@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v31.css">
+<link rel="stylesheet" href="/static/app.v32.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -92,7 +92,7 @@ tailwind.config = {
   <span id="hdrToday"></span>
   <span id="hdrTotal"></span>
   <!-- Visible build marker so we can tell at a glance which version is loaded. -->
-  <span id="hdrBuild" class="px-1.5 py-0.5 rounded-full bg-white/5 text-white/40 font-mono">build v31</span>
+  <span id="hdrBuild" class="px-1.5 py-0.5 rounded-full bg-white/5 text-white/40 font-mono">build v32</span>
 </div>
 
 <!-- Persistent connection-error banner (WS down > 15s) -->
@@ -740,15 +740,15 @@ tailwind.config = {
 <!-- ═══════════════════════════════════════════════════════════════════════
      JAVASCRIPT
      ═══════════════════════════════════════════════════════════════════════ -->
-<!-- Filename-based cache busting: /static/app.v31.js, not ?v=30.
+<!-- Filename-based cache busting: /static/app.v32.js, not ?v=30.
      The server strips the .vNNN. segment before filesystem lookup. This is
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v31.js" defer></script>
-<script src="/static/plan.v31.js" defer></script>
-<script src="/static/overview.v31.js" defer></script>
-<script src="/static/subagents.v31.js" defer></script>
-<script src="/static/charts.v31.js" defer></script>
+<script src="/static/app.v32.js" defer></script>
+<script src="/static/plan.v32.js" defer></script>
+<script src="/static/overview.v32.js" defer></script>
+<script src="/static/subagents.v32.js" defer></script>
+<script src="/static/charts.v32.js" defer></script>
 </body>
 </html>

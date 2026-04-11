@@ -1,3 +1,27 @@
+// ─── Defensive: unregister any lingering service worker ───────────────
+// This project does NOT use a service worker, but a past version may have
+// registered one that's still alive in the user's browser and serving stale
+// responses from its cache. Guarantee a clean state on every page load.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    if (regs.length) {
+      console.warn(`[cache] unregistering ${regs.length} stale service worker(s)`);
+      regs.forEach(r => r.unregister());
+    }
+  }).catch(() => {});
+}
+if ('caches' in window) {
+  caches.keys().then(keys => {
+    // Only delete caches that look like they came from a past SW of ours.
+    // Don't touch unrelated caches created by the browser or extensions.
+    const stale = keys.filter(k => /claude|dashboard|sw|workbox/i.test(k));
+    if (stale.length) {
+      console.warn(`[cache] deleting ${stale.length} stale cache store(s):`, stale);
+      Promise.all(stale.map(k => caches.delete(k)));
+    }
+  }).catch(() => {});
+}
+
 // ─── Persisted preferences (localStorage) ─────────────────────────────
 const PREFS_KEY = 'claude-dashboard-prefs-v1';
 function loadPrefs() {
