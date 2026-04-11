@@ -1,0 +1,98 @@
+# Prometheus alert rules for the Claude Usage Dashboard.
+# Drop this under /etc/prometheus/rules.d/ (or wherever your Prometheus
+# `rule_files:` scans) and `systemctl reload prometheus`.
+#
+# Assumes a scrape config like:
+#
+#   scrape_configs:
+#     - job_name: claude-dashboard
+#       static_configs:
+#         - targets: ['127.0.0.1:8765']
+#       metrics_path: /metrics
+
+groups:
+  - name: claude-dashboard
+    interval: 30s
+    rules:
+      # ─── Availability ─────────────────────────────────────────────
+      - alert: ClaudeDashboardDown
+        expr: up{job="claude-dashboard"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Claude Dashboard /metrics is unreachable"
+          description: "The dashboard service has been unreachable for 2m. Check `systemctl status claude-dashboard` and `journalctl -u claude-dashboard -n 50`."
+
+      # ─── WebSocket health ─────────────────────────────────────────
+      - alert: ClaudeDashboardNoActiveWS
+        expr: dashboard_ws_connections == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No active WebSocket clients for 10m"
+          description: "Either nobody is watching the dashboard (OK) or the WS gateway is broken. Check browser DevTools Network tab for failed `/ws` upgrades."
+
+      # ─── Watcher / ingest health ──────────────────────────────────
+      - alert: ClaudeDashboardIngestStalled
+        expr: rate(dashboard_new_messages_total[15m]) == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No new messages ingested for 30m"
+          description: "The JSONL watcher may be stuck. Check parse errors: `curl -s http://localhost:8765/metrics | grep dashboard_file_retries_total`."
+
+      - alert: ClaudeDashboardRetryBudgetBurning
+        expr: rate(dashboard_file_retries_total{outcome="gave_up"}[10m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Watcher is permanently dropping files"
+          description: "File retry budget exhausted on {{ $value | humanize }} files/sec. Likely a corrupt JSONL or permission issue under ~/.claude/projects/."
+
+      # ─── HTTP health ──────────────────────────────────────────────
+      - alert: ClaudeDashboardHighErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="claude-dashboard",status=~"5.."}[5m]))
+          / sum(rate(http_requests_total{job="claude-dashboard"}[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "5xx error rate >5% for 5m"
+          description: "Recent 5xx rate: {{ $value | humanizePercentage }}. Check journalctl."
+
+      - alert: ClaudeDashboardSlowRequests
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="claude-dashboard"}[5m])) by (le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 request latency >2s for 5m"
+          description: "p95: {{ $value }}s. Most likely cause: /api/sessions hot path has too many subqueries. Verify `idx_sessions_parent_is_sub` exists (SCHEMA v10)."
+
+      # ─── Storage pressure ─────────────────────────────────────────
+      - alert: ClaudeDashboardDBLargeGrowth
+        expr: |
+          deriv(dashboard_db_size_bytes[1h]) > 10 * 1024 * 1024
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "DB growing faster than 10 MB/h"
+          description: "Current growth rate: {{ $value | humanize }}B/s. If sustained, enable retention timer or lower RETENTION_DAYS."
+
+      - alert: ClaudeDashboardDBTooLarge
+        expr: dashboard_db_size_bytes > 2 * 1024 * 1024 * 1024
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DB size >2 GB"
+          description: "Consider running ./rebuild.sh or manually tightening retention: `curl -X DELETE 'http://localhost:8765/api/admin/retention?older_than_days=180&confirm=true'`"

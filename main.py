@@ -250,6 +250,42 @@ if _PROMETHEUS_OK:
                 pass
 
 
+# ─── Preview cleanup (server-side) ───────────────────────────────────────────
+# Used by /api/projects/top to pre-compute a one-paragraph summary from the
+# stored content_preview, stripping markdown decoration while preserving
+# table cell content. Server-side is preferred over JS regex heuristics
+# because (a) it's unit-testable and (b) the same cleanup can be reused by
+# other endpoints later.
+
+_CLEANUP_CODE_FENCE = re.compile(r'```[\s\S]*?```')
+_CLEANUP_TABLE_SEP  = re.compile(r'^\s*\|?[\s:|-]+\|?\s*$', re.MULTILINE)
+_CLEANUP_TABLE_LHS  = re.compile(r'^\s*\|\s*', re.MULTILINE)
+_CLEANUP_TABLE_RHS  = re.compile(r'\s*\|\s*$', re.MULTILINE)
+_CLEANUP_PIPE       = re.compile(r'\s*\|\s*')
+_CLEANUP_LEAD_MARK  = re.compile(r'^[#>\-*]+\s*', re.MULTILINE)
+_CLEANUP_WHITESPACE = re.compile(r'\s+')
+
+
+def summarize_preview(content_preview: str, max_len: int = 1500) -> str:
+    """Collapse a stored content_preview into a single flat paragraph.
+
+    Strips fenced code blocks entirely, flattens markdown table rows to
+    ``cell1 · cell2 · cell3`` so table-heavy replies don't lose all content,
+    and collapses whitespace. The result is safe to display with line-clamp
+    styling on the frontend without further client-side regex work.
+    """
+    if not content_preview:
+        return ''
+    s = _CLEANUP_CODE_FENCE.sub(' ', content_preview)
+    s = _CLEANUP_TABLE_SEP.sub(' ', s)
+    s = _CLEANUP_TABLE_LHS.sub('', s)
+    s = _CLEANUP_TABLE_RHS.sub('', s)
+    s = _CLEANUP_PIPE.sub(' · ', s)
+    s = _CLEANUP_LEAD_MARK.sub('', s)
+    s = _CLEANUP_WHITESPACE.sub(' ', s).strip()
+    return s[:max_len]
+
+
 # ─── Static ───────────────────────────────────────────────────────────────────
 
 # Filename-based cache busting: URLs like /static/app.v31.js resolve to the
@@ -842,13 +878,16 @@ def api_projects_top(
                     for prefix in ('[Extended Thinking]', '[생각중:'):
                         if preview.startswith(prefix):
                             preview = preview[len(prefix):].lstrip(' ]:')
-                    # Cap at 2000 chars — matches the DB-level content_preview
-                    # cap from parser.py, so nothing additional is lost here.
+                    # Pre-compute the clean flat summary on the server so the
+                    # frontend doesn't need fragile regex logic to strip
+                    # markdown. `preview` keeps the raw content for tooltip;
+                    # `summary_line` is what the UI renders inline.
                     p['last_message'] = {
-                        'preview': preview[:2000],
-                        'timestamp': row['timestamp'],
-                        'model': row['model'],
-                        'session_id': row['session_id'],
+                        'preview':      preview[:2000],
+                        'summary_line': summarize_preview(preview),
+                        'timestamp':    row['timestamp'],
+                        'model':        row['model'],
+                        'session_id':   row['session_id'],
                     }
                 else:
                     p['last_message'] = None

@@ -6,27 +6,37 @@
 ## 파일 라인맵
 
 ```
-main.py             1927줄  FastAPI 47 routes + /metrics + WS + 미들웨어
+main.py             2074줄  FastAPI 47 routes + /metrics + WS + summarize_preview + 미들웨어
 database.py          745줄  WAL + thread-local + v1→v11 마이그레이션 + FTS5 × 2
 parser.py            501줄  JSONL 파싱, cwd 식별, subagent split, PARSE_STATS 카운터
 watcher.py           341줄  watchdog + safety poll + WatcherMetrics 의존성 주입
 import_claude_ai.py  287줄  일회성 CLI — claude.ai export 인포터 (update detection)
-backup.sh · restore.sh · rebuild.sh  — DR 스크립트 (백업/복원/재빌드)
-claude-dashboard-retention.{service,timer}  — 주간 retention 타이머
-tests/              2115줄  123 pytest (parser 37 · database 10 · watcher 9 · api 33 · contract 31 · backup 3)
-static/index.html    744줄  Tailwind 쉘 + 대화 소스 토글 + skeleton + conn banner
-static/app.js       3218줄  SPA main (charts 로직은 charts.js 로 분리)
-static/charts.js     125줄  Chart.js 모듈 (theme-aware helpers, chart error overlay)
-static/app.css       298줄  스타일 + 라이트모드 오버라이드 + skeleton shimmer
-.github/workflows/ci.yml        GitHub Actions (ruff + pytest + node --check)
-pyproject.toml                  ruff + pytest 설정
+backup.sh · restore.sh · rebuild.sh           DR 스크립트 (백업/복원/재빌드)
+claude-dashboard-retention.{service,timer}    주간 retention 타이머
+tests/              2615줄  131 pytest (parser 37 · database 10 · watcher 9 · api 33 · contract 31 · backup 3 · e2e 8)
+
+# Frontend — 6 파일 모듈화
+static/index.html    766줄  Tailwind 쉘 + 2-col 개요 레이아웃
+static/app.js       2465줄  core: state/ws/routing/utils/modals + h() DOM helper
+static/sessions.js   543줄  sessions domain: load, filters, presets, bulk, mgmt
+static/plan.js       190줄  plan usage + settings modal
+static/overview.js   190줄  hero/chips/forecast/top10
+static/subagents.js  125줄  heatmap + success matrix
+static/charts.js     125줄  theme-aware Chart.js
+static/app.css       298줄  스타일 + 라이트모드 + 반응형
+
+docs/API.md                  REST API + OpenAPI 스펙 링크 (/docs, /openapi.json)
+docs/alert-rules.yml         Prometheus alert rules (8 경보)
+docs/grafana-dashboard.json  Grafana 4-패널 헬스 뷰 (import 가능)
+.github/workflows/ci.yml     GitHub Actions (ruff + pytest + node --check)
+pyproject.toml               ruff + pytest 설정
 ```
 
 ## 실행·테스트 (수정 검증)
 
 ```bash
 ./start.sh                                                           # 부트스트랩 + uvicorn
-./.venv/bin/python -m pytest tests/ -v                               # 123 tests in ~6s
+./.venv/bin/python -m pytest tests/ -v                               # 131 tests in ~6s
 ./.venv/bin/python import_claude_ai.py --zip <path>                  # claude.ai export 인포터
 ./.venv/bin/python import_claude_ai.py --zip <path> --dry-run        # 파싱만 (DB 변경 없음)
 
@@ -116,7 +126,10 @@ pyproject.toml                  ruff + pytest 설정
 - **SQL**: 전 엔드포인트 파라미터화. `ORDER BY` 는 화이트리스트 (`_SESSIONS_SORT_MAP` 등). LIKE 는 ESCAPE 필수.
 - **입력 검증**: Pydantic + `model_validator`. 예산 저장 시 `daily ≤ weekly` 강제.
 - **이름 매칭 삭제**: 모든 destructive 프런트 액션 (`/api/sessions/{id}`, `/api/projects/{name}`, `/api/admin/retention`) 은 `openDeleteConfirm({target, message, onConfirm})` 을 거쳐 target 이름 정확 입력 후에만 confirm 버튼이 활성화된다. 새 destructive 라우트는 반드시 동일 패턴을 따라야 한다.
-- **XSS**: `app.js` 의 `esc()` 가 `&<>"'` 모두 escape. 사용자 조작 가능 데이터는 전부 `esc()` 통과. 델리트/핀/태그 버튼은 `innerHTML` 이 아니라 `addEventListener` + DOM API 로 만든다.
+- **XSS**:
+  - **새 코드 규칙**: `h(tag, attrs, children)` 헬퍼 사용 필수 (`app.js` 정의). `innerHTML` + 템플릿 리터럴 조합 금지.
+  - 기존 `innerHTML` 사이트는 `esc()` 를 반드시 통과시켜야 함. `esc()` 는 `&<>"'` 모두 escape.
+  - 델리트/핀/태그 버튼, 모달 confirm 입력, 검색 결과 등 **사용자 조작 가능 영역**은 이미 `h()` 또는 명시적 DOM API (`createElement` + `addEventListener`) 로 구성되어 있음. 새 기능 추가 시 이 패턴 준수.
 - **CSRF**: `allow_origins=["*"]` + Basic Auth 조합이 브라우저 credentialed cross-origin 차단 덕분에 현재 안전하다. `allow_origins` 를 좁힐 경우 **반드시** CSRF 토큰 또는 `Origin`/`Referer` 검사를 같이 추가할 것.
 
 ## 프런트 수정 시

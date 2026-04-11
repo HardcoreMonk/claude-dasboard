@@ -2,6 +2,24 @@
 
 47 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 HTTP Basic (`/api/health`, `/metrics` 제외).
 
+## 자동 생성 스펙 (FastAPI)
+
+이 문서와 별개로 FastAPI 가 자동 생성하는 라이브 스펙이 있습니다:
+
+| URL | 용도 |
+|---|---|
+| `http://localhost:8765/docs` | **Swagger UI** — 브라우저 인터랙티브 탐색, 요청 시도 |
+| `http://localhost:8765/redoc` | **ReDoc** — 더 읽기 좋은 문서 뷰 |
+| `http://localhost:8765/openapi.json` | **OpenAPI 3.1 스펙 JSON** — 외부 통합 / 클라이언트 코드 생성 |
+
+외부 툴에서 이 대시보드 API 를 호출하려면 `openapi.json` 을 가져와
+원하는 언어의 client generator 에 넣으면 됩니다. 예:
+
+```bash
+curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
+```
+
+
 ## 통계·시계열·예측
 
 | 메서드 | 경로 | 설명 |
