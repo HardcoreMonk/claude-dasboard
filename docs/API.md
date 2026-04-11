@@ -1,6 +1,6 @@
 # REST API
 
-42 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 HTTP Basic (`/api/health`, `/metrics` 제외).
+47 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 HTTP Basic (`/api/health`, `/metrics` 제외).
 
 ## 통계·시계열·예측
 
@@ -61,6 +61,18 @@
 | GET | `/api/admin/db-size` | DB 파일 크기 |
 | WS | `/ws` | 실시간 (init / batch_update / scan_progress / scan_complete, ping 30s) |
 
+## claude.ai export
+
+`import_claude_ai.py` 로 적재된 웹 대화 아카이브 전용 라우트. 토큰/비용 없음 — content 검색 전용. 기존 `/api/sessions`, `/api/stats` 등 집계 엔드포인트는 이 데이터를 포함하지 않는다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/claude-ai/stats` | 전체 카운트 (conversations, messages, attachments, files, total_text_bytes, first/last timestamp) |
+| GET | `/api/claude-ai/conversations` | sort (`updated_at`/`created_at`/`message_count`/`name`/`text_bytes`), order, search, per_page, page |
+| GET | `/api/claude-ai/conversations/{uuid}` | 대화 메타 상세 (404 on unknown uuid) |
+| GET | `/api/claude-ai/conversations/{uuid}/messages` | 메시지 목록 (limit/offset, content_json 포함) |
+| GET | `/api/claude-ai/search?q=k` | FTS5 전문 검색 (LIKE fallback) |
+
 ## 관측성 메트릭
 
 `/metrics` 응답에 포함되는 주요 시리즈:
@@ -86,4 +98,9 @@ curl -s 'http://localhost:8765/api/subagents/stats' | jq '.by_type_and_stop_reas
 curl -s 'http://localhost:8765/api/sessions/<sid>/chain?depth=4' | jq .
 curl -o claude-usage.csv http://localhost:8765/api/export/csv
 curl -s http://localhost:8765/metrics | grep dashboard_
+
+# claude.ai export 엔드포인트
+curl -s http://localhost:8765/api/claude-ai/stats | jq .
+curl -s 'http://localhost:8765/api/claude-ai/conversations?sort=message_count&per_page=5' | jq '.conversations[]|{uuid,name,message_count}'
+curl -s --get --data-urlencode 'q=하이퍼바이저' --data 'limit=5' http://localhost:8765/api/claude-ai/search | jq '.results'
 ```

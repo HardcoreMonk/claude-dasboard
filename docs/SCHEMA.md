@@ -1,7 +1,7 @@
 # 데이터베이스 스키마
 
 SQLite 파일: `~/.claude/dashboard.db`
-모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA user_version=8`
+모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA user_version=9`
 
 ## 비용은 INTEGER micro-dollars
 
@@ -57,6 +57,47 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 -- ai / ad / au 트리거가 INSERT/UPDATE/DELETE 동기화
 ```
 
+## claude_ai_conversations (v9)
+
+claude.ai 웹 데이터 export (`conversations.json`) 를 인포트한 결과. `sessions` / `messages` 와 완전히 분리되어 있으며 기존 집계 쿼리에 섞이지 않는다. **토큰·모델·비용 컬럼이 없다** — 웹 export 에 해당 정보가 없기 때문.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `uuid` | TEXT PK | 대화 UUID |
+| `name` | TEXT | 제목 |
+| `summary` | TEXT | 요약 (보통 빈 문자열) |
+| `created_at`, `updated_at` | TEXT | ISO 8601 |
+| `message_count`, `user_message_count` | INTEGER | 총/사용자 메시지 수 |
+| `attachment_count`, `file_count` | INTEGER | 첨부 통계 |
+| `total_text_bytes` | INTEGER | 플래튼된 텍스트 바이트 |
+| `imported_at` | TEXT | 인포터 실행 시각 |
+
+## claude_ai_messages (v9)
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `id` | INTEGER PK | autoincrement |
+| `conversation_uuid` | TEXT FK | claude_ai_conversations.uuid |
+| `message_uuid` | TEXT UNIQUE | idempotent 키 |
+| `parent_message_uuid` | TEXT | 부모 메시지 |
+| `sender` | TEXT | `human` / `assistant` |
+| `created_at` | TEXT | ISO 8601 |
+| `text` | TEXT | 플래튼된 모든 content block 텍스트 (thinking/tool_use 태깅 포함) |
+| `content_preview` | TEXT | 앞 2KB — FTS5 인덱스 대상 |
+| `content_json` | TEXT | 원본 content blocks JSON (리치 렌더용) |
+| `has_thinking`, `has_tool_use` | INTEGER | 블록 존재 여부 플래그 |
+| `attachment_count`, `file_count` | INTEGER | 메시지별 첨부 카운트 |
+
+## claude_ai_messages_fts (v9)
+
+```sql
+CREATE VIRTUAL TABLE claude_ai_messages_fts USING fts5(
+    content_preview, content='claude_ai_messages', content_rowid='id',
+    tokenize='unicode61 remove_diacritics 0'
+);
+-- cai_msg_fts_ai / _ad / _au 트리거가 동기화
+```
+
 ## plan_config
 
 | 컬럼 | 설명 |
@@ -90,6 +131,7 @@ idx_sessions_parent_tool_use
 | v6 | `agent-acompact-*` filename prefix → `agent_type='compact'` 자동 태깅 |
 | v7 | `stop_reason` (messages) + `final_stop_reason` / `parent_tool_use_id` / `task_prompt` (sessions). 58,040 메시지 백필 + 875 subagent 부모 링크 |
 | v8 | `sessions.tags TEXT` |
+| v9 | `claude_ai_conversations` + `claude_ai_messages` + `claude_ai_messages_fts` (독립 FTS5) + 트리거. claude.ai 웹 export 전용, 기존 sessions/messages 와 격리 |
 
 ### DB 재구축 (드물게)
 

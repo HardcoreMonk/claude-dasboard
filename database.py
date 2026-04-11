@@ -20,7 +20,7 @@ _write_lock = threading.Lock()
 _read_local = threading.local()   # per-thread cached read connection
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 8                # bump on every schema change
+SCHEMA_VERSION = 9                # bump on every schema change
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -179,6 +179,72 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content_preview ON 
     INSERT INTO messages_fts(messages_fts, rowid, content_preview)
     VALUES ('delete', old.id, COALESCE(old.content_preview, ''));
     INSERT INTO messages_fts(rowid, content_preview)
+    VALUES (new.id, COALESCE(new.content_preview, ''));
+END;
+'''
+
+
+# v9: claude.ai export tables — isolated from sessions/messages so the existing
+# cost / forecast / budget aggregates stay clean. Source of truth is the
+# conversations.json emitted by claude.ai's "Export data" feature, which does
+# NOT include tokens, model names, or cost — only conversations + messages +
+# content blocks (text / thinking / tool_use / tool_result).
+_MIGRATE_V9 = '''
+CREATE TABLE IF NOT EXISTS claude_ai_conversations (
+    uuid TEXT PRIMARY KEY,
+    name TEXT,
+    summary TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    message_count INTEGER DEFAULT 0,
+    user_message_count INTEGER DEFAULT 0,
+    attachment_count INTEGER DEFAULT 0,
+    file_count INTEGER DEFAULT 0,
+    total_text_bytes INTEGER DEFAULT 0,
+    imported_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS claude_ai_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_uuid TEXT NOT NULL,
+    message_uuid TEXT UNIQUE,
+    parent_message_uuid TEXT,
+    sender TEXT,
+    created_at TEXT,
+    text TEXT,
+    content_preview TEXT,
+    content_json TEXT,
+    has_thinking INTEGER DEFAULT 0,
+    has_tool_use INTEGER DEFAULT 0,
+    attachment_count INTEGER DEFAULT 0,
+    file_count INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_cai_msg_conv    ON claude_ai_messages(conversation_uuid);
+CREATE INDEX IF NOT EXISTS idx_cai_msg_created ON claude_ai_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_cai_conv_updated ON claude_ai_conversations(updated_at);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS claude_ai_messages_fts USING fts5(
+    content_preview,
+    content='claude_ai_messages',
+    content_rowid='id',
+    tokenize='unicode61 remove_diacritics 0'
+);
+
+CREATE TRIGGER IF NOT EXISTS cai_msg_fts_ai AFTER INSERT ON claude_ai_messages BEGIN
+    INSERT INTO claude_ai_messages_fts(rowid, content_preview)
+    VALUES (new.id, COALESCE(new.content_preview, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS cai_msg_fts_ad AFTER DELETE ON claude_ai_messages BEGIN
+    INSERT INTO claude_ai_messages_fts(claude_ai_messages_fts, rowid, content_preview)
+    VALUES ('delete', old.id, COALESCE(old.content_preview, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS cai_msg_fts_au AFTER UPDATE OF content_preview ON claude_ai_messages BEGIN
+    INSERT INTO claude_ai_messages_fts(claude_ai_messages_fts, rowid, content_preview)
+    VALUES ('delete', old.id, COALESCE(old.content_preview, ''));
+    INSERT INTO claude_ai_messages_fts(rowid, content_preview)
     VALUES (new.id, COALESCE(new.content_preview, ''));
 END;
 '''
@@ -636,6 +702,14 @@ def init_db() -> None:
                 _ensure_column(conn, 'sessions', 'tags', "TEXT")
                 _set_user_version(conn, 8)
                 current = 8
+            if current < 9:
+                logger.info("Migrating schema v%d → 9 (claude.ai tables)", current)
+                try:
+                    conn.executescript(_MIGRATE_V9)
+                except sqlite3.OperationalError as e:
+                    logger.warning("v9 FTS5 migration skipped: %s", e)
+                _set_user_version(conn, 9)
+                current = 9
             conn.commit()
         finally:
             conn.close()

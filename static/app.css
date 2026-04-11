@@ -31,6 +31,12 @@ body { font-feature-settings: 'ss01','tnum'; }
 /* ── Nav active pill ── */
 .nav-pill.active { background:rgba(52,211,153,.15); color:#34d399; }
 
+/* ── Conversation source toggle ── */
+.conv-source-btn { background:rgba(255,255,255,.04); color:rgba(255,255,255,.5); border:1px solid rgba(255,255,255,.07); }
+.conv-source-btn:hover { color:rgba(255,255,255,.75); }
+.conv-source-btn.active { background:rgba(52,211,153,.15); color:#34d399; border-color:rgba(52,211,153,.3); }
+.cai-badge { background:rgba(147,51,234,.15); color:#d8b4fe; border:1px solid rgba(147,51,234,.3); padding:1px 6px; border-radius:9999px; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+
 /* ── Loading dots ── */
 .dots::after { content:''; animation: dots 1.4s infinite; }
 @keyframes dots { 0%{content:''} 33%{content:'.'} 66%{content:'..'} 100%{content:'...'} }
@@ -98,6 +104,8 @@ body.theme-light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); }
 body.theme-light table > thead { background: rgba(246,247,249,.90); }
 body.theme-light .bg-\[\#111\],
 body.theme-light .bg-\[\#0f0f0f\] { background: #ffffff !important; }
+body.theme-light .bg-\[\#0f0f0f\]\/95,
+body.theme-light .bg-\[\#0f0f0f\]\/90 { background: rgba(255,255,255,.95) !important; }
 body.theme-light .bg-base { background: #f6f7f9 !important; }
 /* Brighten muted accent text on light bg so it stays visible */
 body.theme-light .text-amber-400\/70,
@@ -138,6 +146,24 @@ body.theme-light .bg-red-500\/\[0\.06\] { background: rgba(220,38,38,.14) !impor
 body.theme-light .bg-accent\/10,
 body.theme-light .bg-accent\/15,
 body.theme-light .bg-accent\/20 { background: rgba(16,185,129,.18) !important; }
+
+/* claude.ai 소스 토글 & 배지 — 라이트모드 가독성 */
+body.theme-light .conv-source-btn {
+  background: rgba(0,0,0,.04);
+  color: rgba(0,0,0,.55);
+  border-color: rgba(0,0,0,.12);
+}
+body.theme-light .conv-source-btn:hover { color: rgba(0,0,0,.78); }
+body.theme-light .conv-source-btn.active {
+  background: rgba(16,185,129,.18);
+  color: #047857;
+  border-color: rgba(16,185,129,.45);
+}
+body.theme-light .cai-badge {
+  background: rgba(147,51,234,.18);
+  color: #6d28d9;
+  border-color: rgba(147,51,234,.5);
+}
 /* Toast backgrounds need solid contrast on light bg */
 body.theme-light #toastTray > * {
   background: #ffffff !important;

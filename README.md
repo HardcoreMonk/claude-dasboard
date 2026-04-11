@@ -1,6 +1,6 @@
 # Claude Usage Dashboard
 
-Claude Code 의 토큰 사용량·비용·대화·subagent 를 실시간 추적하는 자체 호스팅 웹 대시보드.
+Claude Code 의 토큰 사용량·비용·대화·subagent 를 실시간 추적하는 자체 호스팅 웹 대시보드. claude.ai 웹 대화 export 도 같은 뷰어에서 검색·탐색할 수 있다.
 
 `~/.claude/projects/` 하위의 세션 JSONL 을 자동 수집해 SQLite (WAL + FTS5) 에 저장하고, 브라우저에서 분석·검색·관리한다.
 
@@ -47,6 +47,7 @@ journalctl -u claude-dashboard -f
 | **세션 관리** | FTS5 전문 검색, 고급 필터 (날짜/비용 range) + preset 저장, 핀, 태그, 세션 2 개 side-by-side diff, bulk 작업 |
 | **UX** | Cmd+K 명령 팔레트, 다크/라이트 테마, 18 개 액션 토스트 피드백, 마크다운 렌더, 모바일 반응형, focus trap, 키보드 단축키 |
 | **관측성** | `/api/health` + `/metrics` (Prometheus) 인증 우회, WebSocket 지수 백오프 무한 재연결 |
+| **claude.ai import** | 웹 export zip (`conversations.json`) 을 분리 테이블로 인포트, 독립 FTS5 검색, 대화 뷰에서 source 토글 (토큰/비용 없음 — 격리 저장) |
 
 ## 화면
 
@@ -62,17 +63,18 @@ journalctl -u claude-dashboard -f
 ## 프로젝트 구조
 
 ```
-main.py              1714줄  FastAPI 42 routes + /metrics + WS
-database.py           652줄  WAL + thread-local + v1→v8 마이그레이션 + FTS5
-parser.py             459줄  cwd 식별, subagent split, stop_reason 캡처
-watcher.py            341줄  watchdog + safety poll + 메트릭 주입
-static/index.html     736줄  Tailwind + Pretendard HTML 쉘
-static/app.js        2780줄  SPA — 라우팅·키보드·WS·bulk·forecast
-static/app.css        227줄  스타일 + 라이트모드 + 반응형
-tests/               1163줄  81 pytest (parser/database/watcher/api)
+main.py               1876줄  FastAPI 47 routes + /metrics + WS
+database.py            726줄  WAL + thread-local + v1→v9 마이그레이션 + FTS5 × 2
+parser.py              459줄  cwd 식별, subagent split, stop_reason 캡처
+watcher.py             341줄  watchdog + safety poll + 메트릭 주입
+import_claude_ai.py    256줄  claude.ai export → claude_ai_* 테이블 (일회성 CLI)
+static/index.html      742줄  Tailwind + Pretendard HTML 쉘
+static/app.js         3127줄  SPA — 라우팅·키보드·WS·bulk·forecast·claude.ai 뷰어
+static/app.css         253줄  스타일 + 라이트모드 + 반응형
+tests/                1163줄  81 pytest (parser/database/watcher/api)
 ```
 
-총 8,072 줄.
+총 ~8,943 줄.
 
 ## 예산 추적 vs 실제 플랜 한도
 
@@ -107,6 +109,21 @@ curl -X POST http://localhost:8765/api/admin/backup    # API (write_lock 획득)
 ```
 
 백업 위치: `~/.claude/dashboard-backups/`, 최근 10 개 자동 유지.
+
+## claude.ai 웹 대화 import
+
+claude.ai 웹에서 쌓인 대화는 Anthropic 공개 API 가 없어 실시간 수집이 불가능하지만, 공식 *Export data* 기능으로 받은 `conversations.json` 을 인포트할 수 있다.
+
+```bash
+# 1. claude.ai → Settings → Privacy → Export data (이메일로 zip 수령)
+# 2. 인포트 (idempotent — 같은 export 재실행 시 중복 없음)
+./.venv/bin/python import_claude_ai.py --zip /path/to/data-*.zip
+
+# 파싱 검증만 하고 DB 변경은 안 할 경우
+./.venv/bin/python import_claude_ai.py --zip /path/to/data-*.zip --dry-run
+```
+
+주의: claude.ai export 에는 **토큰·모델·비용 정보가 없다**. 이 데이터는 `claude_ai_*` 테이블에 분리 저장되며 forecast / budget / burn-out 집계에는 영향을 주지 않는다. 브라우저 대화 뷰 좌측 상단의 **Claude Code ↔ claude.ai** 토글로 전환한다.
 
 ## 문서
 

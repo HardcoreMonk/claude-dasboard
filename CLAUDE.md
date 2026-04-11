@@ -6,21 +6,24 @@
 ## 파일 라인맵
 
 ```
-main.py             1714줄  FastAPI 42 routes + /metrics + WS + 미들웨어
-database.py          652줄  WAL + thread-local + v1→v8 마이그레이션 + FTS5
+main.py             1876줄  FastAPI 47 routes + /metrics + WS + 미들웨어 (claude.ai 5 routes 포함)
+database.py          726줄  WAL + thread-local + v1→v9 마이그레이션 + FTS5 × 2
 parser.py            459줄  JSONL 파싱, cwd 식별, subagent split, stop_reason
 watcher.py           341줄  watchdog + safety poll + WatcherMetrics 의존성 주입
+import_claude_ai.py  256줄  일회성 CLI — claude.ai 데이터 export 인포터
 tests/              1163줄  81 pytest (parser 29 · database 10 · watcher 9 · api 33)
-static/index.html    736줄  Tailwind 쉘
-static/app.js       2780줄  SPA
-static/app.css       227줄  스타일
+static/index.html    742줄  Tailwind 쉘 + 대화 소스 토글
+static/app.js       3127줄  SPA (claude.ai 뷰어 포함)
+static/app.css       253줄  스타일 + 라이트모드 오버라이드
 ```
 
 ## 실행·테스트 (수정 검증)
 
 ```bash
-./start.sh                                    # 부트스트랩 + uvicorn
-./.venv/bin/python -m pytest tests/ -v        # 81 tests in ~2.5s
+./start.sh                                                           # 부트스트랩 + uvicorn
+./.venv/bin/python -m pytest tests/ -v                               # 81 tests in ~2.5s
+./.venv/bin/python import_claude_ai.py --zip <path>                  # claude.ai export 인포터
+./.venv/bin/python import_claude_ai.py --zip <path> --dry-run        # 파싱만 (DB 변경 없음)
 ```
 
 ## 절대 깨면 안 되는 불변식
@@ -68,7 +71,7 @@ static/app.css       227줄  스타일
 
 ## 마이그레이션 (`PRAGMA user_version` 기반)
 
-`SCHEMA_VERSION=8`. `init_db()` 가 시작 시 차분 적용 (v0→v8). 새 마이그레이션 추가 시:
+`SCHEMA_VERSION=9`. `init_db()` 가 시작 시 차분 적용 (v0→v9). 새 마이그레이션 추가 시:
 
 1. `SCHEMA_VERSION` 을 bump.
 2. `v(N-1)_to_v(N)()` 함수를 `database.py` 에 추가.
@@ -77,9 +80,19 @@ static/app.css       227줄  스타일
 
 단계 요약:
 
-- v2 복합 인덱스 · v3 FTS5 + 트리거 + rebuild · v4 cwd/model 치유 · **v5 subagent 재분류 (878 파일, 91k 메시지 reassign)** · v6 acompact 자동 태깅 · **v7 stop_reason + parent_tool_use_id 컬럼 + 58k 메시지 백필 + 875 부모 링크** · v8 `sessions.tags`
+- v2 복합 인덱스 · v3 FTS5 + 트리거 + rebuild · v4 cwd/model 치유 · **v5 subagent 재분류 (878 파일, 91k 메시지 reassign)** · v6 acompact 자동 태깅 · **v7 stop_reason + parent_tool_use_id 컬럼 + 58k 메시지 백필 + 875 부모 링크** · v8 `sessions.tags` · **v9 claude_ai_conversations + claude_ai_messages + claude_ai_messages_fts (독립 테이블)**
 
 전체 표는 `docs/SCHEMA.md` 참고.
+
+## claude.ai export 통합 (v9)
+
+별도 경로. `~/.claude/projects/` JSONL 과 완전히 분리되어 있다.
+
+- **원본**: claude.ai → Settings → Privacy → *Export data* 로 받는 `conversations.json` (토큰/모델/비용 **없음**)
+- **수집 경로**: `import_claude_ai.py` CLI → `claude_ai_*` 테이블 upsert (conversation uuid / message uuid 가 idempotent key)
+- **격리 원칙**: 기존 `sessions` / `messages` 집계 쿼리는 **절대로 claude_ai_* 를 JOIN/UNION 해서는 안 된다**. cost_micro·forecast·budget·burn-out 위젯이 오염된다. 읽기 라우트는 `/api/claude-ai/*` 전용.
+- **프런트 진입점**: 대화 뷰 좌측 상단 source 토글 (`claude-code` ↔ `claude-ai`). `state.convSource` + `localStorage` 로 지속.
+- **content block 렌더링**: 웹 UI 블록 (`text` / `thinking` / `tool_use` / `tool_result`) 은 Claude Code 의 블록과 shape 이 다르다. `renderClaudeAiContent(container, msg)` 가 DOM API 로 렌더 (`innerHTML` 금지 — 보안 훅이 막는다).
 
 ## 관측성·미들웨어 순서
 

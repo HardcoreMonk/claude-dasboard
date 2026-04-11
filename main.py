@@ -1685,6 +1685,168 @@ def api_db_size():
         return {'size_bytes': 0, 'size_mb': 0}
 
 
+# ─── claude.ai export routes ─────────────────────────────────────────────────
+# These tables are populated by import_claude_ai.py from a claude.ai "Export
+# data" archive. The export has no token / model / cost info, so the routes
+# only serve metadata + searchable content.
+
+_CAI_SORT_MAP = {
+    'updated_at':    'updated_at',
+    'created_at':    'created_at',
+    'message_count': 'message_count',
+    'name':          'name',
+    'text_bytes':    'total_text_bytes',
+}
+
+
+@app.get("/api/claude-ai/conversations")
+def api_cai_conversations(
+    sort: str = Query('updated_at'),
+    order: str = Query('desc'),
+    search: str = Query('', max_length=200),
+    per_page: int = Query(100, ge=1, le=500),
+    page: int = Query(1, ge=1),
+):
+    sort_col = _CAI_SORT_MAP.get(sort, 'updated_at')
+    order_sql = 'DESC' if order.lower() != 'asc' else 'ASC'
+    clauses: list[str] = []
+    params: list = []
+    if search:
+        clauses.append("(name LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')")
+        pat = f'%{_esc_like(search)}%'
+        params += [pat, pat]
+    where = ('WHERE ' + ' AND '.join(clauses)) if clauses else ''
+    offset = (page - 1) * per_page
+    with read_db() as db:
+        total = db.execute(
+            f"SELECT COUNT(*) FROM claude_ai_conversations {where}",
+            params,
+        ).fetchone()[0]
+        rows = db.execute(
+            f'''SELECT uuid, name, summary, created_at, updated_at,
+                       message_count, user_message_count,
+                       attachment_count, file_count, total_text_bytes,
+                       imported_at
+                FROM claude_ai_conversations
+                {where}
+                ORDER BY {sort_col} {order_sql}
+                LIMIT ? OFFSET ?''',
+            params + [per_page, offset],
+        ).fetchall()
+    return {
+        'conversations': [dict(r) for r in rows],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    }
+
+
+@app.get("/api/claude-ai/conversations/{uuid}")
+def api_cai_conversation_detail(uuid: str):
+    with read_db() as db:
+        row = db.execute(
+            'SELECT * FROM claude_ai_conversations WHERE uuid = ?', (uuid,)
+        ).fetchone()
+    if not row:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return dict(row)
+
+
+@app.get("/api/claude-ai/conversations/{uuid}/messages")
+def api_cai_conversation_messages(
+    uuid: str,
+    limit: int = Query(1000, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+):
+    with read_db() as db:
+        conv = db.execute(
+            'SELECT uuid, name, created_at FROM claude_ai_conversations WHERE uuid = ?',
+            (uuid,),
+        ).fetchone()
+        if not conv:
+            return JSONResponse({'error': 'Not found'}, status_code=404)
+        rows = db.execute('''
+            SELECT id, message_uuid, parent_message_uuid, sender, created_at,
+                   text, content_json, has_thinking, has_tool_use,
+                   attachment_count, file_count
+            FROM claude_ai_messages
+            WHERE conversation_uuid = ?
+            ORDER BY created_at ASC, id ASC
+            LIMIT ? OFFSET ?
+        ''', (uuid, limit, offset)).fetchall()
+        total = db.execute(
+            'SELECT COUNT(*) FROM claude_ai_messages WHERE conversation_uuid = ?',
+            (uuid,),
+        ).fetchone()[0]
+    return {
+        'conversation': dict(conv),
+        'messages': [dict(r) for r in rows],
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+    }
+
+
+@app.get("/api/claude-ai/search")
+def api_cai_search(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(50, ge=1, le=200),
+):
+    fts_query = _build_fts_query(q)
+    with read_db() as db:
+        if fts_query:
+            try:
+                rows = db.execute('''
+                    SELECT m.id, m.conversation_uuid, m.sender, m.created_at,
+                           substr(m.content_preview, 1, 300) AS snippet,
+                           c.name AS conversation_name
+                    FROM claude_ai_messages_fts fts
+                    JOIN claude_ai_messages m ON m.id = fts.rowid
+                    JOIN claude_ai_conversations c ON c.uuid = m.conversation_uuid
+                    WHERE claude_ai_messages_fts MATCH ?
+                    ORDER BY m.created_at DESC
+                    LIMIT ?
+                ''', (fts_query, limit)).fetchall()
+                return {'results': [dict(r) for r in rows], 'query': q, 'fts': True}
+            except sqlite3.OperationalError as e:
+                logger.warning("claude.ai FTS query failed (%s) — LIKE fallback", e)
+        rows = db.execute('''
+            SELECT m.id, m.conversation_uuid, m.sender, m.created_at,
+                   substr(m.content_preview, 1, 300) AS snippet,
+                   c.name AS conversation_name
+            FROM claude_ai_messages m
+            JOIN claude_ai_conversations c ON c.uuid = m.conversation_uuid
+            WHERE m.content_preview LIKE ? ESCAPE '\\'
+            ORDER BY m.created_at DESC
+            LIMIT ?
+        ''', (f'%{_esc_like(q)}%', limit)).fetchall()
+    return {'results': [dict(r) for r in rows], 'query': q, 'fts': False}
+
+
+@app.get("/api/claude-ai/stats")
+def api_cai_stats():
+    with read_db() as db:
+        conv = db.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(message_count) AS msgs, "
+            "SUM(attachment_count) AS atts, "
+            "SUM(file_count) AS files, "
+            "SUM(total_text_bytes) AS bytes, "
+            "MIN(created_at) AS first_at, "
+            "MAX(updated_at) AS last_at "
+            "FROM claude_ai_conversations"
+        ).fetchone()
+    return {
+        'conversations': conv['total'] or 0,
+        'messages': conv['msgs'] or 0,
+        'attachments': conv['atts'] or 0,
+        'files': conv['files'] or 0,
+        'total_text_bytes': conv['bytes'] or 0,
+        'first_at': conv['first_at'] or '',
+        'last_at': conv['last_at'] or '',
+    }
+
+
 # ─── Prometheus metrics endpoint ─────────────────────────────────────────────
 
 @app.get("/metrics")

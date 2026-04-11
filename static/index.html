@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.css?v=16">
+<link rel="stylesheet" href="/static/app.css?v=19">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -401,8 +401,14 @@ tailwind.config = {
                class="w-full bg-white/5 border border-white/[0.07] rounded-full px-3 py-1 text-[10px] text-white/50 placeholder:text-white/15 outline-none focus:border-accent/30 spring">
       </div>
       <div id="convSearchResults" class="hidden border-b border-white/[0.05] max-h-48 overflow-y-auto"></div>
+      <div class="px-3 py-1.5 border-b border-white/[0.04] flex items-center gap-1">
+        <button data-conv-source="claude-code" onclick="switchConvSource('claude-code')"
+                class="conv-source-btn active flex-1 px-2 py-0.5 rounded-full text-[9px] font-bold spring">Claude Code</button>
+        <button data-conv-source="claude-ai" onclick="switchConvSource('claude-ai')"
+                class="conv-source-btn flex-1 px-2 py-0.5 rounded-full text-[9px] font-bold spring">claude.ai</button>
+      </div>
       <div class="px-3 py-1.5 border-b border-white/[0.04] flex items-center justify-between gap-2">
-        <span class="text-[9px] font-bold text-white/35 uppercase tracking-widest">세션 목록</span>
+        <span id="convListLabel" class="text-[9px] font-bold text-white/35 uppercase tracking-widest">세션 목록</span>
         <div id="convSortBar" class="flex items-center gap-0.5"></div>
       </div>
       <div id="convListBody" class="flex-1 overflow-y-auto"></div>
@@ -731,6 +737,6 @@ tailwind.config = {
 <!-- ═══════════════════════════════════════════════════════════════════════
      JAVASCRIPT
      ═══════════════════════════════════════════════════════════════════════ -->
-<script src="/static/app.js?v=16" defer></script>
+<script src="/static/app.js?v=18" defer></script>
 </body>
 </html>
