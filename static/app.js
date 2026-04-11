@@ -698,6 +698,24 @@ function _idleKey(p) {
   return (p.project_name || '') + '|' + (p.project_path || '');
 }
 
+// Per-session timers for pending tool_use messages. When Claude calls a
+// tool (especially Bash with command_substitution), Claude Code may show
+// the user a "Do you want to proceed?" permission prompt. From the
+// dashboard's view, all we see is an assistant message with stop_reason=
+// 'tool_use' followed by silence — there's no explicit marker. We use a
+// 5-second idle window: if no follow-up arrives for the session, treat it
+// as "waiting for user input" (likely a permission prompt or confirmation).
+const _pendingToolUseTimers = new Map();  // sessionId → setTimeout handle
+const TOOL_USE_IDLE_DELAY_MS = 5000;
+
+function _cancelPendingToolUse(sid) {
+  const handle = _pendingToolUseTimers.get(sid);
+  if (handle) {
+    clearTimeout(handle);
+    _pendingToolUseTimers.delete(sid);
+  }
+}
+
 function notifyIdleFromBatch(records) {
   if (!Array.isArray(records) || !records.length) return;
   if (_prefs.idleNotify === false) return;  // opt-out via settings
@@ -706,21 +724,60 @@ function notifyIdleFromBatch(records) {
     if (!r || r.type !== 'new_message') continue;
     const key = _idleKey(r);
     if (!key) continue;
+    const sid = r.session_id;
+
+    // Any new message for this session cancels a previously-scheduled
+    // tool_use idle timer — Claude is still active.
+    if (sid) _cancelPendingToolUse(sid);
+
     if (r.stop_reason === 'end_turn') {
-      // Flag as idle
+      // Claude finished its turn — immediately flag as idle.
       state.idleProjects[key] = {
         ts: Date.now(),
         preview: (r.preview || '').slice(0, 160),
         project_name: r.project_name,
         project_path: r.project_path,
+        reason: 'end_turn',
       };
       changed = true;
-      // Queue a chime. Multiple end_turns across batches will be audibly
-      // distinct thanks to _chimeNextStart sequencing inside _playIdleChime.
       _playIdleChime();
+    } else if (r.stop_reason === 'tool_use') {
+      // Claude called a tool. Delay-flag as idle: if nothing else arrives
+      // for this session within 5s, treat it as "awaiting permission /
+      // tool confirmation". This catches Bash command_substitution prompts
+      // that block until the user approves.
+      if (sid) {
+        const rec = {
+          key,
+          project_name: r.project_name,
+          project_path: r.project_path,
+          preview: r.preview || '[Tool] 권한 승인 대기 중',
+        };
+        const handle = setTimeout(() => {
+          _pendingToolUseTimers.delete(sid);
+          // Re-check opt-out — user may have toggled off in the meantime
+          if (_prefs.idleNotify === false) return;
+          state.idleProjects[rec.key] = {
+            ts: Date.now(),
+            preview: rec.preview.slice(0, 160),
+            project_name: rec.project_name,
+            project_path: rec.project_path,
+            reason: 'tool_use',
+          };
+          _playIdleChime();
+          if (typeof loadTopProjects === 'function') loadTopProjects();
+        }, TOOL_USE_IDLE_DELAY_MS);
+        _pendingToolUseTimers.set(sid, handle);
+      }
+      // Also clear any EXISTING idle flag for this project — Claude is
+      // actively working again (no longer end_turn idle).
+      if (state.idleProjects[key]) {
+        delete state.idleProjects[key];
+        changed = true;
+      }
     } else if (r.stop_reason) {
-      // Any non-end_turn activity: Claude is working OR user has replied.
-      // Clear the idle flag so the badge disappears.
+      // Any other stop_reason (max_tokens, stop_sequence, refusal) — treat
+      // as "done working", clear the idle flag if set.
       if (state.idleProjects[key]) {
         delete state.idleProjects[key];
         changed = true;
@@ -728,9 +785,6 @@ function notifyIdleFromBatch(records) {
     }
   }
   if (changed) {
-    // Force TOP 10 to re-render with updated badges — debouncedRefresh will
-    // also call loadTopProjects via WS flow, but that's 800ms delayed. We
-    // want the visual update to land immediately.
     if (typeof loadTopProjects === 'function') loadTopProjects();
   }
 }
