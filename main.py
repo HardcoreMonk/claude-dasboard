@@ -266,6 +266,19 @@ _CLEANUP_LEAD_MARK  = re.compile(r'^[#>\-*]+\s*', re.MULTILINE)
 _CLEANUP_WHITESPACE = re.compile(r'\s+')
 
 
+def _iso_to_epoch(iso: Optional[str]) -> float:
+    """Parse an ISO-8601 UTC timestamp into a float epoch. Returns 0 on
+    anything unparseable so it can be used as a stable sort key."""
+    if not iso:
+        return 0.0
+    try:
+        # DB stores ``YYYY-MM-DDTHH:MM:SS[.fraction]Z``
+        s = iso.rstrip('Z').replace('T', ' ')
+        return datetime.strptime(s[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=_tz.utc).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def summarize_preview(content_preview: str, max_len: int = 1500) -> str:
     """Collapse a stored content_preview into a single flat paragraph.
 
@@ -816,11 +829,17 @@ def api_projects(
 def api_projects_top(
     limit: int = Query(10, ge=1, le=50),
     with_last_message: bool = Query(False),
+    active_window_minutes: int = Query(30, ge=1, le=1440),
 ):
-    """Top N projects by total cost. Set ``with_last_message=true`` to also
-    attach the most recent assistant message preview for each project — used
-    by the overview TOP 10 widget.
+    """Top N projects. Projects with activity in the last
+    ``active_window_minutes`` minutes are surfaced first (sorted by most
+    recent activity); the remaining slots are filled by cost-ranked
+    projects. Set ``with_last_message=true`` to attach the most recent
+    assistant message preview for the overview TOP 10 widget.
     """
+    # Fetch a wider candidate pool so we can re-rank in Python: enough that
+    # actives + top-by-cost never loses a legitimate entry.
+    candidate_limit = max(limit * 3, 30)
     with read_db() as db:
         rows = db.execute(f'''
             SELECT project_name, project_path,
@@ -834,8 +853,27 @@ def api_projects_top(
                    MAX(updated_at) AS last_active
             FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
             ORDER BY total_cost DESC LIMIT ?
-        ''', (limit,)).fetchall()
-        projects = [dict(r) for r in rows]
+        ''', (candidate_limit,)).fetchall()
+
+        # Compute is_active against a fresh "now" timestamp and re-rank.
+        active_cutoff = (datetime.now(_tz.utc) - timedelta(minutes=active_window_minutes)).strftime(
+            '%Y-%m-%dT%H:%M:%SZ')
+        projects = []
+        for r in rows:
+            d = dict(r)
+            d['is_active'] = bool(d.get('last_active') and d['last_active'] >= active_cutoff)
+            projects.append(d)
+
+        # Two-tier sort:
+        #   (a) active first, most recent activity at the very top
+        #   (b) remaining slots: highest cost first
+        # Sorting an already cost-sorted list by (is_active DESC, last_active
+        # DESC) is stable, so inactive ordering by cost is preserved.
+        projects.sort(key=lambda p: (
+            0 if p['is_active'] else 1,       # active group first
+            -(_iso_to_epoch(p.get('last_active')) if p['is_active'] else 0),
+        ))
+        projects = projects[:limit]
 
         if with_last_message and projects:
             # Fetch the most recent MEANINGFUL assistant message preview per

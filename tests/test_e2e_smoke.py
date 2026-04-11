@@ -195,14 +195,15 @@ def test_overview_api_contract_matches_frontend_expectations(e2e_client):
                   'daily_budget_burnout_seconds', 'weekly_budget_burnout_seconds']:
         assert field in body, f'/api/forecast.{field} missing'
 
-    # loadTopProjects reads: project_name, project_path, total_cost, total_tokens
-    # and (when with_last_message) last_message.preview
+    # loadTopProjects reads: project_name, project_path, total_cost, total_tokens,
+    # is_active (for LIVE badge), and (when with_last_message) last_message.preview
     r = e2e_client.get('/api/projects/top?limit=5&with_last_message=true')
     body = r.json()
     assert 'projects' in body
     if body['projects']:
         p = body['projects'][0]
-        for field in ['project_name', 'project_path', 'total_cost', 'total_tokens']:
+        for field in ['project_name', 'project_path', 'total_cost', 'total_tokens',
+                      'is_active', 'last_active']:
             assert field in p, f'/api/projects/top[0].{field} missing'
         # last_message is optional (None when no assistant messages) but key must exist
         assert 'last_message' in p

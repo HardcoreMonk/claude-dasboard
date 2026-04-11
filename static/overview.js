@@ -179,10 +179,13 @@ async function loadTopProjects() {
       const previewLine = cleaned
         ? `<div class="text-[10px] text-white/35 mt-1 leading-snug whitespace-normal" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden" title="${esc(lm.preview || '')}"><iconify-icon icon="solar:chat-round-line-linear" width="10" class="inline text-white/25 mr-0.5 align-[-1px]"></iconify-icon>${esc(cleaned)}</div>`
         : '';
+      const liveBadge = p.is_active
+        ? `<span class="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300/90 ring-1 ring-emerald-500/40 text-[9px] font-bold uppercase tracking-wider align-middle" title="최근 30분 이내 활동"><span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>LIVE</span>`
+        : '';
       const row = document.createElement('div');
-      row.className = 'grid grid-cols-[28px_1fr_auto_auto] items-start gap-3 py-2 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-1 spring';
+      row.className = 'grid grid-cols-[28px_1fr_auto_auto] items-start gap-3 py-2 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-1 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
       row.title = '프로젝트 상세 보기';
-      row.innerHTML = `<span class="text-xs font-extrabold text-center pt-0.5 ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-xs font-semibold text-white/60 truncate">${esc(p.project_name||'—')}</div><div class="h-1 bg-white/5 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div>${previewLine}</div><span class="text-xs font-bold text-amber-400/70 whitespace-nowrap pt-0.5">${fmt$(p.total_cost)}</span><span class="text-[10px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5">${fmtTok(p.total_tokens||0)}</span>`;
+      row.innerHTML = `<span class="text-xs font-extrabold text-center pt-0.5 ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-xs font-semibold text-white/60 truncate">${esc(p.project_name||'—')}${liveBadge}</div><div class="h-1 bg-white/5 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div>${previewLine}</div><span class="text-xs font-bold text-amber-400/70 whitespace-nowrap pt-0.5">${fmt$(p.total_cost)}</span><span class="text-[10px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5">${fmtTok(p.total_tokens||0)}</span>`;
       row.addEventListener('click', () => showProjectDetail(p.project_name, p.project_path));
       c.appendChild(row);
     });
