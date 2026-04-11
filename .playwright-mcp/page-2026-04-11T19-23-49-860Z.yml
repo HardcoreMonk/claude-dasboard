@@ -1,0 +1,99 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - button "개요" [ref=e3] [cursor=pointer]:
+      - img [ref=e5]
+      - text: 개요
+    - button "비용" [ref=e9] [cursor=pointer]:
+      - img [ref=e11]
+      - text: 비용
+    - button "세션" [ref=e15] [cursor=pointer]:
+      - img [ref=e17]
+      - text: 세션
+    - button "대화" [ref=e21] [cursor=pointer]:
+      - img [ref=e23]
+      - text: 대화
+    - button "모델" [ref=e27] [cursor=pointer]:
+      - img [ref=e29]
+      - text: 모델
+    - button "프로젝트" [ref=e35] [cursor=pointer]:
+      - img [ref=e37]
+      - text: 프로젝트
+    - button "Subagent" [ref=e41] [cursor=pointer]:
+      - img [ref=e43]
+      - text: Subagent
+    - button "관리" [ref=e45] [cursor=pointer]:
+      - img [ref=e47]
+      - text: 관리
+    - status [ref=e51]:
+      - img "WebSocket 연결 상태" [ref=e52]
+      - generic [ref=e53]: 연결 중
+    - button "테마 전환" [ref=e54] [cursor=pointer]: ☀
+    - button "명령 팔레트" [ref=e55] [cursor=pointer]: ⌘K
+  - generic [ref=e57]: build v32
+  - main [ref=e58]:
+    - generic [ref=e59]:
+      - generic [ref=e61]:
+        - generic [ref=e62]: TOP 10 프로젝트 클릭하여 상세 보기
+        - generic [ref=e64]: 로딩 중 •••
+      - generic [ref=e65]:
+        - generic [ref=e66]:
+          - generic "오늘 세션 보기" [ref=e67] [cursor=pointer]:
+            - generic [ref=e68]:
+              - generic [ref=e69]:
+                - generic [ref=e70]: 오늘 비용
+                - img [ref=e72]
+              - generic [ref=e74]: —
+              - generic [ref=e75]: —
+          - generic "예산 설정" [ref=e76] [cursor=pointer]:
+            - generic [ref=e77]:
+              - generic [ref=e78]:
+                - generic [ref=e79]: 일일 예산
+                - img [ref=e81]
+              - generic [ref=e85]: —
+              - generic [ref=e87]:
+                - generic [ref=e89]: —
+                - generic [ref=e90]:
+                  - text: 남은
+                  - generic [ref=e91]: —
+          - generic [ref=e93]:
+            - generic [ref=e94]: 월말 예측
+            - generic [ref=e95]: —
+            - generic [ref=e96]: —
+            - generic [ref=e97]:
+              - text: 14일 평균
+              - generic [ref=e98]: —
+        - generic [ref=e100]:
+          - generic [ref=e101]: 요약
+          - generic [ref=e102]:
+            - generic "이번 주 세션 보기" [ref=e103] [cursor=pointer]:
+              - generic [ref=e104]: 주
+              - generic [ref=e105]: —
+            - generic [ref=e107]:
+              - generic [ref=e108]: 월
+              - generic [ref=e109]: —
+            - generic [ref=e111]:
+              - generic [ref=e112]: 전체
+              - generic [ref=e113]: —
+              - generic [ref=e114]: —
+            - generic "전체 캐시 읽기 / (입력 + 캐시 읽기)" [ref=e116]:
+              - generic [ref=e117]: 캐시
+              - generic [ref=e118]: —
+              - generic [ref=e119]: —
+            - generic [ref=e121]:
+              - generic [ref=e122]: burn-out
+              - generic [ref=e123]: 일간 —
+              - generic [ref=e124]: ·
+              - generic [ref=e125]: 주간 —
+        - generic [ref=e127]:
+          - generic [ref=e128]:
+            - generic [ref=e129]: 주간 예산
+            - generic [ref=e130]: —
+          - generic [ref=e132]:
+            - generic [ref=e134]: —
+            - generic [ref=e135]:
+              - text: 남은
+              - generic [ref=e136]: —
+              - text: · 재설정
+              - generic [ref=e137]: —
+    - text: ••• •••
+  - text: ••• •••

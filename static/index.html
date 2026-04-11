@@ -91,8 +91,8 @@ tailwind.config = {
 <div class="fixed top-14 right-4 z-30 flex items-center gap-3 text-[10px] text-white/25 font-medium">
   <span id="hdrToday"></span>
   <span id="hdrTotal"></span>
-  <!-- Visible build marker so we can tell at a glance which version is loaded. -->
-  <span id="hdrBuild" class="px-1.5 py-0.5 rounded-full bg-white/5 text-white/40 font-mono">build v32</span>
+  <!-- Build marker — version 진단 용. 캐시 리프레시가 걱정될 때 이걸 보고 확인. -->
+  <span id="hdrBuild" class="px-2 py-0.5 rounded-full bg-accent/15 text-accent ring-1 ring-accent/40 font-mono font-bold tracking-wide">build v32</span>
 </div>
 
 <!-- Persistent connection-error banner (WS down > 15s) -->
@@ -128,8 +128,10 @@ tailwind.config = {
        TOP 10 아래에 max-w-3xl 로 좌측 고정, 우측 공간 확보.
        Hero 3카드 / 요약 chips / 주간 예산 bar 를 차례로 세로 배치. -->
   <div class="max-w-3xl space-y-3 anim-in anim-d1">
-    <!-- Hero row — 오늘 비용 · 일일 예산 · 월말 예측 (primary glance) -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <!-- Hero — 오늘 비용 · 일일 예산 · 월말 예측 (수직 스택).
+         이전엔 sm:grid-cols-3 로 가로 3분할이었지만 사용자 요구("수직 재배열")
+         에 맞춰 모든 hero 카드도 세로 stack 으로. -->
+    <div class="grid grid-cols-1 gap-3">
       <!-- Hero 1: 오늘 비용 -->
       <div onclick="drillToSessionsToday()" title="오늘 세션 보기"
            class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
