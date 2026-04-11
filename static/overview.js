@@ -198,7 +198,7 @@ async function loadTopProjects() {
       const lm = p.last_message;
       const cleaned = lm ? _cleanTopPreview(lm.preview) : '';
       const previewLine = cleaned
-        ? `<div class="text-[10px] text-white/35 mt-1 truncate" title="${esc(lm.preview || '')}"><iconify-icon icon="solar:chat-round-line-linear" width="10" class="inline text-white/25 mr-0.5 align-[-1px]"></iconify-icon>${esc(cleaned)}</div>`
+        ? `<div class="text-[10px] text-white/35 mt-1 leading-snug whitespace-normal" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden" title="${esc(lm.preview || '')}"><iconify-icon icon="solar:chat-round-line-linear" width="10" class="inline text-white/25 mr-0.5 align-[-1px]"></iconify-icon>${esc(cleaned)}</div>`
         : '';
       const row = document.createElement('div');
       row.className = 'grid grid-cols-[28px_1fr_auto_auto] items-start gap-3 py-2 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-1 spring';

@@ -842,8 +842,10 @@ def api_projects_top(
                     for prefix in ('[Extended Thinking]', '[생각중:'):
                         if preview.startswith(prefix):
                             preview = preview[len(prefix):].lstrip(' ]:')
+                    # Cap at 2000 chars — matches the DB-level content_preview
+                    # cap from parser.py, so nothing additional is lost here.
                     p['last_message'] = {
-                        'preview': preview[:500],
+                        'preview': preview[:2000],
                         'timestamp': row['timestamp'],
                         'model': row['model'],
                         'session_id': row['session_id'],
