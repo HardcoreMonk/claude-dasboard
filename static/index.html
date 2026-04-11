@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v39.css">
+<link rel="stylesheet" href="/static/app.v40.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -110,16 +110,66 @@ tailwind.config = {
 <main class="pt-20 pb-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
 <!-- ─── OVERVIEW ─── -->
-<!-- 개요는 TOP 10 프로젝트 전용. 비용/예산/예측 위젯은 비용(cost) 뷰로 이동. -->
+<!-- 좌측: TOP 10 프로젝트 리스트 (560px 고정). 우측: 선택한 프로젝트의
+     마지막 대화 내용을 슬라이드 in 형태로 표시. 작은 화면에서는 세로 스택. -->
 <section class="view" id="view-overview">
-  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+<div class="grid grid-cols-1 md:grid-cols-[560px_1fr] gap-3 anim-in items-start">
+
+  <!-- 좌측: TOP 10 -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-      <span class="text-xs font-bold text-white/40">TOP 10 프로젝트 <span class="text-white/20 font-normal text-[10px]">클릭하여 상세 보기</span></span>
+      <span class="text-xs font-bold text-white/40">TOP 10 프로젝트 <span class="text-white/20 font-normal text-[10px]">클릭하여 내용 미리보기</span></span>
       <div id="topProjectsList" class="mt-3 space-y-1">
         <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
       </div>
     </div>
   </div>
+
+  <!-- 우측: 슬라이드 preview 패널 -->
+  <div id="topPreviewPanel"
+       class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel overflow-hidden
+              transition-all duration-500 ease-[cubic-bezier(.16,1,.3,1)]
+              opacity-0 -translate-x-4 md:h-[calc(100vh-140px)] md:sticky md:top-24"
+       style="pointer-events:none">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5 h-full flex flex-col">
+      <!-- Header -->
+      <div class="flex items-start justify-between gap-3 border-b border-white/[0.05] pb-3">
+        <div class="min-w-0 flex-1">
+          <div id="topPreviewProject" class="text-sm font-bold text-white/90 truncate">프로젝트를 선택하세요</div>
+          <div id="topPreviewMeta" class="text-[10px] text-white/40 mt-1 truncate">좌측 TOP 10 에서 행 클릭</div>
+        </div>
+        <div class="flex items-center gap-1 flex-shrink-0">
+          <button id="topPreviewOpenModal" onclick="topPreviewOpenProjectModal()"
+                  class="hidden text-[10px] px-2.5 py-1 rounded-full border border-accent/40 text-accent bg-accent/10 hover:bg-accent/20 font-bold spring">
+            프로젝트 상세 →
+          </button>
+          <button id="topPreviewClose" onclick="topPreviewClose()"
+                  class="hidden text-white/40 hover:text-white/80 spring text-lg leading-none w-6 h-6 flex items-center justify-center"
+                  aria-label="닫기">&times;</button>
+        </div>
+      </div>
+      <!-- Body (scrollable) -->
+      <div id="topPreviewBody" class="flex-1 overflow-y-auto mt-3 text-[12px] text-white/75 whitespace-pre-wrap leading-relaxed">
+        <div class="flex items-center justify-center h-full text-center text-white/15">
+          <div>
+            <iconify-icon icon="solar:chat-round-dots-linear" width="48" class="text-white/10 block mx-auto mb-3"></iconify-icon>
+            <div class="text-xs">TOP 10 행을 클릭하면</div>
+            <div class="text-xs">마지막 대화가 여기에 표시됩니다</div>
+          </div>
+        </div>
+      </div>
+      <!-- Footer: realtime refresh indicator -->
+      <div id="topPreviewFooter" class="hidden mt-3 pt-3 border-t border-white/[0.05] flex items-center justify-between text-[9px] text-white/35">
+        <span class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>실시간 갱신 중</span>
+        </span>
+        <span id="topPreviewUpdatedAt">—</span>
+      </div>
+    </div>
+  </div>
+
+</div>
 </section>
 
 <!-- ─── COST ─── -->
@@ -743,11 +793,11 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v39.js" defer></script>
-<script src="/static/sessions.v39.js" defer></script>
-<script src="/static/plan.v39.js" defer></script>
-<script src="/static/overview.v39.js" defer></script>
-<script src="/static/subagents.v39.js" defer></script>
-<script src="/static/charts.v39.js" defer></script>
+<script src="/static/app.v40.js" defer></script>
+<script src="/static/sessions.v40.js" defer></script>
+<script src="/static/plan.v40.js" defer></script>
+<script src="/static/overview.v40.js" defer></script>
+<script src="/static/subagents.v40.js" defer></script>
+<script src="/static/charts.v40.js" defer></script>
 </body>
 </html>

@@ -184,10 +184,151 @@ async function loadTopProjects() {
         : '';
       const row = document.createElement('div');
       row.className = 'grid grid-cols-[28px_1fr_auto_auto] items-start gap-3 py-2 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-1 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
-      row.title = '프로젝트 상세 보기';
+      row.title = '클릭하여 마지막 대화 미리보기';
       row.innerHTML = `<span class="text-xs font-extrabold text-center pt-0.5 ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-xs font-semibold text-white/60 truncate">${esc(p.project_name||'—')}${liveBadge}</div><div class="h-1 bg-white/5 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div>${previewLine}</div><span class="text-xs font-bold text-amber-400/70 whitespace-nowrap pt-0.5">${fmt$(p.total_cost)}</span><span class="text-[10px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5">${fmtTok(p.total_tokens||0)}</span>`;
-      row.addEventListener('click', () => showProjectDetail(p.project_name, p.project_path));
+      row.dataset.projectName = p.project_name || '';
+      row.dataset.projectPath = p.project_path || '';
+      row.addEventListener('click', () => topPreviewOpen(p));
       c.appendChild(row);
     });
+    // Real-time refresh: if the preview panel is currently showing one of
+    // these projects, rebuild it with the fresh last_message.
+    if (typeof topPreviewMaybeRefresh === 'function') topPreviewMaybeRefresh(projects);
   } catch (e) { console.error('loadTopProjects:', e); }
+}
+
+
+// ─── TOP 10 preview panel (right slide-in) ─────────────────────────────
+// State: which project is currently shown. When loadTopProjects runs via
+// debouncedRefresh, we re-populate the panel if its project is still in
+// the new list (so the content reflects the latest assistant message).
+let topPreviewState = { projectName: null, projectPath: null };
+
+function topPreviewOpen(project) {
+  if (!project) return;
+  topPreviewState = {
+    projectName: project.project_name || '',
+    projectPath: project.project_path || '',
+  };
+  const panel = document.getElementById('topPreviewPanel');
+  const title = document.getElementById('topPreviewProject');
+  const meta  = document.getElementById('topPreviewMeta');
+  const body  = document.getElementById('topPreviewBody');
+  const closeBtn = document.getElementById('topPreviewClose');
+  const openBtn  = document.getElementById('topPreviewOpenModal');
+  const footer   = document.getElementById('topPreviewFooter');
+  const updAt    = document.getElementById('topPreviewUpdatedAt');
+
+  if (!panel) return;
+
+  // Title row
+  if (title) title.textContent = project.project_name || '—';
+  if (meta) {
+    const parts = [];
+    if (project.total_cost != null) parts.push(fmt$(project.total_cost));
+    if (project.total_tokens != null) parts.push(fmtTok(project.total_tokens) + ' tok');
+    if (project.is_active) parts.push('LIVE');
+    parts.push(esc(project.project_path || ''));
+    meta.textContent = parts.join(' · ');
+  }
+
+  // Body
+  const lm = project.last_message;
+  body.textContent = '';
+  if (lm && lm.preview) {
+    // Render the cleaned summary on top + full raw preview below as <pre>
+    const summary = document.createElement('div');
+    summary.className = 'text-white/90 font-semibold mb-3 leading-snug';
+    summary.textContent = (lm.summary_line || lm.preview).slice(0, 200);
+
+    const divider = document.createElement('div');
+    divider.className = 'text-[9px] uppercase tracking-widest text-white/30 mb-2';
+    divider.textContent = `원문 (${lm.timestamp ? fmtTime(lm.timestamp) : '—'} · ${lm.model || '—'})`;
+
+    const full = document.createElement('div');
+    full.className = 'text-white/70 leading-relaxed';
+    full.textContent = lm.preview;
+
+    body.append(summary, divider, full);
+    if (footer) footer.classList.remove('hidden');
+    if (updAt) updAt.textContent = fmtTime(new Date().toISOString());
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'text-white/30 text-center py-8';
+    empty.textContent = '이 프로젝트에는 아직 assistant 메시지가 없습니다';
+    body.appendChild(empty);
+    if (footer) footer.classList.add('hidden');
+  }
+
+  // Show close button + drill-to-modal button
+  if (closeBtn) closeBtn.classList.remove('hidden');
+  if (openBtn)  openBtn.classList.remove('hidden');
+
+  // Animate slide-in (requestAnimationFrame to ensure transition fires)
+  panel.style.pointerEvents = 'auto';
+  requestAnimationFrame(() => {
+    panel.classList.remove('opacity-0', '-translate-x-4');
+    panel.classList.add('opacity-100', 'translate-x-0');
+  });
+
+  // Highlight active row
+  document.querySelectorAll('#topProjectsList > div').forEach(r => {
+    r.classList.toggle('ring-1', r.dataset.projectName === topPreviewState.projectName
+                                && r.dataset.projectPath === topPreviewState.projectPath);
+    r.classList.toggle('ring-accent/30', r.dataset.projectName === topPreviewState.projectName
+                                        && r.dataset.projectPath === topPreviewState.projectPath);
+  });
+}
+
+function topPreviewClose() {
+  topPreviewState = { projectName: null, projectPath: null };
+  const panel = document.getElementById('topPreviewPanel');
+  if (!panel) return;
+  panel.classList.add('opacity-0', '-translate-x-4');
+  panel.classList.remove('opacity-100', 'translate-x-0');
+  panel.style.pointerEvents = 'none';
+  // Reset content
+  const title = document.getElementById('topPreviewProject');
+  const meta  = document.getElementById('topPreviewMeta');
+  const body  = document.getElementById('topPreviewBody');
+  const closeBtn = document.getElementById('topPreviewClose');
+  const openBtn  = document.getElementById('topPreviewOpenModal');
+  const footer   = document.getElementById('topPreviewFooter');
+  if (title) title.textContent = '프로젝트를 선택하세요';
+  if (meta)  meta.textContent  = '좌측 TOP 10 에서 행 클릭';
+  if (closeBtn) closeBtn.classList.add('hidden');
+  if (openBtn)  openBtn.classList.add('hidden');
+  if (footer)   footer.classList.add('hidden');
+  if (body) {
+    body.textContent = '';
+    const d = document.createElement('div');
+    d.className = 'flex items-center justify-center h-full text-center text-white/15';
+    d.innerHTML = '<div><iconify-icon icon="solar:chat-round-dots-linear" width="48" class="text-white/10 block mx-auto mb-3"></iconify-icon><div class="text-xs">TOP 10 행을 클릭하면</div><div class="text-xs">마지막 대화가 여기에 표시됩니다</div></div>';
+    body.appendChild(d);
+  }
+  // Unhighlight all rows
+  document.querySelectorAll('#topProjectsList > div').forEach(r => {
+    r.classList.remove('ring-1', 'ring-accent/30');
+  });
+}
+
+// Drill into the full project modal from the preview panel footer button
+function topPreviewOpenProjectModal() {
+  if (topPreviewState.projectName) {
+    showProjectDetail(topPreviewState.projectName, topPreviewState.projectPath);
+  }
+}
+
+// Called from loadTopProjects AFTER the new list is rendered. If the panel
+// is showing a project that's still in the list, refresh its content with
+// the newly fetched last_message (realtime update from WS batch refresh).
+function topPreviewMaybeRefresh(projects) {
+  if (!topPreviewState.projectName) return;
+  const match = projects.find(p =>
+    p.project_name === topPreviewState.projectName &&
+    p.project_path === topPreviewState.projectPath
+  );
+  if (match) {
+    topPreviewOpen(match);
+  }
 }
