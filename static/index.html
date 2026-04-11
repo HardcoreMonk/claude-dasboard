@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.css?v=26">
+<link rel="stylesheet" href="/static/app.css?v=27">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -733,7 +733,12 @@ tailwind.config = {
 <!-- ═══════════════════════════════════════════════════════════════════════
      JAVASCRIPT
      ═══════════════════════════════════════════════════════════════════════ -->
-<script src="/static/app.js?v=26" defer></script>
-<script src="/static/charts.js?v=26" defer></script>
+<!-- Module load order matters: app.js defines state/utils/safeFetch first,
+     then feature modules (plan/overview/subagents/charts) consume those globals. -->
+<script src="/static/app.js?v=27" defer></script>
+<script src="/static/plan.js?v=27" defer></script>
+<script src="/static/overview.js?v=27" defer></script>
+<script src="/static/subagents.js?v=27" defer></script>
+<script src="/static/charts.js?v=27" defer></script>
 </body>
 </html>
