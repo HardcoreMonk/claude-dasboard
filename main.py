@@ -739,7 +739,14 @@ def api_projects(
 
 
 @app.get("/api/projects/top")
-def api_projects_top(limit: int = Query(10, ge=1, le=50)):
+def api_projects_top(
+    limit: int = Query(10, ge=1, le=50),
+    with_last_message: bool = Query(False),
+):
+    """Top N projects by total cost. Set ``with_last_message=true`` to also
+    attach the most recent assistant message preview for each project — used
+    by the overview TOP 10 widget.
+    """
     with read_db() as db:
         rows = db.execute(f'''
             SELECT project_name, project_path,
@@ -754,7 +761,59 @@ def api_projects_top(limit: int = Query(10, ge=1, le=50)):
             FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
             ORDER BY total_cost DESC LIMIT ?
         ''', (limit,)).fetchall()
-    return {'projects': [dict(r) for r in rows]}
+        projects = [dict(r) for r in rows]
+
+        if with_last_message and projects:
+            # Fetch the most recent MEANINGFUL assistant message preview per
+            # project. Pure-tool messages (`[Tool: Read]`) and extended-
+            # thinking summaries are noise — we want the most recent actual
+            # text reply. Falls back to any non-empty preview when no clean
+            # text is found.
+            for p in projects:
+                row = db.execute('''
+                    SELECT m.content_preview, m.timestamp, m.model, m.session_id
+                    FROM messages m
+                    JOIN sessions s ON m.session_id = s.id
+                    WHERE s.project_path = ?
+                      AND m.role = 'assistant'
+                      AND m.content_preview IS NOT NULL
+                      AND m.content_preview != ''
+                      AND m.content_preview NOT LIKE '[Tool:%'
+                      AND m.content_preview NOT LIKE '[Extended Thinking]%'
+                      AND m.content_preview NOT LIKE '[생각중:%'
+                      AND LENGTH(m.content_preview) >= 20
+                    ORDER BY m.timestamp DESC, m.id DESC
+                    LIMIT 1
+                ''', (p['project_path'],)).fetchone()
+                if row is None:
+                    # Fallback: accept any non-empty preview
+                    row = db.execute('''
+                        SELECT m.content_preview, m.timestamp, m.model, m.session_id
+                        FROM messages m
+                        JOIN sessions s ON m.session_id = s.id
+                        WHERE s.project_path = ?
+                          AND m.role = 'assistant'
+                          AND m.content_preview IS NOT NULL
+                          AND m.content_preview != ''
+                        ORDER BY m.timestamp DESC, m.id DESC
+                        LIMIT 1
+                    ''', (p['project_path'],)).fetchone()
+                if row:
+                    preview = row['content_preview'] or ''
+                    # Strip common parser prefixes for a cleaner summary
+                    for prefix in ('[Extended Thinking]', '[생각중:'):
+                        if preview.startswith(prefix):
+                            preview = preview[len(prefix):].lstrip(' ]:')
+                    p['last_message'] = {
+                        'preview': preview[:500],
+                        'timestamp': row['timestamp'],
+                        'model': row['model'],
+                        'session_id': row['session_id'],
+                    }
+                else:
+                    p['last_message'] = None
+
+    return {'projects': projects}
 
 
 def _project_where(project_name: str, path: Optional[str]) -> tuple[str, str, list]:

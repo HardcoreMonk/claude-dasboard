@@ -154,9 +154,21 @@ function drillToSessionsWeek() {
 }
 
 // ─── TOP 10 projects ──────────────────────────────────────────────────
+// Collapse markdown/table/code-fence noise so the one-line preview shows
+// the first meaningful sentence instead of a ``` or `| col |` fragment.
+function _cleanTopPreview(txt) {
+  if (!txt) return '';
+  let s = String(txt);
+  s = s.replace(/```[\s\S]*?```/g, ' ');    // strip code blocks
+  s = s.replace(/^\s*\|.*$/gm, ' ');         // strip markdown table rows
+  s = s.replace(/^[#>\-*\s]+/, '');          // leading markers
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
 async function loadTopProjects() {
   try {
-    const data = await safeFetch('/api/projects/top?limit=10');
+    const data = await safeFetch('/api/projects/top?limit=10&with_last_message=true');
     const projects = data.projects || [];
     const c = document.getElementById('topProjectsList');
     if (!projects.length) {
@@ -169,10 +181,15 @@ async function loadTopProjects() {
     projects.forEach((p, i) => {
       const pct = ((p.total_cost || 0) / mx * 100).toFixed(1);
       const rc = i < 3 ? ['text-amber-400', 'text-white/40', 'text-orange-400'][i] : 'text-white/15';
+      const lm = p.last_message;
+      const cleaned = lm ? _cleanTopPreview(lm.preview) : '';
+      const previewLine = cleaned
+        ? `<div class="text-[10px] text-white/35 mt-1 truncate" title="${esc(lm.preview || '')}"><iconify-icon icon="solar:chat-round-line-linear" width="10" class="inline text-white/25 mr-0.5 align-[-1px]"></iconify-icon>${esc(cleaned)}</div>`
+        : '';
       const row = document.createElement('div');
-      row.className = 'grid grid-cols-[28px_1fr_auto_auto] items-center gap-3 py-1.5 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-1 spring';
+      row.className = 'grid grid-cols-[28px_1fr_auto_auto] items-start gap-3 py-2 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-1 spring';
       row.title = '프로젝트 상세 보기';
-      row.innerHTML = `<span class="text-xs font-extrabold text-center ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-xs font-semibold text-white/60 truncate">${esc(p.project_name||'—')}</div><div class="h-1 bg-white/5 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div></div><span class="text-xs font-bold text-amber-400/70 whitespace-nowrap">${fmt$(p.total_cost)}</span><span class="text-[10px] text-white/20 whitespace-nowrap w-16 text-right">${fmtTok(p.total_tokens||0)}</span>`;
+      row.innerHTML = `<span class="text-xs font-extrabold text-center pt-0.5 ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-xs font-semibold text-white/60 truncate">${esc(p.project_name||'—')}</div><div class="h-1 bg-white/5 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div>${previewLine}</div><span class="text-xs font-bold text-amber-400/70 whitespace-nowrap pt-0.5">${fmt$(p.total_cost)}</span><span class="text-[10px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5">${fmtTok(p.total_tokens||0)}</span>`;
       row.addEventListener('click', () => showProjectDetail(p.project_name, p.project_path));
       c.appendChild(row);
     });
