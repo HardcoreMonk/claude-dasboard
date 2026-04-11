@@ -69,12 +69,15 @@ function renderPeriod(key, p) {
 async function loadForecast() {
   try {
     const d = await safeFetch('/api/forecast?days=14');
-    const setEl = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-    setEl('forecastEOM', fmt$(d.projected_eom_cost));
-    setEl('forecastEOMDetail',
+    // IMPORTANT: use the global set() from app.js (which also removes the
+    // .skeleton class on write). A local setEl helper that only touches
+    // textContent leaves the shimmer animation running OVER the real text —
+    // looks identical to a loading failure.
+    set('forecastEOM', fmt$(d.projected_eom_cost));
+    set('forecastEOMDetail',
       `MTD ${fmt$(d.mtd_cost)} · ${d.days_left_in_month}일 남음`);
-    setEl('forecastAvg', fmt$(d.avg_cost_per_day));
-    setEl('forecastAvgDetail', `${fmtN(d.avg_msgs_per_day || 0)} 메시지/일`);
+    set('forecastAvg', fmt$(d.avg_cost_per_day));
+    set('forecastAvgDetail', `${fmtN(d.avg_msgs_per_day || 0)} 메시지/일`);
 
     // Humanise seconds-until-burn-out as "N일 N시간 후" / "N시간 후" / "N분 후"
     // with urgency color coding. DOM-builder form (no innerHTML templates) so
