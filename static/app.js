@@ -2814,7 +2814,15 @@ function set(id,val){
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function fmtN(n){return(Number(n)||0).toLocaleString('ko-KR');}
 function fmtTok(n){n=Number(n)||0;if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return String(n);}
-function fmt$(n){n=Number(n)||0;if(n===0)return'$0';if(n<0.01)return'<$0.01';return'$'+n.toFixed(n>=1?2:4);}
+function fmt$(n){
+  n = Number(n);
+  if (!isFinite(n)) return '$—';   // NaN/Infinity guard
+  if (n === 0) return '$0';
+  if (Math.abs(n) < 0.01) return '<$0.01';
+  // Thousands separator for readability at $1,000+; 2 decimals ≥$1, 4 below.
+  const frac = Math.abs(n) >= 1 ? 2 : 4;
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: frac, maximumFractionDigits: frac });
+}
 function shortModel(m){if(!m)return'—';return m.replace('claude-','').replace(/-\d{8}$/,'');}
 function trimPath(p){if(!p)return'';return p.split('/').filter(Boolean).slice(-2).join('/');}
 function relTime(ts){if(!ts)return'—';const d=new Date(ts);if(isNaN(d))return ts;const df=Date.now()-d.getTime();if(df<6e4)return'방금';if(df<36e5)return Math.floor(df/6e4)+'분 전';if(df<864e5)return Math.floor(df/36e5)+'시간 전';if(df<6048e5)return Math.floor(df/864e5)+'일 전';return d.toLocaleDateString('ko-KR');}
