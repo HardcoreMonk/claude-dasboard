@@ -37,9 +37,49 @@ body { font-feature-settings: 'ss01','tnum'; }
 .conv-source-btn.active { background:rgba(52,211,153,.15); color:#34d399; border-color:rgba(52,211,153,.3); }
 .cai-badge { background:rgba(147,51,234,.15); color:#d8b4fe; border:1px solid rgba(147,51,234,.3); padding:1px 6px; border-radius:9999px; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
 
-/* ── Loading dots ── */
-.dots::after { content:''; animation: dots 1.4s infinite; }
-@keyframes dots { 0%{content:''} 33%{content:'.'} 66%{content:'..'} 100%{content:'...'} }
+/* ── Session tag badge ── (shared by 세션/대화/프로젝트 뷰) */
+.tag-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(6,182,212,.14);
+  color: #67e8f9;
+  border: 1px solid rgba(6,182,212,.32);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* ── Loading dots ── (opacity pulse, no reflow) */
+.dots::after { content:'•••'; letter-spacing:0.1em; animation: dotsPulse 1.4s ease-in-out infinite; display:inline-block; }
+@keyframes dotsPulse { 0%,100% { opacity:.25 } 50% { opacity:.9 } }
+
+/* ── Skeleton shimmer loader ── */
+.skeleton {
+  display: inline-block;
+  color: transparent !important;
+  background: linear-gradient(90deg,
+    rgba(255,255,255,.04) 0%,
+    rgba(255,255,255,.10) 50%,
+    rgba(255,255,255,.04) 100%);
+  background-size: 200% 100%;
+  border-radius: 6px;
+  animation: shimmer 1.6s ease-in-out infinite;
+  min-width: 2.5em;
+  user-select: none;
+}
+.skeleton * { visibility: hidden; }
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+body.theme-light .skeleton {
+  background: linear-gradient(90deg,
+    rgba(0,0,0,.04) 0%,
+    rgba(0,0,0,.10) 50%,
+    rgba(0,0,0,.04) 100%);
+  background-size: 200% 100%;
+}
 
 /* ── Plan bar ── */
 .plan-bar-track { height:8px; background:rgba(255,255,255,.05); border-radius:4px; overflow:hidden; }
@@ -163,6 +203,11 @@ body.theme-light .cai-badge {
   background: rgba(147,51,234,.18);
   color: #6d28d9;
   border-color: rgba(147,51,234,.5);
+}
+body.theme-light .tag-badge {
+  background: rgba(6,182,212,.20);
+  color: #0e7490;
+  border-color: rgba(6,182,212,.50);
 }
 /* Toast backgrounds need solid contrast on light bg */
 body.theme-light #toastTray > * {

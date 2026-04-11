@@ -102,6 +102,7 @@ def import_archive(zip_path: Path, dry_run: bool = False) -> dict:
         'conversations_nonempty': 0,
         'conversations_upserted': 0,
         'messages_inserted': 0,
+        'messages_updated': 0,
         'messages_skipped_dupe': 0,
     }
 
@@ -176,29 +177,53 @@ def import_archive(zip_path: Path, dry_run: bool = False) -> dict:
                 total_text_bytes += len(text.encode('utf-8'))
                 preview = text[:PREVIEW_LIMIT]
 
-                cur = db.execute('''
-                    INSERT OR IGNORE INTO claude_ai_messages
-                        (conversation_uuid, message_uuid, parent_message_uuid,
-                         sender, created_at, text, content_preview, content_json,
-                         has_thinking, has_tool_use,
-                         attachment_count, file_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    uuid,
-                    mu,
-                    msg.get('parent_message_uuid') or '',
-                    msg.get('sender') or '',
-                    msg.get('created_at') or '',
-                    text,
-                    preview,
-                    json.dumps(content_blocks, ensure_ascii=False),
-                    has_thinking,
-                    has_tool_use,
-                    len(msg.get('attachments') or []),
-                    len(msg.get('files') or []),
-                ))
-                if cur.rowcount > 0:
+                # ON CONFLICT DO UPDATE with a guard clause: the incoming row
+                # overwrites only if its updated_at is strictly newer. Same-
+                # timestamp rows are treated as duplicates (no cost to skip).
+                row = db.execute(
+                    'SELECT id, updated_at FROM claude_ai_messages WHERE message_uuid = ?',
+                    (mu,),
+                ).fetchone()
+                msg_updated_at = msg.get('updated_at') or msg.get('created_at') or ''
+                if row is None:
+                    db.execute('''
+                        INSERT INTO claude_ai_messages
+                            (conversation_uuid, message_uuid, parent_message_uuid,
+                             sender, created_at, updated_at, text, content_preview,
+                             content_json, has_thinking, has_tool_use,
+                             attachment_count, file_count)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        uuid, mu,
+                        msg.get('parent_message_uuid') or '',
+                        msg.get('sender') or '',
+                        msg.get('created_at') or '',
+                        msg_updated_at,
+                        text, preview,
+                        json.dumps(content_blocks, ensure_ascii=False),
+                        has_thinking, has_tool_use,
+                        len(msg.get('attachments') or []),
+                        len(msg.get('files') or []),
+                    ))
                     stats['messages_inserted'] += 1
+                elif msg_updated_at and (row['updated_at'] or '') < msg_updated_at:
+                    db.execute('''
+                        UPDATE claude_ai_messages SET
+                            text = ?, content_preview = ?, content_json = ?,
+                            has_thinking = ?, has_tool_use = ?,
+                            attachment_count = ?, file_count = ?,
+                            updated_at = ?
+                        WHERE id = ?
+                    ''', (
+                        text, preview,
+                        json.dumps(content_blocks, ensure_ascii=False),
+                        has_thinking, has_tool_use,
+                        len(msg.get('attachments') or []),
+                        len(msg.get('files') or []),
+                        msg_updated_at,
+                        row['id'],
+                    ))
+                    stats['messages_updated'] += 1
                 else:
                     stats['messages_skipped_dupe'] += 1
 
@@ -241,6 +266,7 @@ def main():
     else:
         print(f"  conversations upserted    : {stats['conversations_upserted']}")
         print(f"  messages inserted         : {stats['messages_inserted']}")
+        print(f"  messages updated (newer)  : {stats['messages_updated']}")
         print(f"  messages skipped (dupe)   : {stats['messages_skipped_dupe']}")
 
     if not args.dry_run:

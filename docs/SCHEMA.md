@@ -1,7 +1,7 @@
 # 데이터베이스 스키마
 
 SQLite 파일: `~/.claude/dashboard.db`
-모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA user_version=9`
+모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA auto_vacuum=INCREMENTAL`, `PRAGMA user_version=11`
 
 ## 비용은 INTEGER micro-dollars
 
@@ -132,6 +132,8 @@ idx_sessions_parent_tool_use
 | v7 | `stop_reason` (messages) + `final_stop_reason` / `parent_tool_use_id` / `task_prompt` (sessions). 58,040 메시지 백필 + 875 subagent 부모 링크 |
 | v8 | `sessions.tags TEXT` |
 | v9 | `claude_ai_conversations` + `claude_ai_messages` + `claude_ai_messages_fts` (독립 FTS5) + 트리거. claude.ai 웹 export 전용, 기존 sessions/messages 와 격리 |
+| v10 | `idx_sessions_parent_is_sub` — `(parent_session_id, is_subagent)` 복합 인덱스. `/api/sessions` 핫 패스 서브쿼리가 **SCAN → SEARCH** 로 전환되어 O(N²) → O(N log N) |
+| v11 | `claude_ai_messages.updated_at` — 재import 시 버전 비교 후 UPDATE 가능 (이전엔 `INSERT OR IGNORE` 로 조용히 drop) |
 
 ### DB 재구축 (드물게)
 

@@ -6,24 +6,34 @@
 ## 파일 라인맵
 
 ```
-main.py             1876줄  FastAPI 47 routes + /metrics + WS + 미들웨어 (claude.ai 5 routes 포함)
-database.py          726줄  WAL + thread-local + v1→v9 마이그레이션 + FTS5 × 2
-parser.py            459줄  JSONL 파싱, cwd 식별, subagent split, stop_reason
+main.py             1927줄  FastAPI 47 routes + /metrics + WS + 미들웨어
+database.py          745줄  WAL + thread-local + v1→v11 마이그레이션 + FTS5 × 2
+parser.py            501줄  JSONL 파싱, cwd 식별, subagent split, PARSE_STATS 카운터
 watcher.py           341줄  watchdog + safety poll + WatcherMetrics 의존성 주입
-import_claude_ai.py  256줄  일회성 CLI — claude.ai 데이터 export 인포터
-tests/              1163줄  81 pytest (parser 29 · database 10 · watcher 9 · api 33)
-static/index.html    742줄  Tailwind 쉘 + 대화 소스 토글
-static/app.js       3127줄  SPA (claude.ai 뷰어 포함)
-static/app.css       253줄  스타일 + 라이트모드 오버라이드
+import_claude_ai.py  287줄  일회성 CLI — claude.ai export 인포터 (update detection)
+backup.sh · restore.sh · rebuild.sh  — DR 스크립트 (백업/복원/재빌드)
+claude-dashboard-retention.{service,timer}  — 주간 retention 타이머
+tests/              2115줄  123 pytest (parser 37 · database 10 · watcher 9 · api 33 · contract 31 · backup 3)
+static/index.html    744줄  Tailwind 쉘 + 대화 소스 토글 + skeleton + conn banner
+static/app.js       3218줄  SPA main (charts 로직은 charts.js 로 분리)
+static/charts.js     125줄  Chart.js 모듈 (theme-aware helpers, chart error overlay)
+static/app.css       298줄  스타일 + 라이트모드 오버라이드 + skeleton shimmer
+.github/workflows/ci.yml        GitHub Actions (ruff + pytest + node --check)
+pyproject.toml                  ruff + pytest 설정
 ```
 
 ## 실행·테스트 (수정 검증)
 
 ```bash
 ./start.sh                                                           # 부트스트랩 + uvicorn
-./.venv/bin/python -m pytest tests/ -v                               # 81 tests in ~2.5s
+./.venv/bin/python -m pytest tests/ -v                               # 123 tests in ~6s
 ./.venv/bin/python import_claude_ai.py --zip <path>                  # claude.ai export 인포터
 ./.venv/bin/python import_claude_ai.py --zip <path> --dry-run        # 파싱만 (DB 변경 없음)
+
+# DR
+./backup.sh                                                          # 수동 백업
+./restore.sh [--latest|<file>]                                       # 복원 (integrity_check 포함)
+./rebuild.sh                                                         # 스냅샷 → rm db → 자동 재빌드
 ```
 
 ## 절대 깨면 안 되는 불변식
@@ -80,7 +90,7 @@ static/app.css       253줄  스타일 + 라이트모드 오버라이드
 
 단계 요약:
 
-- v2 복합 인덱스 · v3 FTS5 + 트리거 + rebuild · v4 cwd/model 치유 · **v5 subagent 재분류 (878 파일, 91k 메시지 reassign)** · v6 acompact 자동 태깅 · **v7 stop_reason + parent_tool_use_id 컬럼 + 58k 메시지 백필 + 875 부모 링크** · v8 `sessions.tags` · **v9 claude_ai_conversations + claude_ai_messages + claude_ai_messages_fts (독립 테이블)**
+- v2 복합 인덱스 · v3 FTS5 + 트리거 + rebuild · v4 cwd/model 치유 · **v5 subagent 재분류 (878 파일, 91k 메시지 reassign)** · v6 acompact 자동 태깅 · **v7 stop_reason + parent_tool_use_id 컬럼 + 58k 메시지 백필 + 875 부모 링크** · v8 `sessions.tags` · **v9 claude_ai_conversations + claude_ai_messages + claude_ai_messages_fts (독립 테이블)** · **v10 parent_session_id 핫 패스 인덱스 (N² → N log N)** · **v11 claude_ai_messages.updated_at (update detection)**
 
 전체 표는 `docs/SCHEMA.md` 참고.
 

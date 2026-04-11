@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.css?v=19">
+<link rel="stylesheet" href="/static/app.css?v=26">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -46,6 +46,9 @@ tailwind.config = {
   <button class="nav-pill active spring px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-tight" data-view="overview">
     <iconify-icon icon="solar:chart-square-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>개요
   </button>
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="cost">
+    <iconify-icon icon="solar:graph-up-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>비용
+  </button>
   <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="sessions">
     <iconify-icon icon="solar:list-check-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>세션
   </button>
@@ -58,13 +61,17 @@ tailwind.config = {
   <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="projects">
     <iconify-icon icon="solar:folder-open-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>프로젝트
   </button>
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="subagents">
+    <iconify-icon icon="solar:widget-2-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>Subagent
+  </button>
   <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="export">
     <iconify-icon icon="solar:database-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>관리
   </button>
 
   <!-- WS badge -->
-  <div class="ml-2 mr-1 flex items-center gap-1.5 text-[10px] text-white/30">
-    <span class="w-1.5 h-1.5 rounded-full bg-white/20 spring" id="wsDot"></span>
+  <div class="ml-2 mr-1 flex items-center gap-1.5 text-[10px] text-white/30" role="status" aria-live="polite">
+    <span class="w-1.5 h-1.5 rounded-full bg-white/20 spring" id="wsDot"
+          role="img" aria-label="WebSocket 연결 상태"></span>
     <span id="wsLabel" class="hidden sm:inline">연결 중</span>
   </div>
   <!-- Theme toggle (U4) -->
@@ -86,6 +93,17 @@ tailwind.config = {
   <span id="hdrTotal"></span>
 </div>
 
+<!-- Persistent connection-error banner (WS down > 15s) -->
+<div id="connBanner" role="alert" aria-live="assertive"
+     class="hidden fixed top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full
+            bg-red-500/15 text-red-300 ring-1 ring-red-500/30 backdrop-blur-xl
+            text-[11px] font-semibold shadow-[0_8px_32px_rgba(0,0,0,.4)] flex items-center gap-2">
+  <iconify-icon icon="solar:wi-fi-router-round-linear" width="14"></iconify-icon>
+  <span id="connBannerMsg">실시간 연결이 끊어졌습니다. 재연결 중…</span>
+  <button onclick="forceReconnectWs()"
+          class="ml-1 px-2 py-0.5 rounded-full bg-red-500/25 hover:bg-red-500/35 spring text-red-200 text-[10px] font-bold">즉시 재연결</button>
+</div>
+
 <!-- ═══════════════════════════════════════════════════════════════════════
      MAIN CONTENT
      ═══════════════════════════════════════════════════════════════════════ -->
@@ -94,119 +112,132 @@ tailwind.config = {
 <!-- ─── OVERVIEW ─── -->
 <section class="view" id="view-overview">
 
-  <!-- Period: Day / Week / Month -->
-  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 anim-in">
-    <!-- Day -->
-    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
-      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-        <div class="text-[10px] font-bold text-white/30 uppercase tracking-widest mb-2">오늘</div>
-        <div class="text-2xl font-extrabold tracking-tight text-white/90" id="pdDayCost">—</div>
-        <div class="text-[11px] text-white/30 mt-1" id="pdDayDetail">—</div>
+  <!-- Hero row — 오늘 비용 · 일일 예산 · 월말 예측 (primary glance) -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 anim-in">
+    <!-- Hero 1: 오늘 비용 (click → sessions filtered to today) -->
+    <div onclick="drillToSessionsToday()" title="오늘 세션 보기"
+         class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">오늘 비용</span>
+          <iconify-icon icon="solar:arrow-right-linear" width="13" class="text-white/20"></iconify-icon>
+        </div>
+        <div class="text-3xl font-extrabold tracking-tight text-white/95 mt-2 tabular-nums skeleton" id="pdDayCost">—</div>
+        <div class="text-[11px] text-white/35 mt-1 skeleton" id="pdDayDetail">—</div>
         <div class="text-[10px] font-semibold mt-1" id="pdDayDelta"></div>
       </div>
     </div>
-    <!-- Week -->
-    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
-      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-        <div class="text-[10px] font-bold text-white/30 uppercase tracking-widest mb-2">이번 주</div>
-        <div class="text-2xl font-extrabold tracking-tight text-white/90" id="pdWeekCost">—</div>
-        <div class="text-[11px] text-white/30 mt-1" id="pdWeekDetail">—</div>
-        <div class="text-[10px] font-semibold mt-1" id="pdWeekDelta"></div>
+    <!-- Hero 2: 일일 예산 (click → openPlanSettings) -->
+    <div onclick="openPlanSettings()" title="예산 설정"
+         class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">일일 예산</span>
+          <iconify-icon icon="solar:settings-linear" width="13" class="text-white/20"></iconify-icon>
+        </div>
+        <div class="text-3xl font-extrabold tracking-tight mt-2 tabular-nums skeleton" id="planDailyPct" style="color:#34d399">—</div>
+        <div class="plan-bar-track mt-2"><div class="plan-bar-fill" id="planDailyBar" style="width:0;background:#34d399"></div></div>
+        <div class="flex items-center justify-between mt-2 text-[10px]">
+          <span class="text-white/40"><span class="text-white/65 font-semibold skeleton" id="planDailyUsed">—</span></span>
+          <span class="text-white/35">남은 <span class="text-white/60 font-semibold skeleton" id="planDailyRemain">—</span></span>
+        </div>
       </div>
     </div>
-    <!-- Month -->
+    <!-- Hero 3: 월말 예측 -->
     <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
-      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-        <div class="text-[10px] font-bold text-white/30 uppercase tracking-widest mb-2">이번 달</div>
-        <div class="text-2xl font-extrabold tracking-tight text-white/90" id="pdMonthCost">—</div>
-        <div class="text-[11px] text-white/30 mt-1" id="pdMonthDetail">—</div>
-        <div class="text-[10px] font-semibold mt-1" id="pdMonthDelta"></div>
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="text-[10px] font-bold text-white/35 uppercase tracking-widest">월말 예측</div>
+        <div class="text-3xl font-extrabold tracking-tight text-amber-400/90 mt-2 tabular-nums skeleton" id="forecastEOM">—</div>
+        <div class="text-[11px] text-white/35 mt-1 skeleton" id="forecastEOMDetail">—</div>
+        <div class="text-[10px] text-white/40 mt-1">14일 평균 <span class="text-white/65 font-semibold tabular-nums skeleton" id="forecastAvg">—</span></div>
       </div>
     </div>
   </div>
 
-  <!-- Budget Tracking -->
+  <!-- Secondary stats chips — 주/월/전체/캐시 효율/burn-out -->
   <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mb-4 anim-in anim-d1">
-    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
-      <div class="flex items-center justify-between mb-1">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-bold text-white/40 uppercase tracking-widest">사용량 추적</span>
-          <span class="text-[9px] text-white/20 font-medium">(로컬 JSONL 기반)</span>
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
+        <div onclick="drillToSessionsWeek()" class="cursor-pointer hover:text-white/95 spring flex items-baseline gap-1.5" title="이번 주 세션 보기">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">주</span>
+          <span class="text-white/80 font-bold tabular-nums skeleton" id="pdWeekCost">—</span>
+          <span class="text-[9px] font-semibold" id="pdWeekDelta"></span>
         </div>
-        <div class="flex items-center gap-2">
-          <a href="https://claude.ai" target="_blank" class="text-[10px] text-accent/60 hover:text-accent spring">실제 한도 → claude.ai</a>
-          <button onclick="openPlanSettings()" class="text-[10px] text-white/25 hover:text-white/50 spring">
-            <iconify-icon icon="solar:settings-linear" width="14"></iconify-icon>
-          </button>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">월</span>
+          <span class="text-white/80 font-bold tabular-nums skeleton" id="pdMonthCost">—</span>
+          <span class="text-[9px] font-semibold" id="pdMonthDelta"></span>
         </div>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-        <!-- Daily Budget -->
-        <div>
-          <div class="flex justify-between items-baseline mb-2">
-            <span class="text-[11px] font-semibold text-white/40">일일 예산</span>
-            <span class="text-lg font-extrabold tracking-tight" id="planDailyPct" style="color:#34d399">—</span>
-          </div>
-          <div class="plan-bar-track"><div class="plan-bar-fill" id="planDailyBar" style="width:0;background:#34d399"></div></div>
-          <div class="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-2 text-[10px]">
-            <span class="text-white/25">사용량</span><span class="text-white/50 text-right font-semibold" id="planDailyUsed">—</span>
-            <span class="text-white/25">토큰</span><span class="text-white/50 text-right" id="planDailyTokens">—</span>
-            <span class="text-white/25">메시지</span><span class="text-white/50 text-right" id="planDailyMsgs">—</span>
-            <span class="text-white/25">남은 시간</span><span class="text-white/50 text-right font-semibold" id="planDailyRemain">—</span>
-            <span class="text-white/25">재설정</span><span class="text-white/50 text-right" id="planDailyReset">—</span>
-          </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">전체</span>
+          <span class="text-white/80 font-bold tabular-nums skeleton" id="statAllCost">—</span>
+          <span class="text-white/30 text-[9px] skeleton" id="statAllSessions">—</span>
         </div>
-        <!-- Weekly Budget -->
-        <div>
-          <div class="flex justify-between items-baseline mb-2">
-            <span class="text-[11px] font-semibold text-white/40">주간 예산</span>
-            <span class="text-lg font-extrabold tracking-tight" id="planWeeklyPct" style="color:#34d399">—</span>
-          </div>
-          <div class="plan-bar-track"><div class="plan-bar-fill" id="planWeeklyBar" style="width:0;background:#34d399"></div></div>
-          <div class="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-2 text-[10px]">
-            <span class="text-white/25">사용량</span><span class="text-white/50 text-right font-semibold" id="planWeeklyUsed">—</span>
-            <span class="text-white/25">토큰</span><span class="text-white/50 text-right" id="planWeeklyTokens">—</span>
-            <span class="text-white/25">메시지</span><span class="text-white/50 text-right" id="planWeeklyMsgs">—</span>
-            <span class="text-white/25">남은 시간</span><span class="text-white/50 text-right font-semibold" id="planWeeklyRemain">—</span>
-            <span class="text-white/25">재설정</span><span class="text-white/50 text-right" id="planWeeklyReset">—</span>
-          </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5" title="전체 캐시 읽기 / (입력 + 캐시 읽기)">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">캐시</span>
+          <span class="text-cyan-400/85 font-bold tabular-nums skeleton" id="statCacheEff">—</span>
+          <span class="text-white/30 text-[9px] skeleton" id="statCacheSaved">—</span>
+        </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">burn-out</span>
+          <span class="text-[10px] skeleton" id="forecastBurnoutDaily">일간 —</span>
+          <span class="text-white/20">·</span>
+          <span class="text-[10px] skeleton" id="forecastBurnoutWeekly">주간 —</span>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Stats Grid -->
-  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4 anim-in anim-d2" id="statsGrid">
-    <div class="bg-white/5 ring-1 ring-white/[0.07] rounded-xl p-4">
-      <div class="text-[10px] font-bold text-white/25 uppercase tracking-widest">오늘 비용</div>
-      <div class="text-xl font-extrabold tracking-tight mt-1" id="statTodayCost">—</div>
-      <div class="text-[10px] text-white/25 mt-0.5" id="statTodayMsg">—</div>
-    </div>
-    <div class="bg-white/5 ring-1 ring-white/[0.07] rounded-xl p-4">
-      <div class="text-[10px] font-bold text-white/25 uppercase tracking-widest">오늘 토큰</div>
-      <div class="text-xl font-extrabold tracking-tight mt-1" id="statTodayTokens">—</div>
-      <div class="text-[10px] text-white/25 mt-0.5" id="statTodaySessions">—</div>
-    </div>
-    <div class="bg-white/5 ring-1 ring-white/[0.07] rounded-xl p-4">
-      <div class="text-[10px] font-bold text-white/25 uppercase tracking-widest">전체 비용</div>
-      <div class="text-xl font-extrabold tracking-tight mt-1" id="statAllCost">—</div>
-      <div class="text-[10px] text-white/25 mt-0.5" id="statAllSessions">—</div>
-    </div>
-    <div class="bg-white/5 ring-1 ring-white/[0.07] rounded-xl p-4">
-      <div class="text-[10px] font-bold text-white/25 uppercase tracking-widest">전체 토큰</div>
-      <div class="text-xl font-extrabold tracking-tight mt-1" id="statAllTokens">—</div>
-      <div class="text-[10px] text-white/25 mt-0.5" id="statAllMessages">—</div>
-    </div>
-    <div class="bg-white/5 ring-1 ring-white/[0.07] rounded-xl p-4">
-      <div class="text-[10px] font-bold text-white/25 uppercase tracking-widest">캐시 효율</div>
-      <div class="text-xl font-extrabold tracking-tight mt-1" id="statCacheEff">—</div>
-      <div class="text-[10px] text-white/25 mt-0.5" id="statCacheSaved">—</div>
+  <!-- 주간 예산 bar (간소화) -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mb-4 anim-in anim-d2">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
+      <div class="flex justify-between items-baseline mb-2">
+        <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">주간 예산</span>
+        <span class="text-base font-extrabold tracking-tight tabular-nums skeleton" id="planWeeklyPct" style="color:#34d399">—</span>
+      </div>
+      <div class="plan-bar-track"><div class="plan-bar-fill" id="planWeeklyBar" style="width:0;background:#34d399"></div></div>
+      <div class="flex items-center justify-between mt-2 text-[10px]">
+        <span class="text-white/40"><span class="text-white/65 font-semibold skeleton" id="planWeeklyUsed">—</span></span>
+        <span class="text-white/35">남은 <span class="text-white/60 font-semibold skeleton" id="planWeeklyRemain">—</span> · 재설정 <span class="text-white/50 skeleton" id="planWeeklyReset">—</span></span>
+      </div>
+      <!-- Hidden-but-kept nodes so existing loaders still find their targets -->
+      <span class="hidden" id="planDailyTokens"></span>
+      <span class="hidden" id="planDailyMsgs"></span>
+      <span class="hidden" id="planDailyReset"></span>
+      <span class="hidden" id="planWeeklyTokens"></span>
+      <span class="hidden" id="planWeeklyMsgs"></span>
+      <span class="hidden" id="statTodayCost"></span>
+      <span class="hidden" id="statTodayMsg"></span>
+      <span class="hidden" id="statTodayTokens"></span>
+      <span class="hidden" id="statTodaySessions"></span>
+      <span class="hidden" id="statAllTokens"></span>
+      <span class="hidden" id="statAllMessages"></span>
+      <span class="hidden" id="pdDayDetail2"></span>
+      <span class="hidden" id="pdWeekDetail"></span>
+      <span class="hidden" id="pdMonthDetail"></span>
+      <span class="hidden" id="forecastAvgDetail"></span>
     </div>
   </div>
 
+  <!-- Top 10 Projects (click row → project modal) -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d5">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <span class="text-xs font-bold text-white/40">TOP 10 프로젝트 <span class="text-white/20 font-normal text-[10px]">클릭하여 상세 보기</span></span>
+      <div id="topProjectsList" class="mt-3 space-y-1">
+        <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── COST / CHARTS ─── -->
+<section class="view hidden" id="view-cost">
   <!-- Charts Row 1 -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4 anim-in anim-d3">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4 anim-in">
     <div class="lg:col-span-2 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
         <div class="flex items-center justify-between mb-3">
@@ -234,7 +265,7 @@ tailwind.config = {
   </div>
 
   <!-- Charts Row 2 -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4 anim-in anim-d4">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4 anim-in anim-d1">
     <div class="lg:col-span-2 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
         <div class="flex items-center justify-between">
@@ -254,44 +285,11 @@ tailwind.config = {
       </div>
     </div>
   </div>
+</section>
 
-  <!-- Cost forecasting (B3) -->
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 anim-in anim-d4">
-    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
-      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-        <div class="text-[10px] font-bold text-white/30 uppercase tracking-widest">월말 예측</div>
-        <div class="text-2xl font-extrabold tracking-tight text-amber-400/85 mt-1 tabular-nums" id="forecastEOM">—</div>
-        <div class="text-[10px] text-white/35 mt-0.5" id="forecastEOMDetail">—</div>
-      </div>
-    </div>
-    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
-      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-        <div class="text-[10px] font-bold text-white/30 uppercase tracking-widest">평균 (최근 14일)</div>
-        <div class="text-2xl font-extrabold tracking-tight text-white/90 mt-1 tabular-nums" id="forecastAvg">—</div>
-        <div class="text-[10px] text-white/35 mt-0.5" id="forecastAvgDetail">—</div>
-      </div>
-    </div>
-    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
-      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-        <div class="text-[10px] font-bold text-white/30 uppercase tracking-widest">예산 burn-out</div>
-        <div class="text-sm font-bold text-white/85 mt-2" id="forecastBurnoutDaily">일간 —</div>
-        <div class="text-sm font-bold text-white/85 mt-1" id="forecastBurnoutWeekly">주간 —</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Top 10 Projects -->
-  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d5">
-    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-      <span class="text-xs font-bold text-white/40">TOP 10 프로젝트</span>
-      <div id="topProjectsList" class="mt-3 space-y-1">
-        <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Subagent heatmap (agentType × project) -->
-  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d5 mt-3">
+<!-- ─── SUBAGENT ANALYSIS ─── -->
+<section class="view hidden" id="view-subagents">
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
       <div class="flex items-center justify-between">
         <span class="text-xs font-bold text-white/40">SUBAGENT 히트맵 <span class="text-white/25 font-normal">(agentType × 프로젝트)</span></span>
@@ -302,9 +300,7 @@ tailwind.config = {
       </div>
     </div>
   </div>
-
-  <!-- Subagent success matrix (agentType × stop_reason) -->
-  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d5 mt-3">
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d1 mt-3">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
       <span class="text-xs font-bold text-white/40">SUBAGENT 종료 매트릭스 <span class="text-white/25 font-normal">(agentType × stop_reason)</span></span>
       <div id="subagentSuccessMatrix" class="mt-3 overflow-x-auto">
@@ -515,19 +511,19 @@ tailwind.config = {
       <button onclick="closeProjectModal()" class="text-white/30 hover:text-white/70 spring text-2xl leading-none ml-4" title="닫기 (Esc)">&times;</button>
     </div>
     <!-- Tabs -->
-    <div class="flex items-center gap-1 px-6 pt-3 border-b border-white/[0.06] flex-shrink-0">
-      <button class="proj-tab active px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent border-b-2 border-accent -mb-px spring" data-tab="overview">
+    <div class="flex items-center gap-1 px-6 pt-3 border-b border-white/[0.06] flex-shrink-0" role="tablist" aria-label="프로젝트 상세 탭">
+      <button class="proj-tab active px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent border-b-2 border-accent -mb-px spring" data-tab="overview" role="tab" aria-selected="true" aria-controls="projTabContent">
         <iconify-icon icon="solar:chart-linear" width="13" class="align-[-2px] mr-1"></iconify-icon>통계
       </button>
-      <button class="proj-tab px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-white/35 hover:text-white/65 border-b-2 border-transparent -mb-px spring" data-tab="sessions">
+      <button class="proj-tab px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-white/35 hover:text-white/65 border-b-2 border-transparent -mb-px spring" data-tab="sessions" role="tab" aria-selected="false" aria-controls="projTabContent">
         <iconify-icon icon="solar:list-check-linear" width="13" class="align-[-2px] mr-1"></iconify-icon>세션 목록
       </button>
-      <button class="proj-tab px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-white/35 hover:text-white/65 border-b-2 border-transparent -mb-px spring" data-tab="conversations">
+      <button class="proj-tab px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-white/35 hover:text-white/65 border-b-2 border-transparent -mb-px spring" data-tab="conversations" role="tab" aria-selected="false" aria-controls="projTabContent">
         <iconify-icon icon="solar:chat-round-line-linear" width="13" class="align-[-2px] mr-1"></iconify-icon>전체 대화
       </button>
     </div>
     <!-- Content -->
-    <div id="projTabContent" class="flex-1 overflow-y-auto p-6 bg-white/[0.01]">
+    <div id="projTabContent" class="flex-1 overflow-y-auto p-6 bg-white/[0.01]" role="tabpanel" aria-live="polite">
       <div class="text-center text-white/25 text-xs py-10 dots">로딩 중</div>
     </div>
   </div>
@@ -728,7 +724,7 @@ tailwind.config = {
       <div class="flex items-center justify-between"><span class="text-white/50">모달 닫기·검색 해제</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">Esc</kbd></span></div>
       <div class="flex items-center justify-between"><span class="text-white/50">도움말</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">?</kbd></span></div>
       <div class="pt-2 text-[10px] text-white/30 border-t border-white/[0.05] mt-2 pt-3">
-        o=개요 · s=세션 · c=대화 · m=모델 · p=프로젝트 · e=관리
+        o=개요 · b=비용 · s=세션 · c=대화 · m=모델 · p=프로젝트 · u=Subagent · e=관리
       </div>
     </div>
   </div>
@@ -737,6 +733,7 @@ tailwind.config = {
 <!-- ═══════════════════════════════════════════════════════════════════════
      JAVASCRIPT
      ═══════════════════════════════════════════════════════════════════════ -->
-<script src="/static/app.js?v=18" defer></script>
+<script src="/static/app.js?v=26" defer></script>
+<script src="/static/charts.js?v=26" defer></script>
 </body>
 </html>

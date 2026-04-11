@@ -20,7 +20,7 @@ _write_lock = threading.Lock()
 _read_local = threading.local()   # per-thread cached read connection
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 9                # bump on every schema change
+SCHEMA_VERSION = 11               # bump on every schema change
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -29,6 +29,10 @@ def _configure(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
+    # Incremental auto-vacuum lets /api/admin/retention reclaim space without
+    # a full VACUUM rewrite. First-time switch from NONE only takes effect
+    # after a one-shot VACUUM, so a brand-new DB inherits it immediately.
+    conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
 
 
 def _new_connection() -> sqlite3.Connection:
@@ -710,6 +714,26 @@ def init_db() -> None:
                     logger.warning("v9 FTS5 migration skipped: %s", e)
                 _set_user_version(conn, 9)
                 current = 9
+            if current < 10:
+                logger.info("Migrating schema v%d → 10 (parent_session_id hot path index)", current)
+                # Hot path /api/sessions does correlated subqueries filtered by
+                # parent_session_id + is_subagent. Without this composite index
+                # each row triggers a full SCAN of sessions — O(N²) at scale.
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_sessions_parent_is_sub "
+                    "ON sessions(parent_session_id, is_subagent)"
+                )
+                _set_user_version(conn, 10)
+                current = 10
+            if current < 11:
+                logger.info("Migrating schema v%d → 11 (claude_ai_messages.updated_at)", current)
+                # claude.ai export re-imports couldn't detect edits previously
+                # (INSERT OR IGNORE dropped any updated version). Adding
+                # updated_at lets the importer compare versions and replace
+                # stale rows when a later export carries a newer timestamp.
+                _ensure_column(conn, 'claude_ai_messages', 'updated_at', "TEXT")
+                _set_user_version(conn, 11)
+                current = 11
             conn.commit()
         finally:
             conn.close()

@@ -90,7 +90,7 @@ function sortPillHtml(view, col, label, size = 'text-[10px]') {
 }
 
 // ─── Navigation + URL hash routing ─────────────────────────────────────
-const VALID_VIEWS = new Set(['overview','sessions','conversations','models','projects','export']);
+const VALID_VIEWS = new Set(['overview','cost','sessions','conversations','models','projects','subagents','export']);
 
 function showView(view, { updateHash = true } = {}) {
   if (!VALID_VIEWS.has(view)) view = 'overview';
@@ -121,8 +121,11 @@ document.querySelectorAll('.nav-pill[data-view]').forEach(btn => {
 });
 
 function onViewChange(view) {
-  if (view !== 'overview') {
-    Object.keys(state.charts).forEach(k => {
+  // Destroy overview/cost chart instances when leaving a chart-bearing view
+  // to avoid Chart.js re-init conflicts on return. Project modal chart
+  // (projDaily) has its own lifecycle and is left alone.
+  if (view !== 'cost') {
+    ['usage','models','dailyCost','cache'].forEach(k => {
       if (state.charts[k]) { state.charts[k].destroy(); state.charts[k] = null; }
     });
   } else {
@@ -132,6 +135,7 @@ function onViewChange(view) {
   if (view === 'conversations') loadConvList();
   if (view === 'models') loadModels();
   if (view === 'projects') loadProjects();
+  if (view === 'subagents') { loadSubagentHeatmap(); loadSubagentSuccessMatrix(); }
   if (view === 'export') loadDbSize();
 }
 
@@ -293,29 +297,83 @@ async function loadForecast() {
     set('forecastAvg', fmt$(d.avg_cost_per_day));
     set('forecastAvgDetail', `${fmtN(d.avg_msgs_per_day || 0)} 메시지/일`);
 
-    // Burn-rate trajectory: humanise the seconds-until-budget-burnout into
-    // "약 N시간" / "약 N일" with colour coded urgency.
-    const fmtBurnout = (sec, limit, used) => {
-      if (sec === null || sec === undefined) return `<span class="text-white/30">예산 미설정</span>`;
+    // Humanise seconds-until-burn-out as "N일 N시간 후" / "N시간 후" / "N분 후"
+    // with urgency color coding. DOM-builder form (no innerHTML templates) so
+    // upstream values can't leak markup.
+    const buildBurnoutSpan = (sec, limit, used) => {
+      const span = document.createElement('span');
+      if (sec === null || sec === undefined) {
+        span.className = 'text-white/30';
+        span.textContent = '예산 미설정';
+        return span;
+      }
       if (used >= limit) {
-        return `<span class="text-red-400 font-bold">초과 (${fmt$(used)}/${fmt$(limit)})</span>`;
+        span.className = 'text-red-400 font-bold';
+        span.textContent = `초과 (${fmt$(used)}/${fmt$(limit)})`;
+        return span;
       }
       const days = Math.floor(sec / 86400);
       const hours = Math.floor((sec % 86400) / 3600);
-      let label;
-      if (days >= 1) label = `${days}일 ${hours}시간 후`;
-      else if (hours >= 1) label = `${hours}시간 후`;
-      else label = `${Math.floor(sec / 60)}분 후`;
-      const cls = sec < 3600 ? 'text-red-400' : sec < 86400 ? 'text-amber-400' : 'text-emerald-400/85';
-      return `<span class="${cls} font-bold">${label}</span>`;
+      const label = days >= 1 ? `${days}일 ${hours}시간 후`
+        : hours >= 1 ? `${hours}시간 후`
+        : `${Math.floor(sec / 60)}분 후`;
+      span.className = 'font-bold ' + (sec < 3600 ? 'text-red-400'
+        : sec < 86400 ? 'text-amber-400'
+        : 'text-emerald-400/85');
+      span.textContent = label;
+      return span;
     };
-    const dEl = document.getElementById('forecastBurnoutDaily');
-    const wEl = document.getElementById('forecastBurnoutWeekly');
-    if (dEl) dEl.innerHTML = `일간 ${fmtBurnout(d.daily_budget_burnout_seconds, d.daily_limit, d.daily_used)}`;
-    if (wEl) wEl.innerHTML = `주간 ${fmtBurnout(d.weekly_budget_burnout_seconds, d.weekly_limit, d.weekly_used)}`;
+    const setBurnout = (elId, prefix, sec, limit, used) => {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.textContent = prefix + ' ';
+      el.appendChild(buildBurnoutSpan(sec, limit, used));
+      el.classList.remove('skeleton');
+    };
+    setBurnout('forecastBurnoutDaily', '일간',
+      d.daily_budget_burnout_seconds, d.daily_limit, d.daily_used);
+    setBurnout('forecastBurnoutWeekly', '주간',
+      d.weekly_budget_burnout_seconds, d.weekly_limit, d.weekly_used);
   } catch (e) {
     reportError('loadForecast', e);
   }
+}
+
+// ─── Overview drill-down helpers ────────────────────────────────────
+// Hero 오늘 카드 → 세션 뷰로 날짜 필터 프리필해서 이동
+function _todayISO() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+function _isoDaysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+function drillToSessionsToday() {
+  const today = _todayISO();
+  state.advFilters = { date_from: today, date_to: today, cost_min: '', cost_max: '' };
+  savePrefs({ advFilters: state.advFilters });
+  state.currentPage = 1;
+  showView('sessions');
+  // Ensure input values match filter state when panel opens
+  const g = id => document.getElementById(id);
+  if (g('advDateFrom')) g('advDateFrom').value = today;
+  if (g('advDateTo'))   g('advDateTo').value = today;
+}
+function drillToSessionsWeek() {
+  const to = _todayISO(), from = _isoDaysAgo(6);
+  state.advFilters = { date_from: from, date_to: to, cost_min: '', cost_max: '' };
+  savePrefs({ advFilters: state.advFilters });
+  state.currentPage = 1;
+  showView('sessions');
+  const g = id => document.getElementById(id);
+  if (g('advDateFrom')) g('advDateFrom').value = from;
+  if (g('advDateTo'))   g('advDateTo').value = to;
 }
 
 // ─── Filter presets (B2) ─────────────────────────────────────────────
@@ -588,10 +646,12 @@ const cmdkState = {
 function _cmdkStaticItems() {
   return [
     { label: '개요',      hint: '대시보드', icon: 'solar:chart-square-linear', action: () => showView('overview') },
+    { label: '비용',      hint: '토큰/비용 차트', icon: 'solar:graph-up-linear', action: () => showView('cost') },
     { label: '세션',      hint: '전체 세션 목록', icon: 'solar:list-check-linear', action: () => showView('sessions') },
     { label: '대화',      hint: '대화 뷰어', icon: 'solar:chat-round-line-linear', action: () => showView('conversations') },
     { label: '모델',      hint: '모델 분석', icon: 'solar:cpu-bolt-linear', action: () => showView('models') },
     { label: '프로젝트',   hint: '프로젝트 목록', icon: 'solar:folder-open-linear', action: () => showView('projects') },
+    { label: 'Subagent',  hint: '히트맵 + 종료 매트릭스', icon: 'solar:widget-2-linear', action: () => showView('subagents') },
     { label: '관리',      hint: 'CSV / 백업 / 보존', icon: 'solar:database-linear', action: () => showView('export') },
     { label: '예산 설정',  hint: '플랜/예산 편집', icon: 'solar:settings-linear', action: () => openPlanSettings() },
     { label: '다크/라이트 전환', hint: '테마 토글', icon: 'solar:sun-linear', action: () => toggleTheme() },
@@ -774,6 +834,8 @@ function toggleTheme() {
   const next = state.theme === 'light' ? 'dark' : 'light';
   applyTheme(next);
   savePrefs({ theme: next });
+  // Flip Chart.js colors live — otherwise user has to nav away and back.
+  refreshChartsForTheme();
 }
 applyTheme(state.theme);
 
@@ -802,8 +864,6 @@ function connectWS() {
     loadPeriods();
     loadPlanUsage();
     loadTopProjects();
-    loadSubagentHeatmap();
-    loadSubagentSuccessMatrix();
     loadForecast();
   };
   state.ws.onmessage = (e) => {
@@ -839,7 +899,10 @@ function debouncedRefresh() {
   if (_refreshTimer) return;
   _refreshTimer = setTimeout(() => {
     _refreshTimer = null;
-    loadStats(); loadCharts(); loadPeriods(); loadPlanUsage(); loadTopProjects();
+    loadStats(); loadPeriods(); loadPlanUsage(); loadTopProjects();
+    // Only refresh Chart.js instances when actually visible — otherwise we
+    // waste cycles creating/destroying offscreen chart objects.
+    if (location.hash.startsWith('#/cost')) loadCharts();
   }, 800);
 }
 
@@ -888,7 +951,32 @@ function clearNewDataBadge() {
   if (b) b.remove();
 }
 
+// Persistent connection banner: shown when WS has been non-connected for
+// longer than CONN_BANNER_DELAY. Auto-hides on first reconnect.
+let _connBannerTimer = null;
+const CONN_BANNER_DELAY = 15000;
+function showConnBanner(msg) {
+  const el = document.getElementById('connBanner');
+  if (!el) return;
+  const m = document.getElementById('connBannerMsg');
+  if (m && msg) m.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideConnBanner() {
+  const el = document.getElementById('connBanner');
+  if (el) el.classList.add('hidden');
+  if (_connBannerTimer) { clearTimeout(_connBannerTimer); _connBannerTimer = null; }
+}
+
 function setWsStatus(cls, label) {
+  // Schedule/cancel the persistent banner based on connection state.
+  if (cls === 'connected') {
+    hideConnBanner();
+  } else if (!_connBannerTimer) {
+    _connBannerTimer = setTimeout(
+      () => showConnBanner(`실시간 연결 중단 (${label || '재연결 중…'})`),
+      CONN_BANNER_DELAY);
+  }
   const d = document.getElementById('wsDot');
   if (!d) return;
   // Larger, status-coloured dot. Pulses red while disconnected so it's
@@ -932,50 +1020,10 @@ function renderStats(data){
 }
 
 // ─── Charts ─────────────────────────────────────────────────────────────
-const CC={emerald:'#34d399',blue:'#60a5fa',amber:'#fbbf24',rose:'#fb7185',cyan:'#22d3ee',purple:'#a78bfa',white10:'rgba(255,255,255,.06)',white5:'rgba(255,255,255,.03)'};
-const CHART_D={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},animation:{duration:400}};
-function grd(){return{color:CC.white5,drawBorder:false};}
-function tck(){return{color:'rgba(255,255,255,.15)',font:{size:11,family:'Pretendard'}};}
-async function loadCharts(){await Promise.allSettled([loadUsageChart().catch(e=>console.error(e)),loadModelChart().catch(e=>console.error(e)),loadDailyCostChart().catch(e=>console.error(e)),loadCacheChart().catch(e=>console.error(e))]);}
-
-async function loadUsageChart(){
-  const h=state.usageRange==='24h'?24:state.usageRange==='7d'?168:720;
-  const ep=h<=168?`/api/usage/hourly?hours=${h}`:`/api/usage/daily?days=30`;
-  const data=await safeFetch(ep);const rows=data.data||[];
-  const labels=rows.map(r=>r.hour||r.date||''),inp=rows.map(r=>r.input_tokens||0),out=rows.map(r=>r.output_tokens||0),cr=rows.map(r=>r.cache_read_tokens||0);
-  if(state.charts.usage)state.charts.usage.destroy();
-  state.charts.usage=new Chart(document.getElementById('chartUsage'),{type:'line',data:{labels,datasets:[
-    {label:'입력',data:inp,borderColor:CC.blue,backgroundColor:'rgba(96,165,250,.08)',fill:true,tension:.3,pointRadius:1.5,borderWidth:1.5},
-    {label:'출력',data:out,borderColor:CC.emerald,backgroundColor:'rgba(52,211,153,.06)',fill:true,tension:.3,pointRadius:1.5,borderWidth:1.5},
-    {label:'캐시',data:cr,borderColor:CC.cyan,backgroundColor:'rgba(34,211,238,.04)',fill:true,tension:.3,pointRadius:1,borderWidth:1,borderDash:[4,2]},
-  ]},options:{...CHART_D,plugins:{legend:{display:true,position:'top',align:'end',labels:{color:'rgba(255,255,255,.25)',boxWidth:10,font:{size:11,family:'Pretendard'}}},tooltip:{backgroundColor:'#111',borderColor:'rgba(255,255,255,.08)',borderWidth:1,titleColor:'rgba(255,255,255,.6)',bodyColor:'rgba(255,255,255,.4)',callbacks:{label:c=>`${c.dataset.label}: ${fmtTok(c.raw)}`}}},scales:{x:{grid:grd(),ticks:{...tck(),maxTicksLimit:8,maxRotation:0}},y:{grid:grd(),ticks:{...tck(),callback:v=>fmtTok(v)}}}}});
-}
-async function loadModelChart(){
-  const data=await safeFetch('/api/models');const rows=data.models||[];
-  const labels=rows.map(r=>shortModel(r.model)),vals=rows.map(r=>r.message_count||0);
-  const pal=[CC.emerald,CC.blue,CC.amber,CC.rose,CC.cyan,CC.purple];
-  if(state.charts.models)state.charts.models.destroy();
-  state.charts.models=new Chart(document.getElementById('chartModels'),{type:'doughnut',data:{labels,datasets:[{data:vals,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'65%',plugins:{legend:{display:true,position:'right',labels:{color:'rgba(255,255,255,.25)',boxWidth:8,font:{size:11,family:'Pretendard'},padding:6}},tooltip:{backgroundColor:'#111',borderColor:'rgba(255,255,255,.08)',borderWidth:1,titleColor:'rgba(255,255,255,.6)',bodyColor:'rgba(255,255,255,.4)'}}}});
-}
-async function loadDailyCostChart(){
-  const data=await safeFetch('/api/usage/daily?days=30');const rows=data.data||[];
-  const labels=rows.map(r=>r.date?r.date.slice(5):''),costs=rows.map(r=>parseFloat((r.cost_usd||0).toFixed(4)));
-  if(state.charts.dailyCost)state.charts.dailyCost.destroy();
-  state.charts.dailyCost=new Chart(document.getElementById('chartDailyCost'),{type:'bar',data:{labels,datasets:[{label:'비용',data:costs,backgroundColor:'rgba(52,211,153,.25)',borderColor:CC.emerald,borderWidth:1,borderRadius:3}]},options:{...CHART_D,plugins:{tooltip:{backgroundColor:'#111',borderColor:'rgba(255,255,255,.08)',borderWidth:1,titleColor:'rgba(255,255,255,.6)',bodyColor:'rgba(255,255,255,.4)',callbacks:{label:c=>` $${c.raw.toFixed(4)}`}}},scales:{x:{grid:grd(),ticks:{...tck(),maxTicksLimit:10}},y:{grid:grd(),ticks:{...tck(),callback:v=>'$'+v}}}}});
-}
-async function loadCacheChart(){
-  const data=await safeFetch('/api/stats');const a=data.all_time||{};
-  const d=[a.input_tokens||0,a.cache_creation_tokens||0,a.cache_read_tokens||0,a.output_tokens||0];
-  if(state.charts.cache)state.charts.cache.destroy();
-  state.charts.cache=new Chart(document.getElementById('chartCache'),{type:'doughnut',data:{labels:['입력','캐시 생성','캐시 읽기','출력'],datasets:[{data:d,backgroundColor:[CC.blue+'66',CC.purple+'66',CC.cyan+'66',CC.emerald+'66'],borderColor:[CC.blue,CC.purple,CC.cyan,CC.emerald],borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'60%',plugins:{legend:{display:true,position:'right',labels:{color:'rgba(255,255,255,.25)',boxWidth:8,font:{size:11,family:'Pretendard'},padding:5}},tooltip:{backgroundColor:'#111',borderColor:'rgba(255,255,255,.08)',borderWidth:1,titleColor:'rgba(255,255,255,.6)',bodyColor:'rgba(255,255,255,.4)',callbacks:{label:c=>` ${c.label}: ${fmtTok(c.raw)}`}}}}});
-}
-function setUsageRange(btn,range){
-  document.querySelectorAll('.chart-range').forEach(b=>{b.classList.remove('active');b.classList.add('text-white/20');b.classList.remove('text-white/40');});
-  btn.classList.add('active','text-white/40');btn.classList.remove('text-white/20');
-  state.usageRange=range;
-  savePrefs({ usageRange: range });
-  loadUsageChart();
-}
+// Moved to static/charts.js. Load order (see index.html):
+//   1. app.js    — defines state, safeFetch, utils, ws, routing
+//   2. charts.js — defines themeColors, tck, grd, loadCharts, Chart.js wiring
+// All chart functions become window.* globals via regular script loading.
 
 // ─── Sessions ───────────────────────────────────────────────────────────
 let searchTimer=null;
@@ -1106,7 +1154,7 @@ function renderSessions(data){
     const stopBadge = stopReasonBadge(s.final_stop_reason);
     const tagList = (s.tags || '').split(',').map(t => t.trim()).filter(Boolean);
     const tagBadges = tagList.length
-      ? tagList.map(t => `<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300/80 font-medium">#${esc(t)}</span>`).join(' ')
+      ? tagList.map(t => `<span class="tag-badge">#${esc(t)}</span>`).join(' ')
       : '';
     tr.setAttribute('data-sid', s.id);
     const checked = state.bulkSelected && state.bulkSelected.has(s.id) ? 'checked' : '';
@@ -1231,6 +1279,10 @@ async function loadConvList(){
       const div=document.createElement('div');
       div.className='px-4 py-3 border-b border-white/[0.04] cursor-pointer spring hover:bg-white/[0.04]';
       div.dataset.id=s.id;
+      const tagList = (s.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      const tagRow = tagList.length
+        ? `<div class="mt-1 flex flex-wrap gap-1">${tagList.map(t => `<span class="tag-badge">#${esc(t)}</span>`).join('')}</div>`
+        : '';
       div.innerHTML=`
         <div class="flex items-center justify-between gap-2">
           <div class="text-xs font-bold text-white/80 truncate">${esc(s.project_name||'—')}</div>
@@ -1240,7 +1292,8 @@ async function loadConvList(){
           <span>${fmtTok((s.total_input_tokens||0)+(s.total_output_tokens||0))}</span>
           <span class="text-amber-400/70">${fmt$(s.total_cost_usd)}</span>
           <span>${relTime(s.updated_at)}</span>
-        </div>`;
+        </div>
+        ${tagRow}`;
       div.onclick=()=>openConversation(s.id,s,div);b.appendChild(div);
     });
   }catch(e){reportError('loadConvList',e);}
@@ -2083,10 +2136,15 @@ async function loadProjects(){
       const tr=document.createElement('tr');
       tr.className='border-b border-white/[0.03] hover:bg-white/[0.05] cursor-pointer spring';
       tr.onclick=()=>showProjectDetail(p.project_name,p.project_path);
+      const pTagList = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      const pTagRow = pTagList.length
+        ? `<div class="mt-1 flex flex-wrap gap-1">${pTagList.map(t => `<span class="tag-badge">#${esc(t)}</span>`).join('')}</div>`
+        : '';
       tr.innerHTML=`
         <td class="px-5 py-3">
           <div class="font-bold text-white/90 truncate">${esc(p.project_name||'—')}</div>
           <div class="text-[10px] text-white/30 mt-0.5 truncate max-w-md" title="${esc(p.project_path||'')}">${esc(p.project_path||'')}</div>
+          ${pTagRow}
         </td>
         <td class="px-3 py-3 text-right tabular-nums text-white/75 font-semibold">${fmtN(p.session_count||0)}</td>
         <td class="px-3 py-3 text-right"><span class="text-[11px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400/80 font-semibold tabular-nums">${fmtTok(p.total_tokens||0)}</span></td>
@@ -2210,14 +2268,22 @@ function renderPeriod(key,p){set(`pd${key}Cost`,fmt$(p.cost));const tok=(p.input
 // ─── Plan Usage ─────────────────────────────────────────────────────────
 let planTimer=null,planData=null;
 async function loadPlanUsage(){try{const resp=await fetch('/api/plan/usage');if(!resp.ok)throw new Error(`HTTP ${resp.status}`);planData=await resp.json();renderPlanBlock('Daily',planData.daily);renderPlanBlock('Weekly',planData.weekly);if(planData.plan?.label){const t=document.querySelector('.plan-section-title');/* not used */}checkPlanAlerts(planData);if(planTimer)clearInterval(planTimer);planTimer=setInterval(tickPlanCountdown,1000);}catch(e){reportError('loadPlanUsage',e);}}
+function _writeText(el, txt) {
+  if (!el) return;
+  el.textContent = txt;
+  if (el.classList.contains('skeleton')) el.classList.remove('skeleton');
+}
 function renderPlanBlock(key,b){if(!b)return;const el=id=>document.getElementById(`plan${key}${id}`);
   const pctEl=el('Pct'),barEl=el('Bar'),usedEl=el('Used'),tokEl=el('Tokens'),msgEl=el('Msgs'),remainEl=el('Remain'),resetEl=el('Reset');
   const pct=b.percentage||0,bw=Math.min(pct,100),color=planBarColor(pct);
-  if(pctEl){pctEl.textContent=pct.toFixed(1)+'%';pctEl.style.color=color;}
+  if(pctEl){_writeText(pctEl, pct.toFixed(1)+'%');pctEl.style.color=color;}
   if(barEl){barEl.style.width=bw+'%';barEl.style.background=color;}
-  if(usedEl)usedEl.textContent=`${fmt$(b.used_cost)} / ${fmt$(b.limit_cost)}`;
-  if(tokEl)tokEl.textContent=fmtTok(b.used_tokens)+(b.cache_tokens?` (캐시 ${fmtTok(b.cache_tokens)})`:'');
-  if(msgEl)msgEl.textContent=fmtN(b.messages)+'건';if(remainEl)remainEl.textContent=fmtDuration(b.remaining_seconds);if(resetEl)resetEl.textContent=fmtResetTime(b.reset_at);}
+  _writeText(usedEl, `${fmt$(b.used_cost)} / ${fmt$(b.limit_cost)}`);
+  _writeText(tokEl,  fmtTok(b.used_tokens)+(b.cache_tokens?` (캐시 ${fmtTok(b.cache_tokens)})`:''));
+  _writeText(msgEl,  fmtN(b.messages)+'건');
+  _writeText(remainEl, fmtDuration(b.remaining_seconds));
+  _writeText(resetEl,  fmtResetTime(b.reset_at));
+}
 const PLAN_C={green:'#34d399',yellow:'#fbbf24',orange:'#fb923c',red:'#f87171'};
 function planBarColor(p){if(p>=90)return PLAN_C.red;if(p>=75)return PLAN_C.orange;if(p>=50)return PLAN_C.yellow;return PLAN_C.green;}
 function checkPlanAlerts(d){if(!d)return;['daily','weekly'].forEach(p=>{const pct=d[p]?.percentage||0;if(pct>=90&&Notification.permission==='granted'&&!state['_a_'+p]){new Notification('Claude 사용량 경고',{body:`${p==='daily'?'일일':'주간'} ${pct.toFixed(0)}% (${fmt$(d[p].used_cost)} / ${fmt$(d[p].limit_cost)})`});state['_a_'+p]=true;}});}
@@ -2556,6 +2622,7 @@ function setProjectTab(tab, reload = true) {
     t.classList.toggle('border-accent', active);
     t.classList.toggle('text-white/35', !active);
     t.classList.toggle('border-transparent', !active);
+    t.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   if (!reload) return;
   if (tab === 'overview') renderProjectOverview();
@@ -2672,31 +2739,26 @@ function renderProjectDailyChart(daily) {
           display: true,
           position: 'top',
           align: 'end',
-          labels: { color: 'rgba(255,255,255,.4)', boxWidth: 10, font: { size: 10, family: 'Pretendard' } },
+          labels: legendLabels({ boxWidth: 10, font: { size: 10, family: 'Pretendard' } }),
         },
-        tooltip: {
-          backgroundColor: '#111',
-          borderColor: 'rgba(255,255,255,.08)',
-          borderWidth: 1,
-          titleColor: 'rgba(255,255,255,.6)',
-          bodyColor: 'rgba(255,255,255,.4)',
+        tooltip: tooltipOpts({
           callbacks: {
             label: ctx => ctx.dataset.label === '비용'
               ? ` ${fmt$(ctx.raw)}`
               : ` ${fmtN(ctx.raw)}건`,
           },
-        },
+        }),
       },
       scales: {
         x: {
-          grid: { color: 'rgba(255,255,255,.03)' },
-          ticks: { color: 'rgba(255,255,255,.30)', font: { size: 9 }, maxTicksLimit: 10, maxRotation: 0 },
+          grid: grd(),
+          ticks: { ...tck(), font: { size: 9, family: 'Pretendard' }, maxTicksLimit: 10, maxRotation: 0 },
         },
         y: {
           position: 'left',
-          grid: { color: 'rgba(255,255,255,.03)' },
+          grid: grd(),
           ticks: {
-            color: 'rgba(251,191,36,.55)', font: { size: 9 },
+            color: 'rgba(251,191,36,.75)', font: { size: 9, family: 'Pretendard' },
             callback: v => '$' + v,
           },
         },
@@ -2704,7 +2766,7 @@ function renderProjectDailyChart(daily) {
           position: 'right',
           grid: { display: false },
           ticks: {
-            color: 'rgba(96,165,250,.55)', font: { size: 9 },
+            color: 'rgba(96,165,250,.75)', font: { size: 9, family: 'Pretendard' },
             callback: v => fmtTok(v),
           },
         },
@@ -2755,11 +2817,17 @@ function renderProjectSessionsTab() {
           </tr>
         </thead>
         <tbody class="text-white/70">
-          ${rows.length === 0 ? `<tr><td colspan="8" class="text-center py-10 text-white/25">세션 없음</td></tr>` : rows.map(s => `
+          ${rows.length === 0 ? `<tr><td colspan="8" class="text-center py-10 text-white/25">세션 없음</td></tr>` : rows.map(s => {
+            const sTagList = (s.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+            const sTagRow = sTagList.length
+              ? `<div class="mt-1 flex flex-wrap gap-1">${sTagList.map(t => `<span class="tag-badge">#${esc(t)}</span>`).join('')}</div>`
+              : '';
+            return `
             <tr class="border-b border-white/[0.03] hover:bg-white/[0.04] spring">
               <td class="px-3 py-3">
                 <div class="text-[11px] font-semibold text-white/80">${fmtTime(s.updated_at)}</div>
                 <div class="text-[9px] text-white/30 font-mono mt-0.5">${esc((s.id||'').slice(0,8))}${s.pinned ? ' <span class="text-accent">★</span>' : ''}</div>
+                ${sTagRow}
               </td>
               <td class="px-3 py-3"><span class="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/50 whitespace-nowrap">${esc(shortModel(s.model||''))}</span></td>
               <td class="px-3 py-3 text-right tabular-nums">${fmtN(s.message_count||0)}</td>
@@ -2771,7 +2839,8 @@ function renderProjectSessionsTab() {
                 <button onclick="openConvFromProject('${s.id}')" title="대화 보기" class="text-white/30 hover:text-accent spring"><iconify-icon icon="solar:arrow-right-linear" width="14"></iconify-icon></button>
               </td>
             </tr>
-          `).join('')}
+          `;
+          }).join('')}
         </tbody>
       </table>
     </div>
@@ -3025,15 +3094,37 @@ async function loadSubagentHeatmap() {
 }
 
 // ─── Top 10 ─────────────────────────────────────────────────────────────
-async function loadTopProjects(){try{const data=await safeFetch('/api/projects/top?limit=10');const projects=data.projects||[];const c=document.getElementById('topProjectsList');
-  if(!projects.length){c.innerHTML='<div class="text-center text-white/10 text-xs py-8">데이터 없음</div>';return;}
-  const mx=Math.max(...projects.map(p=>p.total_cost||0),1);
-  const cols=['#34d399','#60a5fa','#fbbf24','#22d3ee','#a78bfa','#fb7185','#34d399','#60a5fa','#fbbf24','#22d3ee'];
-  c.innerHTML=projects.map((p,i)=>{const pct=((p.total_cost||0)/mx*100).toFixed(1);const rc=i<3?['text-amber-400','text-white/40','text-orange-400'][i]:'text-white/15';
-    return `<div class="grid grid-cols-[28px_1fr_auto_auto] items-center gap-3 py-1.5 border-b border-white/[0.03] last:border-b-0"><span class="text-xs font-extrabold text-center ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-xs font-semibold text-white/50 truncate" title="${esc(p.project_path||'')}">${esc(p.project_name||'—')}</div><div class="h-1 bg-white/5 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div></div><span class="text-xs font-bold text-amber-400/70 whitespace-nowrap">${fmt$(p.total_cost)}</span><span class="text-[10px] text-white/20 whitespace-nowrap w-16 text-right">${fmtTok(p.total_tokens||0)}</span></div>`;}).join('');}catch(e){console.error('loadTopProjects:',e);}}
+async function loadTopProjects(){
+  try{
+    const data=await safeFetch('/api/projects/top?limit=10');
+    const projects=data.projects||[];
+    const c=document.getElementById('topProjectsList');
+    if(!projects.length){c.innerHTML='<div class="text-center text-white/10 text-xs py-8">데이터 없음</div>';return;}
+    const mx=Math.max(...projects.map(p=>p.total_cost||0),1);
+    const cols=['#34d399','#60a5fa','#fbbf24','#22d3ee','#a78bfa','#fb7185','#34d399','#60a5fa','#fbbf24','#22d3ee'];
+    c.textContent='';
+    projects.forEach((p,i)=>{
+      const pct=((p.total_cost||0)/mx*100).toFixed(1);
+      const rc=i<3?['text-amber-400','text-white/40','text-orange-400'][i]:'text-white/15';
+      const row=document.createElement('div');
+      row.className='grid grid-cols-[28px_1fr_auto_auto] items-center gap-3 py-1.5 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-1 spring';
+      row.title='프로젝트 상세 보기';
+      row.innerHTML=`<span class="text-xs font-extrabold text-center ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-xs font-semibold text-white/60 truncate">${esc(p.project_name||'—')}</div><div class="h-1 bg-white/5 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div></div><span class="text-xs font-bold text-amber-400/70 whitespace-nowrap">${fmt$(p.total_cost)}</span><span class="text-[10px] text-white/20 whitespace-nowrap w-16 text-right">${fmtTok(p.total_tokens||0)}</span>`;
+      row.addEventListener('click',()=>showProjectDetail(p.project_name,p.project_path));
+      c.appendChild(row);
+    });
+  }catch(e){console.error('loadTopProjects:',e);}
+}
 
 // ─── Utilities ──────────────────────────────────────────────────────────
-function set(id,val){const el=document.getElementById(id);if(el)el.textContent=val;}
+// set() auto-clears the .skeleton class on first write so placeholder
+// shimmer blocks disappear as soon as real data arrives.
+function set(id,val){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.textContent=val;
+  if(el.classList.contains('skeleton'))el.classList.remove('skeleton');
+}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function fmtN(n){return(Number(n)||0).toLocaleString('ko-KR');}
 function fmtTok(n){n=Number(n)||0;if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return String(n);}
@@ -3050,8 +3141,8 @@ function fmtTime(ts){if(!ts)return'—';const d=new Date(ts);if(isNaN(d))return 
 //   g o/s/c/m/p/e → jump to view
 //   ?           → show help overlay
 const NAV_KEY_MAP = {
-  o: 'overview', s: 'sessions', c: 'conversations',
-  m: 'models', p: 'projects', e: 'export',
+  o: 'overview', b: 'cost', s: 'sessions', c: 'conversations',
+  m: 'models', p: 'projects', u: 'subagents', e: 'export',
 };
 let _gPending = false;
 

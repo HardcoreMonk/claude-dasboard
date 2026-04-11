@@ -35,6 +35,7 @@ journalctl -u claude-dashboard -f
 ```bash
 ./.venv/bin/python -m pip install pytest httpx
 ./.venv/bin/python -m pytest tests/ -v
+# 123 passed — parser 37 · database 10 · watcher 9 · api 33 · contract 31 · backup 3
 ```
 
 ## 주요 기능
@@ -63,18 +64,23 @@ journalctl -u claude-dashboard -f
 ## 프로젝트 구조
 
 ```
-main.py               1876줄  FastAPI 47 routes + /metrics + WS
-database.py            726줄  WAL + thread-local + v1→v9 마이그레이션 + FTS5 × 2
-parser.py              459줄  cwd 식별, subagent split, stop_reason 캡처
+main.py               1927줄  FastAPI 47 routes + /metrics + WS
+database.py            745줄  WAL + thread-local + v1→v11 마이그레이션 + FTS5 × 2
+parser.py              501줄  cwd 식별, subagent split, PARSE_STATS 카운터
 watcher.py             341줄  watchdog + safety poll + 메트릭 주입
-import_claude_ai.py    256줄  claude.ai export → claude_ai_* 테이블 (일회성 CLI)
-static/index.html      742줄  Tailwind + Pretendard HTML 쉘
-static/app.js         3127줄  SPA — 라우팅·키보드·WS·bulk·forecast·claude.ai 뷰어
-static/app.css         253줄  스타일 + 라이트모드 + 반응형
-tests/                1163줄  81 pytest (parser/database/watcher/api)
+import_claude_ai.py    287줄  claude.ai export → claude_ai_* 테이블 (update detection)
+backup.sh · restore.sh · rebuild.sh           DR 스크립트
+claude-dashboard-retention.{service,timer}    주간 retention 타이머
+static/index.html      744줄  Tailwind + Pretendard HTML 쉘
+static/app.js         3218줄  SPA main
+static/charts.js       125줄  Chart.js 모듈 (theme-aware, chart error overlay)
+static/app.css         298줄  스타일 + 라이트모드 + skeleton shimmer
+tests/                2115줄  123 pytest (parser 37 · db 10 · watcher 9 · api 33 · contract 31 · backup 3)
+.github/workflows/ci.yml      Actions: ruff + pytest + node --check
+pyproject.toml                ruff + pytest 설정
 ```
 
-총 ~8,943 줄.
+총 ~9,500 줄.
 
 ## 예산 추적 vs 실제 플랜 한도
 
@@ -94,6 +100,32 @@ Anthropic 은 rate limit 조회 API 를 공개하지 않는다. 이 대시보드
 
 > ⚠️ **CORS × CSRF**: 현재 `allow_origins=["*"]` + Basic Auth 조합은 브라우저가 credentialed cross-origin 요청을 거부하기에 사실상 안전하다. `allow_origins` 를 좁히기 전에 반드시 CSRF 토큰 또는 `Origin`/`Referer` 검사를 추가하거나, localhost 전용으로 운영할 것.
 
+## HTTPS / localhost only 배포
+
+WebSocket 인증은 쿼리스트링 `?token=` 또는 Basic Auth 헤더로 비밀번호를 전송합니다. **HTTP 로 공개 바인딩 시 도청 위험** — 다음 중 하나를 권장:
+
+```bash
+# 옵션 1: localhost 전용 바인딩 + SSH 터널로 접속
+# claude-dashboard.service 의 --host 0.0.0.0 → 127.0.0.1 변경
+# 원격 접속: ssh -L 8765:localhost:8765 user@host
+
+# 옵션 2: Caddy 리버스 프록시로 TLS 종단 (Let's Encrypt 자동)
+# /etc/caddy/Caddyfile
+dashboard.example.com {
+    reverse_proxy 127.0.0.1:8765
+    @ws {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @ws 127.0.0.1:8765
+}
+
+# 옵션 3: unix socket — 네트워크 노출 제로
+# uvicorn --uds /var/run/claude-dashboard.sock ...
+```
+
+`DASHBOARD_PASSWORD` 는 모든 요청과 `/ws` 업그레이드에 `hmac.compare_digest` 로 상수시간 검증됩니다.
+
 ## 환경 요건
 
 - Python 3.12+
@@ -101,14 +133,56 @@ Anthropic 은 rate limit 조회 API 를 공개하지 않는다. 이 대시보드
 - 디스크: `~/.claude/projects/` 읽기, `~/.claude/dashboard.db` 쓰기
 - 선택: `prometheus_client`, `watchdog` (없으면 자동 fallback)
 
-## 백업·복구
+## 백업·복구·재빌드 (DR runbook)
 
 ```bash
-./backup.sh                                            # CLI (sqlite3 .backup)
-curl -X POST http://localhost:8765/api/admin/backup    # API (write_lock 획득)
+# 백업 (sqlite3 .backup 로 트랜잭션 안전)
+./backup.sh                                            # CLI
+curl -X POST http://localhost:8765/api/admin/backup    # API (서비스가 write_lock 획득)
+
+# 복원 (integrity_check → 서비스 중지 → 교체 → 재시작)
+./restore.sh                                           # 인터랙티브 최근 10개 선택
+./restore.sh --latest                                  # 최신 백업
+./restore.sh ~/.claude/dashboard-backups/dashboard_20260412_003000.db
+
+# DB 전체 재빌드 (손상/마이그레이션 버그 복구)
+./rebuild.sh                                           # 스냅샷 → rm db → 재시작 → 자동 v0→v11 재스캔
 ```
 
-백업 위치: `~/.claude/dashboard-backups/`, 최근 10 개 자동 유지.
+백업 위치: `~/.claude/dashboard-backups/`
+- `dashboard_*.db` — 일반 백업 (최근 10 개 자동 유지)
+- `pre-restore_*.db` — 복원 실행 전 자동 스냅샷 (로테이션에서 제외)
+- `pre-rebuild_*.db` — 재빌드 실행 전 자동 스냅샷 (로테이션에서 제외)
+
+### 외부 백업 동기화 (권장)
+
+단일 디스크 장애 대비. 예시는 `restic`:
+
+```bash
+# 1회 초기화
+restic -r /mnt/external/backup init
+# 주기 실행 (systemd timer 또는 cron)
+restic -r /mnt/external/backup backup ~/.claude/dashboard-backups ~/.claude/dashboard.db
+restic -r /mnt/external/backup forget --keep-daily 7 --keep-weekly 4 --prune
+```
+
+`rclone sync ~/.claude/dashboard-backups remote:claude-dashboard` 도 동등.
+
+### 자동 데이터 보존 (retention)
+
+```bash
+sudo cp claude-dashboard-retention.service /etc/systemd/system/
+sudo cp claude-dashboard-retention.timer   /etc/systemd/system/
+sudo systemctl enable --now claude-dashboard-retention.timer
+```
+
+매주 일요일 03:30 에 `RETENTION_DAYS=365` 보다 오래된 세션을 삭제하고 `PRAGMA incremental_vacuum` 으로 디스크를 반환합니다. 기본값 변경:
+
+```bash
+sudo systemctl edit claude-dashboard-retention.service
+# [Service]
+# Environment=RETENTION_DAYS=180
+```
 
 ## claude.ai 웹 대화 import
 

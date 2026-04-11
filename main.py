@@ -267,8 +267,9 @@ async def index():
 @app.get("/api/health")
 def api_health():
     with read_db() as db:
-        n = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-    return {"ok": True, "messages": n}
+        n_msg = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        n_sess = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    return {"ok": True, "messages": n_msg, "sessions": n_sess}
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -718,11 +719,23 @@ def api_projects(
                    SUM(CASE WHEN is_subagent=1 THEN 1 ELSE 0 END) AS subagent_count,
                    SUM(cost_micro)*1.0/1000000 AS total_cost,
                    SUM(total_input_tokens + total_output_tokens) AS total_tokens,
-                   MAX(updated_at) AS last_active
+                   MAX(updated_at) AS last_active,
+                   GROUP_CONCAT(tags) AS tags_concat
             FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
             ORDER BY {sort_col} {order_sql}
         ''').fetchall()
-    return {'projects': [dict(r) for r in rows], 'sort': sort, 'order': order_sql.lower()}
+    projects = []
+    for r in rows:
+        d = dict(r)
+        raw = d.pop('tags_concat', '') or ''
+        seen: list[str] = []
+        for tok in raw.split(','):
+            tok = tok.strip()
+            if tok and tok not in seen:
+                seen.append(tok)
+        d['tags'] = ','.join(seen)
+        projects.append(d)
+    return {'projects': projects, 'sort': sort, 'order': order_sql.lower()}
 
 
 @app.get("/api/projects/top")
@@ -854,10 +867,42 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
             'window_days': days, 'daily': [],
             'avg_cost_per_day': 0, 'avg_msgs_per_day': 0,
             'mtd_cost': 0, 'projected_eom_cost': 0, 'days_left_in_month': 0,
+            'daily_used': 0, 'weekly_used': 0,
+            'daily_limit': cfg.get('daily_cost_limit', 50.0) or 0.0,
+            'weekly_limit': cfg.get('weekly_cost_limit', 300.0) or 0.0,
             'daily_budget_burnout_seconds': None,
             'weekly_budget_burnout_seconds': None,
         }
 
+    # Weekday-aware projection — averaging weekdays and weekends separately
+    # gives a much better month-end estimate when developer usage is bursty on
+    # work days. Falls back to simple mean when one side is empty.
+    weekday_costs: list[float] = []
+    weekend_costs: list[float] = []
+    weekday_msgs: list[float] = []
+    weekend_msgs: list[float] = []
+    for d in daily:
+        try:
+            dow = datetime.strptime(d['date'], '%Y-%m-%d').weekday()
+        except (ValueError, TypeError):
+            continue
+        is_weekend = dow >= 5
+        (weekend_costs if is_weekend else weekday_costs).append(d['cost'] or 0)
+        (weekend_msgs  if is_weekend else weekday_msgs ).append(d['msgs']  or 0)
+
+    def _mean(xs):
+        return (sum(xs) / len(xs)) if xs else 0.0
+
+    wd_cost, we_cost = _mean(weekday_costs), _mean(weekend_costs)
+    wd_msgs, we_msgs = _mean(weekday_msgs),  _mean(weekend_msgs)
+    # Fall back to whichever side has data when the other is empty.
+    if not weekday_costs:
+        wd_cost = we_cost
+        wd_msgs = we_msgs
+    if not weekend_costs:
+        we_cost = wd_cost
+        we_msgs = wd_msgs
+    # Blended simple mean for backwards-compatible avg_cost_per_day field.
     avg_cost = sum(d['cost'] or 0 for d in daily) / len(daily)
     avg_msgs = sum(d['msgs'] or 0 for d in daily) / len(daily)
 
@@ -878,7 +923,17 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
             FROM messages WHERE role='assistant' AND timestamp >= ?
         ''', (mtd_start_utc,)).fetchone()
     mtd_cost = mtd['cost'] if mtd else 0
-    projected_eom = mtd_cost + avg_cost * days_left
+
+    # Weekday-aware projection: walk remaining days individually, adding the
+    # appropriate per-weekday average for each. Much closer to reality when
+    # weekend spend differs from weekdays by 2-3x.
+    remaining_cost_projection = 0.0
+    cursor = now
+    for _ in range(days_left):
+        cursor = cursor + timedelta(days=1)
+        is_weekend = cursor.weekday() >= 5
+        remaining_cost_projection += we_cost if is_weekend else wd_cost
+    projected_eom = mtd_cost + remaining_cost_projection
 
     # Burn-rate to daily/weekly limits, given current spend so far + avg pace
     daily_limit = cfg.get('daily_cost_limit', 50.0) or 0.0
@@ -1226,7 +1281,8 @@ def api_project_stats(project_name: str, path: Optional[str] = Query(None)):
                    cost_micro*1.0/1000000 AS cost_usd,
                    message_count, user_message_count,
                    total_input_tokens, total_output_tokens,
-                   total_cache_read_tokens, pinned, is_subagent, version
+                   total_cache_read_tokens, pinned, is_subagent, version,
+                   tags
             FROM sessions
             WHERE {where}
             ORDER BY updated_at DESC

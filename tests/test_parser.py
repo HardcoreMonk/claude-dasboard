@@ -304,3 +304,110 @@ def test_get_agent_meta_uses_sidecar_when_present(tmp_path):
     atype, adesc = p.get_agent_meta(str(f))
     assert atype == 'Explore'
     assert adesc == 'audit'
+
+
+# ─── Malformed / adversarial input (견고성) ───────────────────────────────
+
+def test_parse_jsonl_skips_truncated_line(tmp_path):
+    """One bad line in the middle of a file must not kill ingestion."""
+    p.reset_parse_stats()
+    f = tmp_path / 'broken.jsonl'
+    f.write_text(
+        '{"type":"user","sessionId":"s1","uuid":"u1"}\n'
+        '{"type":"assistant","sessionId":"s1","uuid":"u2","message":\n'  # truncated
+        '{"type":"user","sessionId":"s1","uuid":"u3"}\n'
+    )
+    out = list(p.parse_jsonl_file(str(f)))
+    assert len(out) == 2  # truncated line skipped
+    assert p.PARSE_STATS['malformed_json'] == 1
+
+
+def test_parse_jsonl_skips_non_object_line(tmp_path):
+    """JSONL rows MUST be objects. Arrays and scalars are nonsense here."""
+    p.reset_parse_stats()
+    f = tmp_path / 'mixed.jsonl'
+    f.write_text(
+        '{"type":"user","sessionId":"s1","uuid":"u1"}\n'
+        '[1, 2, 3]\n'
+        '"a plain string"\n'
+        '{"type":"user","sessionId":"s1","uuid":"u2"}\n'
+    )
+    out = list(p.parse_jsonl_file(str(f)))
+    assert len(out) == 2
+    assert p.PARSE_STATS['malformed_json'] == 2
+
+
+def test_parse_jsonl_handles_empty_file(tmp_path):
+    p.reset_parse_stats()
+    f = tmp_path / 'empty.jsonl'
+    f.write_text('')
+    assert list(p.parse_jsonl_file(str(f))) == []
+    assert p.PARSE_STATS['malformed_json'] == 0
+    assert p.PARSE_STATS['read_errors'] == 0
+
+
+def test_parse_jsonl_missing_file_bumps_read_error():
+    p.reset_parse_stats()
+    missing = '/nonexistent/claude/path/does-not-exist.jsonl'
+    out = list(p.parse_jsonl_file(missing))
+    assert out == []
+    assert p.PARSE_STATS['read_errors'] == 1
+
+
+def test_process_record_survives_message_being_not_a_dict(mem_db):
+    """A record with ``message: null`` or ``message: "oops"`` must not crash;
+    we want the row skipped, the stats incremented, and the next record to
+    continue processing cleanly."""
+    p.reset_parse_stats()
+    bad_assistant = {
+        'type': 'assistant',
+        'sessionId': 's1',
+        'uuid': 'bad-1',
+        'timestamp': '2026-04-11T12:00:00Z',
+        'message': 'oops this should be a dict',
+    }
+    # Must not raise
+    p.process_record(bad_assistant, '/tmp/fake.jsonl', mem_db)
+    # A real record afterwards must still land
+    p.process_record(_assistant_record(uuid='after'), '/tmp/fake.jsonl', mem_db)
+    row = mem_db.execute(
+        'SELECT COUNT(*) AS n FROM messages WHERE session_id = ?', ('s1',)
+    ).fetchone()
+    assert row['n'] == 1  # only the good record persisted
+
+
+def test_process_record_survives_usage_being_not_a_dict(mem_db):
+    """usage field occasionally arrives as string / null in malformed JSONL."""
+    p.reset_parse_stats()
+    rec = _assistant_record(uuid='bad-usage')
+    rec['message']['usage'] = 'oops'  # invalid shape
+    # Should not raise; cost should fall through to 0
+    p.process_record(rec, '/tmp/fake.jsonl', mem_db)
+    row = mem_db.execute(
+        'SELECT cost_micro FROM messages WHERE message_uuid = ?', ('bad-usage',)
+    ).fetchone()
+    assert row is not None
+    assert row['cost_micro'] == 0
+
+
+def test_process_record_skips_record_without_session_id(mem_db):
+    p.reset_parse_stats()
+    rec = _assistant_record()
+    rec['sessionId'] = ''
+    p.process_record(rec, '/tmp/fake.jsonl', mem_db)
+    # Nothing inserted
+    assert mem_db.execute('SELECT COUNT(*) FROM messages').fetchone()[0] == 0
+    assert p.PARSE_STATS['skipped_no_sid'] == 1
+
+
+def test_calculate_cost_micro_defensive_against_bad_usage_values():
+    """Null/string values in usage dict must count as zero, not crash."""
+    bad = {
+        'input_tokens': None,
+        'output_tokens': 'oops',
+        'cache_creation_input_tokens': 100,
+        'cache_read_input_tokens': 0,
+    }
+    # Should not raise; uses only the valid numeric field
+    cost = p.calculate_cost_micro(bad, 'claude-opus-4-6')
+    assert cost > 0  # cache_creation=100 * opus price > 0

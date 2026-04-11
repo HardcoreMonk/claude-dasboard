@@ -16,6 +16,20 @@ logger = logging.getLogger(__name__)
 CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'
 CONTENT_MAX_BYTES = 100_000  # 100 KB cap
 
+# Process-wide counters for malformed / skipped input. The watcher can
+# sample these to expose Prometheus gauges without adding tight coupling.
+PARSE_STATS: dict[str, int] = {
+    'malformed_json': 0,      # json.loads() raised — the line was not valid JSON
+    'read_errors': 0,         # OSError reading the file
+    'process_errors': 0,      # a parseable record blew up inside process_record
+    'skipped_no_sid': 0,      # record had no sessionId — cannot place
+}
+
+
+def reset_parse_stats() -> None:
+    for k in PARSE_STATS:
+        PARSE_STATS[k] = 0
+
 # ─── Pricing ──────────────────────────────────────────────────────────────────
 
 MODEL_PRICING: dict[str, dict[str, float]] = {
@@ -79,13 +93,19 @@ MICRO = 1_000_000  # 1 USD = 1M micro-dollars
 
 
 def calculate_cost_micro(usage: dict, model: str) -> int:
-    """Return cost in micro-dollars (integer). 1 USD = 1,000,000."""
+    """Return cost in micro-dollars (integer). 1 USD = 1,000,000.
+
+    Defensive against malformed usage dicts — any non-int field counts as 0.
+    """
     p = get_pricing(model)
+    def _i(k):
+        v = usage.get(k, 0)
+        return v if isinstance(v, (int, float)) else 0
     usd = (
-        usage.get('input_tokens', 0) * p['input']
-        + usage.get('output_tokens', 0) * p['output']
-        + usage.get('cache_creation_input_tokens', 0) * p['cache_creation']
-        + usage.get('cache_read_input_tokens', 0) * p['cache_read']
+        _i('input_tokens') * p['input']
+        + _i('output_tokens') * p['output']
+        + _i('cache_creation_input_tokens') * p['cache_creation']
+        + _i('cache_read_input_tokens') * p['cache_read']
     )
     return round(usd * MICRO)
 
@@ -231,6 +251,11 @@ def get_agent_meta(file_path: str) -> tuple[str, str]:
 # ─── JSONL reader ─────────────────────────────────────────────────────────────
 
 def parse_jsonl_file(file_path: str, start_line: int = 0) -> Generator[dict, None, None]:
+    """Yield records from a JSONL file, skipping (and counting) malformed lines.
+
+    A single broken line must never abort ingestion of the rest of the file.
+    PARSE_STATS tracks the running malformed/read counts for observability.
+    """
     try:
         with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
             for i, line in enumerate(f):
@@ -241,11 +266,20 @@ def parse_jsonl_file(file_path: str, start_line: int = 0) -> Generator[dict, Non
                     continue
                 try:
                     record = json.loads(line)
-                    record['_line_number'] = i
-                    yield record
                 except json.JSONDecodeError as e:
+                    PARSE_STATS['malformed_json'] += 1
                     logger.info("Skipping malformed JSON at %s:%d — %s", file_path, i, e)
+                    continue
+                if not isinstance(record, dict):
+                    # A JSONL line must be an object. Arrays/strings/numbers
+                    # are nonsensical here; skip and count.
+                    PARSE_STATS['malformed_json'] += 1
+                    logger.info("Skipping non-object JSONL at %s:%d", file_path, i)
+                    continue
+                record['_line_number'] = i
+                yield record
     except OSError as e:
+        PARSE_STATS['read_errors'] += 1
         logger.error("Error reading %s: %s", file_path, e)
 
 
@@ -262,12 +296,28 @@ def effective_session_id(record_session_id: str, file_path: str) -> str:
 
 
 def process_record(record: dict, file_path: str, db: sqlite3.Connection) -> Optional[dict]:
-    """Insert/update DB rows for one JSONL record.  No commit — caller does that."""
+    """Insert/update DB rows for one JSONL record.  No commit — caller does that.
+
+    All exceptions inside a record are contained: a single malformed record
+    must not abort processing of the rest of the file. sqlite3.Error is
+    re-raised because that indicates corruption that needs the outer
+    transaction to roll back.
+    """
+    if not isinstance(record, dict):
+        PARSE_STATS['process_errors'] += 1
+        return None
     rtype = record.get('type')
-    if rtype == 'assistant':
-        return _process_assistant(record, file_path, db)
-    if rtype == 'user':
-        return _process_user(record, file_path, db)
+    try:
+        if rtype == 'assistant':
+            return _process_assistant(record, file_path, db)
+        if rtype == 'user':
+            return _process_user(record, file_path, db)
+    except sqlite3.Error:
+        raise  # let the outer write_db() rollback
+    except Exception as e:
+        PARSE_STATS['process_errors'] += 1
+        logger.warning("Skipping record at %s (uuid=%s): %s",
+                       file_path, record.get('uuid', '?'), e)
     return None
 
 
@@ -330,12 +380,23 @@ def _ensure_session(sid: str, file_path: str, record: dict, db: sqlite3.Connecti
 def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection) -> Optional[dict]:
     raw_sid = record.get('sessionId', '')
     if not raw_sid:
+        PARSE_STATS['skipped_no_sid'] += 1
         return None
     sid = effective_session_id(raw_sid, file_path)
 
-    msg = record.get('message', {})
-    usage = msg.get('usage', {})
-    model = msg.get('model', '')
+    msg_raw = record.get('message')
+    if msg_raw is not None and not isinstance(msg_raw, dict):
+        # Malformed: ``message`` should always be an object on assistant
+        # records. Skip entirely instead of silently creating a zero-cost row.
+        PARSE_STATS['process_errors'] += 1
+        return None
+    msg = msg_raw or {}
+    usage = msg.get('usage') or {}
+    if not isinstance(usage, dict):
+        usage = {}
+    model = msg.get('model') or ''
+    if not isinstance(model, str):
+        model = ''
     stop_reason = msg.get('stop_reason') or ''
 
     input_tok    = usage.get('input_tokens', 0)
@@ -425,12 +486,16 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection) -> 
 def _process_user(record: dict, file_path: str, db: sqlite3.Connection) -> Optional[dict]:
     raw_sid = record.get('sessionId', '')
     if not raw_sid:
+        PARSE_STATS['skipped_no_sid'] += 1
         return None
     sid = effective_session_id(raw_sid, file_path)
 
     _ensure_session(sid, file_path, record, db)
 
-    raw = record.get('message', {}).get('content', '')
+    msg = record.get('message') or {}
+    if not isinstance(msg, dict):
+        msg = {}
+    raw = msg.get('content', '')
     if isinstance(raw, list):
         content_str = _safe_json_content(raw)
         preview = extract_content_text(raw)

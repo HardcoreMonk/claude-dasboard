@@ -1,0 +1,19 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+exclude = [".venv", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]
+ignore = [
+    "E501",  # line too long — SQL/log strings are allowed to run long
+    "E741",  # ambiguous variable name (e.g. `l` for loop var)
+    "B008",  # function call in argument default (FastAPI Query() etc.)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["E402"]  # test fixtures may import after setup
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
