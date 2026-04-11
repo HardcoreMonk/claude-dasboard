@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v37.css">
+<link rel="stylesheet" href="/static/app.v38.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -110,134 +110,9 @@ tailwind.config = {
 <main class="pt-20 pb-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
 <!-- ─── OVERVIEW ─── -->
+<!-- 개요는 TOP 10 프로젝트 전용. 비용/예산/예측 위젯은 비용(cost) 뷰로 이동. -->
 <section class="view" id="view-overview">
-<!-- 2-column layout: 좌측 수직 스택 (Hero 3 + chips + weekly) | 우측 TOP 10.
-     작은 화면(lg 미만)에서는 좌우 컬럼이 위아래로 스택되어 풀 폭으로 쌓임. -->
-<div class="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-3 anim-in">
-
-  <!-- 좌측 컬럼: Hero 수직 스택 + chips + weekly -->
-  <div class="space-y-3 order-2 lg:order-1">
-    <!-- Hero — 오늘 비용 · 일일 예산 · 월말 예측 (수직 스택).
-         이전엔 sm:grid-cols-3 로 가로 3분할이었지만 사용자 요구("수직 재배열")
-         에 맞춰 모든 hero 카드도 세로 stack 으로. -->
-    <div class="grid grid-cols-1 gap-3">
-      <!-- Hero 1: 오늘 비용 -->
-      <div onclick="drillToSessionsToday()" title="오늘 세션 보기"
-           class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
-        <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
-          <div class="flex items-center justify-between">
-            <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">오늘 비용</span>
-            <iconify-icon icon="solar:arrow-right-linear" width="13" class="text-white/20"></iconify-icon>
-          </div>
-          <div class="text-2xl font-extrabold tracking-tight text-white/95 mt-2 tabular-nums skeleton" id="pdDayCost">—</div>
-          <div class="text-[10px] text-white/35 mt-1 skeleton truncate" id="pdDayDetail">—</div>
-          <div class="text-[10px] font-semibold mt-1" id="pdDayDelta"></div>
-        </div>
-      </div>
-      <!-- Hero 2: 일일 예산 -->
-      <div onclick="openPlanSettings()" title="예산 설정"
-           class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
-        <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
-          <div class="flex items-center justify-between">
-            <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">일일 예산</span>
-            <iconify-icon icon="solar:settings-linear" width="13" class="text-white/20"></iconify-icon>
-          </div>
-          <div class="text-2xl font-extrabold tracking-tight mt-2 tabular-nums skeleton" id="planDailyPct" style="color:#34d399">—</div>
-          <div class="plan-bar-track mt-2"><div class="plan-bar-fill" id="planDailyBar" style="width:0;background:#34d399"></div></div>
-          <div class="flex items-center justify-between mt-2 text-[10px]">
-            <span class="text-white/40"><span class="text-white/65 font-semibold skeleton" id="planDailyUsed">—</span></span>
-            <span class="text-white/35">남은 <span class="text-white/60 font-semibold skeleton" id="planDailyRemain">—</span></span>
-          </div>
-        </div>
-      </div>
-      <!-- Hero 3: 월말 예측 -->
-      <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel" title="API 사용량 기반 추정치 — Claude Pro/Max 같은 정액 플랜은 실제 청구액과 다릅니다">
-        <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
-          <div class="flex items-center justify-between">
-            <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">월말 예측</span>
-            <span class="text-[9px] text-amber-300/45 px-1.5 py-0.5 rounded-full bg-amber-500/[0.08] border border-amber-500/15" title="Anthropic API 과금 기준. 정액 플랜(Pro/Max)은 실제 $0 ~ $월구독료">API 기준</span>
-          </div>
-          <div class="text-2xl font-extrabold tracking-tight text-amber-400/90 mt-2 tabular-nums skeleton" id="forecastEOM">—</div>
-          <div class="text-[10px] text-white/35 mt-1 skeleton truncate" id="forecastEOMDetail">—</div>
-          <div class="text-[10px] text-white/40 mt-1">14일 평균 <span class="text-white/65 font-semibold tabular-nums skeleton" id="forecastAvg">—</span></div>
-          <div class="text-[9px] text-white/25 mt-1.5 leading-tight">※ 정액 플랜(Pro/Max)은 실제 요금과 무관</div>
-        </div>
-      </div>
-    </div>
-    <!-- Secondary stats chips — 주/월/전체/캐시 효율/burn-out -->
-    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mb-3">
-      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
-        <div class="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-2">요약</div>
-        <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
-          <div onclick="drillToSessionsWeek()" class="cursor-pointer hover:text-white/95 spring flex items-baseline gap-1.5" title="이번 주 세션 보기">
-            <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">주</span>
-            <span class="text-white/80 font-bold tabular-nums skeleton" id="pdWeekCost">—</span>
-            <span class="text-[9px] font-semibold" id="pdWeekDelta"></span>
-          </div>
-          <div class="h-3 w-px bg-white/10"></div>
-          <div class="flex items-baseline gap-1.5">
-            <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">월</span>
-            <span class="text-white/80 font-bold tabular-nums skeleton" id="pdMonthCost">—</span>
-            <span class="text-[9px] font-semibold" id="pdMonthDelta"></span>
-          </div>
-          <div class="h-3 w-px bg-white/10"></div>
-          <div class="flex items-baseline gap-1.5">
-            <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">전체</span>
-            <span class="text-white/80 font-bold tabular-nums skeleton" id="statAllCost">—</span>
-            <span class="text-white/30 text-[9px] skeleton" id="statAllSessions">—</span>
-          </div>
-          <div class="h-3 w-px bg-white/10"></div>
-          <div class="flex items-baseline gap-1.5" title="전체 캐시 읽기 / (입력 + 캐시 읽기)">
-            <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">캐시</span>
-            <span class="text-cyan-400/85 font-bold tabular-nums skeleton" id="statCacheEff">—</span>
-            <span class="text-white/30 text-[9px] skeleton" id="statCacheSaved">—</span>
-          </div>
-          <div class="h-3 w-px bg-white/10"></div>
-          <div class="flex items-baseline gap-1.5">
-            <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">burn-out</span>
-            <span class="text-[10px] skeleton" id="forecastBurnoutDaily">일간 —</span>
-            <span class="text-white/20">·</span>
-            <span class="text-[10px] skeleton" id="forecastBurnoutWeekly">주간 —</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 주간 예산 bar (간소화) -->
-    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
-      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
-        <div class="flex justify-between items-baseline mb-2">
-          <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">주간 예산</span>
-          <span class="text-base font-extrabold tracking-tight tabular-nums skeleton" id="planWeeklyPct" style="color:#34d399">—</span>
-        </div>
-        <div class="plan-bar-track"><div class="plan-bar-fill" id="planWeeklyBar" style="width:0;background:#34d399"></div></div>
-        <div class="flex items-center justify-between mt-2 text-[10px]">
-          <span class="text-white/40"><span class="text-white/65 font-semibold skeleton" id="planWeeklyUsed">—</span></span>
-          <span class="text-white/35">남은 <span class="text-white/60 font-semibold skeleton" id="planWeeklyRemain">—</span> · 재설정 <span class="text-white/50 skeleton" id="planWeeklyReset">—</span></span>
-        </div>
-        <!-- Hidden-but-kept nodes so existing loaders still find their targets -->
-        <span class="hidden" id="planDailyTokens"></span>
-        <span class="hidden" id="planDailyMsgs"></span>
-        <span class="hidden" id="planDailyReset"></span>
-        <span class="hidden" id="planWeeklyTokens"></span>
-        <span class="hidden" id="planWeeklyMsgs"></span>
-        <span class="hidden" id="statTodayCost"></span>
-        <span class="hidden" id="statTodayMsg"></span>
-        <span class="hidden" id="statTodayTokens"></span>
-        <span class="hidden" id="statTodaySessions"></span>
-        <span class="hidden" id="statAllTokens"></span>
-        <span class="hidden" id="statAllMessages"></span>
-        <span class="hidden" id="pdDayDetail2"></span>
-        <span class="hidden" id="pdWeekDetail"></span>
-        <span class="hidden" id="pdMonthDetail"></span>
-        <span class="hidden" id="forecastAvgDetail"></span>
-      </div>
-    </div>
-  </div>
-  <!-- /좌측 컬럼 -->
-
-  <!-- 우측 컬럼: TOP 10 프로젝트 (전체 높이, 각 행에 최근 대화 미리보기) -->
-  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel order-1 lg:order-2 h-fit">
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
       <span class="text-xs font-bold text-white/40">TOP 10 프로젝트 <span class="text-white/20 font-normal text-[10px]">클릭하여 상세 보기</span></span>
       <div id="topProjectsList" class="mt-3 space-y-1">
@@ -245,13 +120,127 @@ tailwind.config = {
       </div>
     </div>
   </div>
-  <!-- /우측 컬럼 -->
-
-</div>
 </section>
 
-<!-- ─── COST / CHARTS ─── -->
+<!-- ─── COST ─── -->
 <section class="view hidden" id="view-cost">
+
+  <!-- Hero 3카드: 오늘 비용 · 일일 예산 · 월말 예측 -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 anim-in">
+    <!-- Hero 1: 오늘 비용 -->
+    <div onclick="drillToSessionsToday()" title="오늘 세션 보기"
+         class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">오늘 비용</span>
+          <iconify-icon icon="solar:arrow-right-linear" width="13" class="text-white/20"></iconify-icon>
+        </div>
+        <div class="text-2xl font-extrabold tracking-tight text-white/95 mt-2 tabular-nums skeleton" id="pdDayCost">—</div>
+        <div class="text-[10px] text-white/35 mt-1 skeleton truncate" id="pdDayDetail">—</div>
+        <div class="text-[10px] font-semibold mt-1" id="pdDayDelta"></div>
+      </div>
+    </div>
+    <!-- Hero 2: 일일 예산 -->
+    <div onclick="openPlanSettings()" title="예산 설정"
+         class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">일일 예산</span>
+          <iconify-icon icon="solar:settings-linear" width="13" class="text-white/20"></iconify-icon>
+        </div>
+        <div class="text-2xl font-extrabold tracking-tight mt-2 tabular-nums skeleton" id="planDailyPct" style="color:#34d399">—</div>
+        <div class="plan-bar-track mt-2"><div class="plan-bar-fill" id="planDailyBar" style="width:0;background:#34d399"></div></div>
+        <div class="flex items-center justify-between mt-2 text-[10px]">
+          <span class="text-white/40"><span class="text-white/65 font-semibold skeleton" id="planDailyUsed">—</span></span>
+          <span class="text-white/35">남은 <span class="text-white/60 font-semibold skeleton" id="planDailyRemain">—</span></span>
+        </div>
+      </div>
+    </div>
+    <!-- Hero 3: 월말 예측 -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel" title="API 사용량 기반 추정치 — Claude Pro/Max 같은 정액 플랜은 실제 청구액과 다릅니다">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">월말 예측</span>
+          <span class="text-[9px] text-amber-300/45 px-1.5 py-0.5 rounded-full bg-amber-500/[0.08] border border-amber-500/15" title="Anthropic API 과금 기준. 정액 플랜(Pro/Max)은 실제 $0 ~ $월구독료">API 기준</span>
+        </div>
+        <div class="text-2xl font-extrabold tracking-tight text-amber-400/90 mt-2 tabular-nums skeleton" id="forecastEOM">—</div>
+        <div class="text-[10px] text-white/35 mt-1 skeleton truncate" id="forecastEOMDetail">—</div>
+        <div class="text-[10px] text-white/40 mt-1">14일 평균 <span class="text-white/65 font-semibold tabular-nums skeleton" id="forecastAvg">—</span></div>
+        <div class="text-[9px] text-white/25 mt-1.5 leading-tight">※ 정액 플랜(Pro/Max)은 실제 요금과 무관</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 요약 chips -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mb-4 anim-in anim-d1">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
+      <div class="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-2">요약</div>
+      <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
+        <div onclick="drillToSessionsWeek()" class="cursor-pointer hover:text-white/95 spring flex items-baseline gap-1.5" title="이번 주 세션 보기">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">주</span>
+          <span class="text-white/80 font-bold tabular-nums skeleton" id="pdWeekCost">—</span>
+          <span class="text-[9px] font-semibold" id="pdWeekDelta"></span>
+        </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">월</span>
+          <span class="text-white/80 font-bold tabular-nums skeleton" id="pdMonthCost">—</span>
+          <span class="text-[9px] font-semibold" id="pdMonthDelta"></span>
+        </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">전체</span>
+          <span class="text-white/80 font-bold tabular-nums skeleton" id="statAllCost">—</span>
+          <span class="text-white/30 text-[9px] skeleton" id="statAllSessions">—</span>
+        </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5" title="전체 캐시 읽기 / (입력 + 캐시 읽기)">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">캐시</span>
+          <span class="text-cyan-400/85 font-bold tabular-nums skeleton" id="statCacheEff">—</span>
+          <span class="text-white/30 text-[9px] skeleton" id="statCacheSaved">—</span>
+        </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">burn-out</span>
+          <span class="text-[10px] skeleton" id="forecastBurnoutDaily">일간 —</span>
+          <span class="text-white/20">·</span>
+          <span class="text-[10px] skeleton" id="forecastBurnoutWeekly">주간 —</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 주간 예산 bar -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mb-4 anim-in anim-d2">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
+      <div class="flex justify-between items-baseline mb-2">
+        <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">주간 예산</span>
+        <span class="text-base font-extrabold tracking-tight tabular-nums skeleton" id="planWeeklyPct" style="color:#34d399">—</span>
+      </div>
+      <div class="plan-bar-track"><div class="plan-bar-fill" id="planWeeklyBar" style="width:0;background:#34d399"></div></div>
+      <div class="flex items-center justify-between mt-2 text-[10px]">
+        <span class="text-white/40"><span class="text-white/65 font-semibold skeleton" id="planWeeklyUsed">—</span></span>
+        <span class="text-white/35">남은 <span class="text-white/60 font-semibold skeleton" id="planWeeklyRemain">—</span> · 재설정 <span class="text-white/50 skeleton" id="planWeeklyReset">—</span></span>
+      </div>
+      <!-- Hidden-but-kept nodes so existing loaders still find their targets -->
+      <span class="hidden" id="planDailyTokens"></span>
+      <span class="hidden" id="planDailyMsgs"></span>
+      <span class="hidden" id="planDailyReset"></span>
+      <span class="hidden" id="planWeeklyTokens"></span>
+      <span class="hidden" id="planWeeklyMsgs"></span>
+      <span class="hidden" id="statTodayCost"></span>
+      <span class="hidden" id="statTodayMsg"></span>
+      <span class="hidden" id="statTodayTokens"></span>
+      <span class="hidden" id="statTodaySessions"></span>
+      <span class="hidden" id="statAllTokens"></span>
+      <span class="hidden" id="statAllMessages"></span>
+      <span class="hidden" id="pdDayDetail2"></span>
+      <span class="hidden" id="pdWeekDetail"></span>
+      <span class="hidden" id="pdMonthDetail"></span>
+      <span class="hidden" id="forecastAvgDetail"></span>
+    </div>
+  </div>
+
   <!-- Charts Row 1 -->
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4 anim-in">
     <div class="lg:col-span-2 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
@@ -754,11 +743,11 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v37.js" defer></script>
-<script src="/static/sessions.v37.js" defer></script>
-<script src="/static/plan.v37.js" defer></script>
-<script src="/static/overview.v37.js" defer></script>
-<script src="/static/subagents.v37.js" defer></script>
-<script src="/static/charts.v37.js" defer></script>
+<script src="/static/app.v38.js" defer></script>
+<script src="/static/sessions.v38.js" defer></script>
+<script src="/static/plan.v38.js" defer></script>
+<script src="/static/overview.v38.js" defer></script>
+<script src="/static/subagents.v38.js" defer></script>
+<script src="/static/charts.v38.js" defer></script>
 </body>
 </html>
