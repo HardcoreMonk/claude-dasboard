@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v33.css">
+<link rel="stylesheet" href="/static/app.v34.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -92,7 +92,7 @@ tailwind.config = {
   <span id="hdrToday"></span>
   <span id="hdrTotal"></span>
   <!-- Build marker — version 진단 용. 캐시 리프레시가 걱정될 때 이걸 보고 확인. -->
-  <span id="hdrBuild" class="px-2 py-0.5 rounded-full bg-accent/15 text-accent ring-1 ring-accent/40 font-mono font-bold tracking-wide">build v33</span>
+  <span id="hdrBuild" class="px-2 py-0.5 rounded-full bg-accent/15 text-accent ring-1 ring-accent/40 font-mono font-bold tracking-wide">build v34</span>
 </div>
 
 <!-- Persistent connection-error banner (WS down > 15s) -->
@@ -747,15 +747,15 @@ tailwind.config = {
 <!-- ═══════════════════════════════════════════════════════════════════════
      JAVASCRIPT
      ═══════════════════════════════════════════════════════════════════════ -->
-<!-- Filename-based cache busting: /static/app.v33.js, not ?v=30.
+<!-- Filename-based cache busting: /static/app.v34.js, not ?v=30.
      The server strips the .vNNN. segment before filesystem lookup. This is
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v33.js" defer></script>
-<script src="/static/plan.v33.js" defer></script>
-<script src="/static/overview.v33.js" defer></script>
-<script src="/static/subagents.v33.js" defer></script>
-<script src="/static/charts.v33.js" defer></script>
+<script src="/static/app.v34.js" defer></script>
+<script src="/static/plan.v34.js" defer></script>
+<script src="/static/overview.v34.js" defer></script>
+<script src="/static/subagents.v34.js" defer></script>
+<script src="/static/charts.v34.js" defer></script>
 </body>
 </html>

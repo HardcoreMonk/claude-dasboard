@@ -157,14 +157,25 @@ function drillToSessionsWeek() {
 }
 
 // ─── TOP 10 projects ──────────────────────────────────────────────────
-// Collapse markdown/table/code-fence noise so the one-line preview shows
-// the first meaningful sentence instead of a ``` or `| col |` fragment.
+// Normalise a one-line preview from a markdown-heavy assistant reply. The
+// goal is to PRESERVE CONTENT (cell text, heading text) while stripping only
+// structural/visual decoration. A previous version dropped entire table
+// rows, which silently erased most of the preview for table-heavy projects.
 function _cleanTopPreview(txt) {
   if (!txt) return '';
   let s = String(txt);
-  s = s.replace(/```[\s\S]*?```/g, ' ');    // strip code blocks
-  s = s.replace(/^\s*\|.*$/gm, ' ');         // strip markdown table rows
-  s = s.replace(/^[#>\-*\s]+/, '');          // leading markers
+  // 1. Strip fenced code blocks entirely (usually noise for a 1-line summary)
+  s = s.replace(/```[\s\S]*?```/g, ' ');
+  // 2. Remove markdown table separator rows ("|---|---|") — they have no content
+  s = s.replace(/^\s*\|?[\s:|-]+\|?\s*$/gm, ' ');
+  // 3. Collapse remaining pipe-separated cells into "· "-joined text
+  //    so "| a | b | c |" becomes "a · b · c" instead of being deleted
+  s = s.replace(/^\s*\|\s*/gm, '');
+  s = s.replace(/\s*\|\s*$/gm, '');
+  s = s.replace(/\s*\|\s*/g, ' · ');
+  // 4. Strip leading markdown markers (# > - *) only from the first sentence
+  s = s.replace(/^[#>\-*\s]+/, '');
+  // 5. Collapse all whitespace (incl. newlines) to a single space
   s = s.replace(/\s+/g, ' ').trim();
   return s;
 }
