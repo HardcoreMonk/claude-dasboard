@@ -113,21 +113,12 @@ tailwind.config = {
 
 <!-- ─── OVERVIEW ─── -->
 <section class="view" id="view-overview">
+<!-- 2-column layout: 좌측 수직 스택 (Hero 3 + chips + weekly) | 우측 TOP 10.
+     작은 화면(lg 미만)에서는 좌우 컬럼이 위아래로 스택되어 풀 폭으로 쌓임. -->
+<div class="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-3 anim-in">
 
-  <!-- TOP 10 프로젝트 (최상단, 전체 폭, 각 행에 최근 대화 미리보기 포함) -->
-  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mb-4 anim-in">
-    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-      <span class="text-xs font-bold text-white/40">TOP 10 프로젝트 <span class="text-white/20 font-normal text-[10px]">클릭하여 상세 보기</span></span>
-      <div id="topProjectsList" class="mt-3 space-y-1">
-        <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 나머지 패널 — 왼쪽 수직 스택.
-       TOP 10 아래에 max-w-3xl 로 좌측 고정, 우측 공간 확보.
-       Hero 3카드 / 요약 chips / 주간 예산 bar 를 차례로 세로 배치. -->
-  <div class="max-w-3xl space-y-3 anim-in anim-d1">
+  <!-- 좌측 컬럼: Hero 수직 스택 + chips + weekly -->
+  <div class="space-y-3 order-2 lg:order-1">
     <!-- Hero — 오늘 비용 · 일일 예산 · 월말 예측 (수직 스택).
          이전엔 sm:grid-cols-3 로 가로 3분할이었지만 사용자 요구("수직 재배열")
          에 맞춰 모든 hero 카드도 세로 stack 으로. -->
@@ -241,6 +232,20 @@ tailwind.config = {
       </div>
     </div>
   </div>
+  <!-- /좌측 컬럼 -->
+
+  <!-- 우측 컬럼: TOP 10 프로젝트 (전체 높이, 각 행에 최근 대화 미리보기) -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel order-1 lg:order-2 h-fit">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <span class="text-xs font-bold text-white/40">TOP 10 프로젝트 <span class="text-white/20 font-normal text-[10px]">클릭하여 상세 보기</span></span>
+      <div id="topProjectsList" class="mt-3 space-y-1">
+        <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+      </div>
+    </div>
+  </div>
+  <!-- /우측 컬럼 -->
+
+</div>
 </section>
 
 <!-- ─── COST / CHARTS ─── -->
