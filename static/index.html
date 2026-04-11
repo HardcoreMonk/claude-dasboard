@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v40.css">
+<link rel="stylesheet" href="/static/app.v42.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -110,67 +110,65 @@ tailwind.config = {
 <main class="pt-20 pb-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
 <!-- ─── OVERVIEW ─── -->
-<!-- 좌측: TOP 10 프로젝트 리스트 (560px 고정). 우측: 선택한 프로젝트의
-     마지막 대화 내용을 슬라이드 in 형태로 표시. 작은 화면에서는 세로 스택. -->
+<!-- 기본 레이아웃: TOP 10 프로젝트 전체 폭. 각 행 오른쪽에 눈 아이콘 버튼이
+     있고, 해당 버튼 클릭 시에만 우측에서 drawer 형태의 preview 패널이
+     fixed 위치로 슬라이드 in. 행 본체 클릭은 기존 프로젝트 모달로 드릴. -->
 <section class="view" id="view-overview">
-<div class="grid grid-cols-1 md:grid-cols-[560px_1fr] gap-3 anim-in items-start">
-
-  <!-- 좌측: TOP 10 -->
-  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-      <span class="text-xs font-bold text-white/40">TOP 10 프로젝트 <span class="text-white/20 font-normal text-[10px]">클릭하여 내용 미리보기</span></span>
+      <span class="text-xs font-bold text-white/40">TOP 10 프로젝트 <span class="text-white/20 font-normal text-[10px]">행 클릭 → 프로젝트 상세, 👁 버튼 → 마지막 대화 미리보기</span></span>
       <div id="topProjectsList" class="mt-3 space-y-1">
         <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
       </div>
     </div>
   </div>
+</section>
 
-  <!-- 우측: 슬라이드 preview 패널 -->
-  <div id="topPreviewPanel"
-       class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel overflow-hidden
-              transition-all duration-500 ease-[cubic-bezier(.16,1,.3,1)]
-              opacity-0 -translate-x-4 md:h-[calc(100vh-140px)] md:sticky md:top-24"
-       style="pointer-events:none">
-    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5 h-full flex flex-col">
-      <!-- Header -->
-      <div class="flex items-start justify-between gap-3 border-b border-white/[0.05] pb-3">
-        <div class="min-w-0 flex-1">
-          <div id="topPreviewProject" class="text-sm font-bold text-white/90 truncate">프로젝트를 선택하세요</div>
-          <div id="topPreviewMeta" class="text-[10px] text-white/40 mt-1 truncate">좌측 TOP 10 에서 행 클릭</div>
-        </div>
-        <div class="flex items-center gap-1 flex-shrink-0">
-          <button id="topPreviewOpenModal" onclick="topPreviewOpenProjectModal()"
-                  class="hidden text-[10px] px-2.5 py-1 rounded-full border border-accent/40 text-accent bg-accent/10 hover:bg-accent/20 font-bold spring">
-            프로젝트 상세 →
-          </button>
-          <button id="topPreviewClose" onclick="topPreviewClose()"
-                  class="hidden text-white/40 hover:text-white/80 spring text-lg leading-none w-6 h-6 flex items-center justify-center"
-                  aria-label="닫기">&times;</button>
-        </div>
+<!-- Preview drawer — fixed 위치, overview 레이아웃과 분리.
+     미리보기 버튼 클릭 시에만 translate-x-full → 0 으로 슬라이드 in -->
+<aside id="topPreviewPanel"
+       class="fixed top-20 right-0 z-40 w-full sm:w-[480px] h-[calc(100vh-96px)]
+              bg-[#0a0a0a]/95 backdrop-blur-xl ring-1 ring-white/[0.08]
+              shadow-[-12px_0_40px_rgba(0,0,0,0.5)] rounded-l-bezel
+              transition-all duration-500 ease-[cubic-bezier(.16,1,.3,1)]"
+       style="transform:translateX(100%);opacity:0;pointer-events:none"
+       role="dialog" aria-labelledby="topPreviewProject" aria-hidden="true">
+  <div class="p-5 h-full flex flex-col">
+    <!-- Header -->
+    <div class="flex items-start justify-between gap-3 border-b border-white/[0.05] pb-3">
+      <div class="min-w-0 flex-1">
+        <div id="topPreviewProject" class="text-sm font-bold text-white/90 truncate">—</div>
+        <div id="topPreviewMeta" class="text-[10px] text-white/40 mt-1 truncate">—</div>
       </div>
-      <!-- Body (scrollable) -->
-      <div id="topPreviewBody" class="flex-1 overflow-y-auto mt-3 text-[12px] text-white/75 whitespace-pre-wrap leading-relaxed">
-        <div class="flex items-center justify-center h-full text-center text-white/15">
-          <div>
-            <iconify-icon icon="solar:chat-round-dots-linear" width="48" class="text-white/10 block mx-auto mb-3"></iconify-icon>
-            <div class="text-xs">TOP 10 행을 클릭하면</div>
-            <div class="text-xs">마지막 대화가 여기에 표시됩니다</div>
-          </div>
-        </div>
-      </div>
-      <!-- Footer: realtime refresh indicator -->
-      <div id="topPreviewFooter" class="hidden mt-3 pt-3 border-t border-white/[0.05] flex items-center justify-between text-[9px] text-white/35">
-        <span class="flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>실시간 갱신 중</span>
-        </span>
-        <span id="topPreviewUpdatedAt">—</span>
+      <div class="flex items-center gap-1 flex-shrink-0">
+        <button id="topPreviewOpenModal" onclick="topPreviewOpenProjectModal()"
+                class="text-[10px] px-2.5 py-1 rounded-full border border-accent/40 text-accent bg-accent/10 hover:bg-accent/20 font-bold spring">
+          프로젝트 상세 →
+        </button>
+        <button onclick="topPreviewClose()"
+                class="text-white/40 hover:text-white/80 spring text-xl leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/5"
+                aria-label="닫기">&times;</button>
       </div>
     </div>
+    <!-- Body -->
+    <div id="topPreviewBody"
+         class="flex-1 overflow-y-auto mt-3 text-[12px] text-white/75 whitespace-pre-wrap leading-relaxed">
+    </div>
+    <!-- Footer -->
+    <div id="topPreviewFooter" class="mt-3 pt-3 border-t border-white/[0.05] flex items-center justify-between text-[9px] text-white/35">
+      <span class="flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>실시간 갱신 중</span>
+      </span>
+      <span id="topPreviewUpdatedAt">—</span>
+    </div>
   </div>
-
-</div>
-</section>
+</aside>
+<!-- Drawer backdrop (click outside = close) -->
+<div id="topPreviewBackdrop"
+     class="fixed inset-0 z-30 bg-black/30 transition-opacity duration-300"
+     style="opacity:0;pointer-events:none"
+     onclick="topPreviewClose()"></div>
 
 <!-- ─── COST ─── -->
 <section class="view hidden" id="view-cost">
@@ -793,11 +791,11 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v40.js" defer></script>
-<script src="/static/sessions.v40.js" defer></script>
-<script src="/static/plan.v40.js" defer></script>
-<script src="/static/overview.v40.js" defer></script>
-<script src="/static/subagents.v40.js" defer></script>
-<script src="/static/charts.v40.js" defer></script>
+<script src="/static/app.v42.js" defer></script>
+<script src="/static/sessions.v42.js" defer></script>
+<script src="/static/plan.v42.js" defer></script>
+<script src="/static/overview.v42.js" defer></script>
+<script src="/static/subagents.v42.js" defer></script>
+<script src="/static/charts.v42.js" defer></script>
 </body>
 </html>
