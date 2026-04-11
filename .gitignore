@@ -28,3 +28,11 @@ env/
 # OS junk
 Thumbs.db
 ehthumbs.db
+
+# Playwright MCP diagnostic artifacts (screenshots / console dumps / DOM yml)
+.playwright-mcp/
+layout-check.png
+layout-vertical.png
+overview-current-state.png
+overview-viewport.png
+overview-lower.png
