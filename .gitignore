@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+
+# Virtual env (created by start.sh)
+.venv/
+venv/
+env/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local Claude Code project state
+.claude/
+
+# Environment / secrets
+.env
+*.local
+
+# OS junk
+Thumbs.db
+ehthumbs.db
