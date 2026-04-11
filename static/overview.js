@@ -182,10 +182,18 @@ async function loadTopProjects() {
       const liveBadge = p.is_active
         ? `<span class="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300/90 ring-1 ring-emerald-500/40 text-[9px] font-bold uppercase tracking-wider align-middle" title="최근 30분 이내 활동"><span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>LIVE</span>`
         : '';
+      // Idle badge — shown to the LEFT of the project name when Claude has
+      // just finished an assistant turn (stop_reason === end_turn) and is
+      // waiting for user input. Cleared when the next activity arrives.
+      const idleKey = (p.project_name || '') + '|' + (p.project_path || '');
+      const idleEntry = (state.idleProjects && state.idleProjects[idleKey]) || null;
+      const idleBadge = idleEntry
+        ? `<span class="mr-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300/95 ring-1 ring-amber-500/40 text-[9px] font-bold uppercase tracking-wider align-middle animate-pulse" title="${esc(idleEntry.preview || '응답 완료 — 입력 대기 중')}"><iconify-icon icon="solar:hourglass-line-linear" width="10" class="inline"></iconify-icon>입력 대기</span>`
+        : '';
       const row = document.createElement('div');
       row.className = 'grid grid-cols-[28px_1fr_auto_auto_auto] items-start gap-2 py-2 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-1 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
       row.title = '클릭하여 프로젝트 상세 보기';
-      row.innerHTML = `<span class="text-xs font-extrabold text-center pt-0.5 ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-xs font-semibold text-white/60 truncate">${esc(p.project_name||'—')}${liveBadge}</div><div class="h-1 bg-white/5 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div>${previewLine}</div><button data-peek-btn type="button" title="마지막 대화 미리보기" aria-label="마지막 대화 미리보기" class="flex items-center gap-1 self-start mt-0.5 px-2 py-1 rounded-full bg-accent/10 hover:bg-accent/25 text-accent/80 hover:text-accent ring-1 ring-accent/30 hover:ring-accent/60 text-[10px] font-bold spring"><iconify-icon icon="solar:eye-linear" width="13" style="pointer-events:none"></iconify-icon><span style="pointer-events:none">미리보기</span></button><span class="text-xs font-bold text-amber-400/70 whitespace-nowrap pt-0.5">${fmt$(p.total_cost)}</span><span class="text-[10px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5">${fmtTok(p.total_tokens||0)}</span>`;
+      row.innerHTML = `<span class="text-xs font-extrabold text-center pt-0.5 ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-xs font-semibold text-white/60 truncate">${idleBadge}${esc(p.project_name||'—')}${liveBadge}</div><div class="h-1 bg-white/5 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div>${previewLine}</div><button data-peek-btn type="button" title="마지막 대화 미리보기" aria-label="마지막 대화 미리보기" class="flex items-center gap-1 self-start mt-0.5 px-2 py-1 rounded-full bg-accent/10 hover:bg-accent/25 text-accent/80 hover:text-accent ring-1 ring-accent/30 hover:ring-accent/60 text-[10px] font-bold spring"><iconify-icon icon="solar:eye-linear" width="13" style="pointer-events:none"></iconify-icon><span style="pointer-events:none">미리보기</span></button><span class="text-xs font-bold text-amber-400/70 whitespace-nowrap pt-0.5">${fmt$(p.total_cost)}</span><span class="text-[10px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5">${fmtTok(p.total_tokens||0)}</span>`;
       row.dataset.projectName = p.project_name || '';
       row.dataset.projectPath = p.project_path || '';
       // 행 본체: 기존 프로젝트 상세 모달로 드릴

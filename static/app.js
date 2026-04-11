@@ -616,77 +616,68 @@ function debouncedRefresh() {
   }, 800);
 }
 
-// ─── Idle notification (작업 완료 알림) ──────────────────────────────
-// When the watcher ingests an assistant message with stop_reason === end_turn,
-// Claude is idle and waiting for user input. Show a browser Notification +
-// toast so the user can come back to the conversation. Dedupe per project
-// within a short window so a burst of messages doesn't spam.
-const _idleNotifyDedupe = new Map();  // projectKey → last notify timestamp
-const IDLE_NOTIFY_DEDUPE_MS = 8000;
+// ─── Idle indicator (작업 완료 → 입력 대기) ────────────────────────────
+// When an assistant message with stop_reason === end_turn arrives, mark the
+// project as "idle, awaiting user input". The TOP 10 renderer picks this up
+// and prepends a small toast-style pill badge to the LEFT of the project
+// name. When a subsequent non-end_turn message arrives (tool_use means Claude
+// is working again, user means user replied), clear the badge.
+//
+// NO global toasts, OS notifications, or title flashes — the signal lives
+// inline with the project row.
+state.idleProjects = {};  // projectKey → { ts, preview, project_name, project_path }
+
+function _idleKey(p) {
+  return (p.project_name || '') + '|' + (p.project_path || '');
+}
 
 function notifyIdleFromBatch(records) {
   if (!Array.isArray(records) || !records.length) return;
-  // User preference gate — disabled by default no. Opt out via Display settings.
-  if (_prefs.idleNotify === false) return;
-  const now = Date.now();
-  // Seen set for deduping within this single batch
-  const seen = new Set();
+  if (_prefs.idleNotify === false) return;  // opt-out via settings
+  let changed = false;
   for (const r of records) {
     if (!r || r.type !== 'new_message') continue;
-    if (r.stop_reason !== 'end_turn') continue;
-    const key = (r.project_name || '') + '|' + (r.project_path || '');
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    const last = _idleNotifyDedupe.get(key) || 0;
-    if (now - last < IDLE_NOTIFY_DEDUPE_MS) continue;
-    _idleNotifyDedupe.set(key, now);
-    _showIdleNotification(r);
-  }
-}
-
-function _showIdleNotification(record) {
-  const title = `${record.project_name || '프로젝트'} 입력 대기`;
-  const bodyText = (record.preview || '').slice(0, 160).trim() || '응답이 완료되었습니다';
-  // 1) Always: in-app toast (lightweight, non-blocking)
-  if (typeof showToast === 'function') {
-    showToast(title + ' — ' + bodyText, { type: 'info', duration: 6000 });
-  }
-  // 2) If granted: browser Notification (OS-level, works when tab is backgrounded)
-  if ('Notification' in window && Notification.permission === 'granted') {
-    try {
-      const n = new Notification(title, {
-        body: bodyText,
-        tag: 'claude-idle-' + (record.project_path || ''),
-        renotify: true,
-        silent: false,
-        icon: '/static/app.v43.css'  // fallback; browsers ignore if invalid
-      });
-      n.onclick = () => {
-        window.focus();
-        if (typeof showProjectDetail === 'function') {
-          showProjectDetail(record.project_name, record.project_path);
-        }
-        n.close();
+    const key = _idleKey(r);
+    if (!key) continue;
+    if (r.stop_reason === 'end_turn') {
+      // Flag as idle
+      state.idleProjects[key] = {
+        ts: Date.now(),
+        preview: (r.preview || '').slice(0, 160),
+        project_name: r.project_name,
+        project_path: r.project_path,
       };
-      // Auto-dismiss after 10s
-      setTimeout(() => { try { n.close(); } catch {} }, 10000);
-    } catch (e) {
-      console.warn('idle Notification failed:', e);
+      changed = true;
+    } else if (r.stop_reason) {
+      // Any non-end_turn activity: Claude is working OR user has replied.
+      // Clear the idle flag so the badge disappears.
+      if (state.idleProjects[key]) {
+        delete state.idleProjects[key];
+        changed = true;
+      }
     }
   }
-  // 3) Page title flash so the browser tab icon gets user attention
-  _titleFlash('🟢 입력 대기 · ' + (record.project_name || ''));
+  if (changed) {
+    // Force TOP 10 to re-render with updated badges — debouncedRefresh will
+    // also call loadTopProjects via WS flow, but that's 800ms delayed. We
+    // want the visual update to land immediately.
+    if (typeof loadTopProjects === 'function') loadTopProjects();
+  }
 }
 
-let _titleOrig = null;
-let _titleFlashTimer = null;
+// Settings toggle — user can opt out entirely.
 function toggleIdleNotify() {
-  const current = _prefs.idleNotify !== false;  // default true
+  const current = _prefs.idleNotify !== false;
   const next = !current;
   _prefs.idleNotify = next;
   savePrefs({ idleNotify: next });
   _renderIdleNotifyToggle();
-  showToast('작업 완료 알림: ' + (next ? '켬' : '끔'), { type: 'info' });
+  if (!next) {
+    // Turning off also clears existing badges
+    state.idleProjects = {};
+    if (typeof loadTopProjects === 'function') loadTopProjects();
+  }
+  showToast('입력 대기 뱃지: ' + (next ? '켬' : '끔'), { type: 'info' });
 }
 function _renderIdleNotifyToggle() {
   const btn = document.getElementById('idleNotifyToggle');
@@ -698,22 +689,7 @@ function _renderIdleNotifyToggle() {
       ? 'bg-accent/15 text-accent border border-accent/30'
       : 'bg-white/5 text-white/45 border border-white/[0.07]');
 }
-// Render once DOM settles
 window.addEventListener('load', _renderIdleNotifyToggle);
-
-function _titleFlash(tempTitle) {
-  if (_titleOrig === null) _titleOrig = document.title;
-  document.title = tempTitle;
-  if (_titleFlashTimer) clearTimeout(_titleFlashTimer);
-  _titleFlashTimer = setTimeout(() => {
-    if (_titleOrig !== null) document.title = _titleOrig;
-    _titleOrig = null;
-  }, 10000);
-  // Restore immediately on tab focus
-  window.addEventListener('focus', () => {
-    if (_titleOrig !== null) { document.title = _titleOrig; _titleOrig = null; }
-  }, { once: true });
-}
 
 function handleWsMessage(msg) {
   if (msg.type === 'init') {
