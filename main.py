@@ -259,7 +259,19 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / 'index.html')
+    # SPA entry: never cache the HTML shell — it contains the ?v=N cache-bust
+    # query strings that point at the current static bundle. If the browser
+    # caches this file, it keeps loading stale asset versions forever.
+    # The referenced /static/* assets themselves stay cacheable under their
+    # own ETag/Last-Modified (immutable per version).
+    return FileResponse(
+        STATIC_DIR / 'index.html',
+        headers={
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+        },
+    )
 
 
 # ─── Health ───────────────────────────────────────────────────────────────────
