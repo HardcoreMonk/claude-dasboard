@@ -18,7 +18,6 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 try:
@@ -253,8 +252,35 @@ if _PROMETHEUS_OK:
 
 # ─── Static ───────────────────────────────────────────────────────────────────
 
-# Mount /static for extracted app.js / app.css and any other auxiliaries.
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# Filename-based cache busting: URLs like /static/app.v31.js resolve to the
+# same app.js file on disk, but they are completely distinct URL keys from the
+# browser's / proxy's / CDN's perspective. This is strictly safer than query-
+# string (?v=N) versioning because some proxies drop query strings from cache
+# keys entirely. A regex rewrites the filename before filesystem lookup.
+_STATIC_VERSION_RE = re.compile(r'^(.+?)\.v\d+\.(js|css|html|map)$')
+
+
+@app.get("/static/{path:path}")
+async def static_file(path: str):
+    # Strip ".vNNN" segment from the filename (e.g. "app.v31.js" → "app.js").
+    m = _STATIC_VERSION_RE.match(path)
+    if m:
+        path = f"{m.group(1)}.{m.group(2)}"
+    try:
+        target = (STATIC_DIR / path).resolve()
+    except Exception:
+        return JSONResponse({'error': 'bad path'}, status_code=400)
+    # Path traversal guard: the resolved path must live under STATIC_DIR.
+    if not str(target).startswith(str(STATIC_DIR.resolve()) + os.sep) \
+            and target != STATIC_DIR.resolve():
+        return JSONResponse({'error': 'not found'}, status_code=404)
+    if not target.is_file():
+        return JSONResponse({'error': 'not found'}, status_code=404)
+    # Versioned URLs are treated as immutable — aggressive cache is safe.
+    headers = {}
+    if m:
+        headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return FileResponse(target, headers=headers)
 
 
 @app.get("/")
