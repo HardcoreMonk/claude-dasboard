@@ -636,12 +636,28 @@ document.addEventListener('click', () => {
   if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
 }, { once: true, capture: true });
 
+// Chime queue — ensures rapid-fire end_turn events produce audibly distinct
+// chimes instead of overlapping at the same ctx.currentTime (which sounds
+// like one blob). Each chime is scheduled AFTER the previous one ends.
+const CHIME_LEN = 0.37;   // total audible duration
+const CHIME_GAP = 0.05;   // silence between back-to-back chimes
+const CHIME_QUEUE_CAP = 2.0;  // don't queue more than 2s into the future
+let _chimeNextStart = 0;
+
 function _playIdleChime() {
   const ctx = _ensureAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') ctx.resume().catch(() => {});
 
   const now = ctx.currentTime;
+  // Start either immediately, or right after the previously-queued chime
+  // finishes (plus a small gap so consecutive chimes are audibly separate).
+  let start = Math.max(now, _chimeNextStart + CHIME_GAP);
+  // Cap the queue — if we're scheduling more than 2s in the future, drop
+  // this chime entirely. Prevents a large burst from spamming audio forever.
+  if (start > now + CHIME_QUEUE_CAP) return;
+  _chimeNextStart = start + CHIME_LEN;
+
   const master = ctx.createGain();
   master.gain.value = 0.15;  // quiet
   master.connect(ctx.destination);
@@ -659,11 +675,11 @@ function _playIdleChime() {
     osc.connect(gain);
     gain.connect(master);
     // Quick attack, exponential release
-    gain.gain.setValueAtTime(0, now + n.offset);
-    gain.gain.linearRampToValueAtTime(1, now + n.offset + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + n.offset + n.duration);
-    osc.start(now + n.offset);
-    osc.stop(now + n.offset + n.duration + 0.05);
+    gain.gain.setValueAtTime(0, start + n.offset);
+    gain.gain.linearRampToValueAtTime(1, start + n.offset + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + n.offset + n.duration);
+    osc.start(start + n.offset);
+    osc.stop(start + n.offset + n.duration + 0.05);
   });
 }
 
@@ -686,7 +702,6 @@ function notifyIdleFromBatch(records) {
   if (!Array.isArray(records) || !records.length) return;
   if (_prefs.idleNotify === false) return;  // opt-out via settings
   let changed = false;
-  let playedChime = false;
   for (const r of records) {
     if (!r || r.type !== 'new_message') continue;
     const key = _idleKey(r);
@@ -700,12 +715,9 @@ function notifyIdleFromBatch(records) {
         project_path: r.project_path,
       };
       changed = true;
-      // Play chime once per batch — even if multiple projects transition
-      // simultaneously, one sound is enough (the badge shows all of them).
-      if (!playedChime) {
-        _playIdleChime();
-        playedChime = true;
-      }
+      // Queue a chime. Multiple end_turns across batches will be audibly
+      // distinct thanks to _chimeNextStart sequencing inside _playIdleChime.
+      _playIdleChime();
     } else if (r.stop_reason) {
       // Any non-end_turn activity: Claude is working OR user has replied.
       // Clear the idle flag so the badge disappears.
