@@ -616,6 +616,105 @@ function debouncedRefresh() {
   }, 800);
 }
 
+// ─── Idle notification (작업 완료 알림) ──────────────────────────────
+// When the watcher ingests an assistant message with stop_reason === end_turn,
+// Claude is idle and waiting for user input. Show a browser Notification +
+// toast so the user can come back to the conversation. Dedupe per project
+// within a short window so a burst of messages doesn't spam.
+const _idleNotifyDedupe = new Map();  // projectKey → last notify timestamp
+const IDLE_NOTIFY_DEDUPE_MS = 8000;
+
+function notifyIdleFromBatch(records) {
+  if (!Array.isArray(records) || !records.length) return;
+  // User preference gate — disabled by default no. Opt out via Display settings.
+  if (_prefs.idleNotify === false) return;
+  const now = Date.now();
+  // Seen set for deduping within this single batch
+  const seen = new Set();
+  for (const r of records) {
+    if (!r || r.type !== 'new_message') continue;
+    if (r.stop_reason !== 'end_turn') continue;
+    const key = (r.project_name || '') + '|' + (r.project_path || '');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const last = _idleNotifyDedupe.get(key) || 0;
+    if (now - last < IDLE_NOTIFY_DEDUPE_MS) continue;
+    _idleNotifyDedupe.set(key, now);
+    _showIdleNotification(r);
+  }
+}
+
+function _showIdleNotification(record) {
+  const title = `${record.project_name || '프로젝트'} 입력 대기`;
+  const bodyText = (record.preview || '').slice(0, 160).trim() || '응답이 완료되었습니다';
+  // 1) Always: in-app toast (lightweight, non-blocking)
+  if (typeof showToast === 'function') {
+    showToast(title + ' — ' + bodyText, { type: 'info', duration: 6000 });
+  }
+  // 2) If granted: browser Notification (OS-level, works when tab is backgrounded)
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      const n = new Notification(title, {
+        body: bodyText,
+        tag: 'claude-idle-' + (record.project_path || ''),
+        renotify: true,
+        silent: false,
+        icon: '/static/app.v43.css'  // fallback; browsers ignore if invalid
+      });
+      n.onclick = () => {
+        window.focus();
+        if (typeof showProjectDetail === 'function') {
+          showProjectDetail(record.project_name, record.project_path);
+        }
+        n.close();
+      };
+      // Auto-dismiss after 10s
+      setTimeout(() => { try { n.close(); } catch {} }, 10000);
+    } catch (e) {
+      console.warn('idle Notification failed:', e);
+    }
+  }
+  // 3) Page title flash so the browser tab icon gets user attention
+  _titleFlash('🟢 입력 대기 · ' + (record.project_name || ''));
+}
+
+let _titleOrig = null;
+let _titleFlashTimer = null;
+function toggleIdleNotify() {
+  const current = _prefs.idleNotify !== false;  // default true
+  const next = !current;
+  _prefs.idleNotify = next;
+  savePrefs({ idleNotify: next });
+  _renderIdleNotifyToggle();
+  showToast('작업 완료 알림: ' + (next ? '켬' : '끔'), { type: 'info' });
+}
+function _renderIdleNotifyToggle() {
+  const btn = document.getElementById('idleNotifyToggle');
+  if (!btn) return;
+  const on = _prefs.idleNotify !== false;
+  btn.textContent = on ? '켜짐' : '꺼짐';
+  btn.className = 'rounded-full px-4 py-1.5 text-[11px] font-bold spring ' +
+    (on
+      ? 'bg-accent/15 text-accent border border-accent/30'
+      : 'bg-white/5 text-white/45 border border-white/[0.07]');
+}
+// Render once DOM settles
+window.addEventListener('load', _renderIdleNotifyToggle);
+
+function _titleFlash(tempTitle) {
+  if (_titleOrig === null) _titleOrig = document.title;
+  document.title = tempTitle;
+  if (_titleFlashTimer) clearTimeout(_titleFlashTimer);
+  _titleFlashTimer = setTimeout(() => {
+    if (_titleOrig !== null) document.title = _titleOrig;
+    _titleOrig = null;
+  }, 10000);
+  // Restore immediately on tab focus
+  window.addEventListener('focus', () => {
+    if (_titleOrig !== null) { document.title = _titleOrig; _titleOrig = null; }
+  }, { once: true });
+}
+
 function handleWsMessage(msg) {
   if (msg.type === 'init') {
     state.stats = msg.data;
@@ -625,6 +724,9 @@ function handleWsMessage(msg) {
     // Track how many new records arrived since the user last viewed
     state.newDataCounts.sessions += (msg.records?.length || 1);
     renderNewDataBadge();
+    // Detect assistant messages that reached end_turn — Claude is idle and
+    // waiting for user input. Notify once per project per burst.
+    notifyIdleFromBatch(msg.records || []);
     debouncedRefresh();
   } else if (msg.type === 'scan_progress') {
     showScan(`스캔 중: ${msg.processed}/${msg.total}`);

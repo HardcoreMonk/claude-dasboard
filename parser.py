@@ -480,6 +480,10 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection) -> 
         'cost_usd': cm / MICRO,
         'model': model,
         'timestamp': record.get('timestamp', ''),
+        # Forwarded to the WS broadcast so the frontend can show an
+        # "input awaiting" notification when stop_reason === 'end_turn'.
+        'stop_reason': stop_reason,
+        'preview': preview[:300],
     }
 
 
