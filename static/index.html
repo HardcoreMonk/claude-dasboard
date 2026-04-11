@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v45.css">
+<link rel="stylesheet" href="/static/app.v46.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -663,8 +663,8 @@ tailwind.config = {
       </div>
       <div class="flex items-center justify-between">
         <div>
-          <div class="text-xs font-semibold text-white/80">입력 대기 뱃지</div>
-          <div class="text-[10px] text-white/30">프로젝트의 assistant 응답이 end_turn 으로 끝나면 TOP 10 행의 프로젝트 이름 좌측에 "⏳ 입력 대기" 뱃지 표시 (토스트/OS 알림 없음)</div>
+          <div class="text-xs font-semibold text-white/80">입력 대기 뱃지 + 차임</div>
+          <div class="text-[10px] text-white/30">assistant end_turn 감지 시 TOP 10 행의 프로젝트 이름 좌측에 ⏳ 입력 대기 뱃지 + 짧은 차임 소리 (C5→G5)</div>
         </div>
         <button id="idleNotifyToggle" onclick="toggleIdleNotify()"
                 class="rounded-full px-4 py-1.5 text-[11px] font-bold spring">—</button>
@@ -799,11 +799,11 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v45.js" defer></script>
-<script src="/static/sessions.v45.js" defer></script>
-<script src="/static/plan.v45.js" defer></script>
-<script src="/static/overview.v45.js" defer></script>
-<script src="/static/subagents.v45.js" defer></script>
-<script src="/static/charts.v45.js" defer></script>
+<script src="/static/app.v46.js" defer></script>
+<script src="/static/sessions.v46.js" defer></script>
+<script src="/static/plan.v46.js" defer></script>
+<script src="/static/overview.v46.js" defer></script>
+<script src="/static/subagents.v46.js" defer></script>
+<script src="/static/charts.v46.js" defer></script>
 </body>
 </html>

@@ -616,6 +616,57 @@ function debouncedRefresh() {
   }, 800);
 }
 
+// ─── Idle chime (Web Audio API) ───────────────────────────────────────
+// Short two-note chime (C5 → G5 perfect fifth, ~300ms) played on end_turn
+// detection so the user notices "Claude is idle" even without looking at the
+// dashboard tab. Uses Web Audio API — no external MP3/OGG file, no network,
+// no CORS issues. Respects _prefs.idleNotify (same toggle as the badge).
+let _audioCtx = null;
+function _ensureAudioCtx() {
+  if (_audioCtx) return _audioCtx;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) _audioCtx = new AC();
+  } catch (e) { _audioCtx = null; }
+  return _audioCtx;
+}
+// Browsers suspend AudioContext until a user gesture. Prime it on any click.
+document.addEventListener('click', () => {
+  const ctx = _ensureAudioCtx();
+  if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+}, { once: true, capture: true });
+
+function _playIdleChime() {
+  const ctx = _ensureAudioCtx();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+  const now = ctx.currentTime;
+  const master = ctx.createGain();
+  master.gain.value = 0.15;  // quiet
+  master.connect(ctx.destination);
+
+  // Two-note chime — slightly overlapping C5 and G5 (perfect fifth, pleasant)
+  const notes = [
+    { freq: 523.25, offset: 0.00, duration: 0.18 },
+    { freq: 783.99, offset: 0.09, duration: 0.28 },
+  ];
+  notes.forEach(n => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = n.freq;
+    osc.connect(gain);
+    gain.connect(master);
+    // Quick attack, exponential release
+    gain.gain.setValueAtTime(0, now + n.offset);
+    gain.gain.linearRampToValueAtTime(1, now + n.offset + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + n.offset + n.duration);
+    osc.start(now + n.offset);
+    osc.stop(now + n.offset + n.duration + 0.05);
+  });
+}
+
 // ─── Idle indicator (작업 완료 → 입력 대기) ────────────────────────────
 // When an assistant message with stop_reason === end_turn arrives, mark the
 // project as "idle, awaiting user input". The TOP 10 renderer picks this up
@@ -635,6 +686,7 @@ function notifyIdleFromBatch(records) {
   if (!Array.isArray(records) || !records.length) return;
   if (_prefs.idleNotify === false) return;  // opt-out via settings
   let changed = false;
+  let playedChime = false;
   for (const r of records) {
     if (!r || r.type !== 'new_message') continue;
     const key = _idleKey(r);
@@ -648,6 +700,12 @@ function notifyIdleFromBatch(records) {
         project_path: r.project_path,
       };
       changed = true;
+      // Play chime once per batch — even if multiple projects transition
+      // simultaneously, one sound is enough (the badge shows all of them).
+      if (!playedChime) {
+        _playIdleChime();
+        playedChime = true;
+      }
     } else if (r.stop_reason) {
       // Any non-end_turn activity: Claude is working OR user has replied.
       // Clear the idle flag so the badge disappears.
