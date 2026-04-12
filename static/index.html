@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v51.css">
+<link rel="stylesheet" href="/static/app.v52.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -657,7 +657,7 @@ tailwind.config = {
       <div class="flex items-center justify-between">
         <div>
           <div class="text-xs font-semibold text-white/80">알림 허용</div>
-          <div class="text-[10px] text-white/30">예산 경고 + 작업 완료 브라우저 알림</div>
+          <div class="text-[10px] text-white/30">작업 완료 브라우저 알림</div>
         </div>
         <button onclick="if('Notification' in window)Notification.requestPermission().then(p=>showToast('알림: '+p,{type:'info'}))" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">요청</button>
       </div>
@@ -799,11 +799,11 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v51.js" defer></script>
-<script src="/static/sessions.v51.js" defer></script>
-<script src="/static/plan.v51.js" defer></script>
-<script src="/static/overview.v51.js" defer></script>
-<script src="/static/subagents.v51.js" defer></script>
-<script src="/static/charts.v51.js" defer></script>
+<script src="/static/app.v52.js" defer></script>
+<script src="/static/sessions.v52.js" defer></script>
+<script src="/static/plan.v52.js" defer></script>
+<script src="/static/overview.v52.js" defer></script>
+<script src="/static/subagents.v52.js" defer></script>
+<script src="/static/charts.v52.js" defer></script>
 </body>
 </html>

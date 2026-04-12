@@ -2690,4 +2690,4 @@ window.addEventListener('load', () => {
 });
 connectWS();
 setInterval(()=>{if(state.ws&&state.ws.readyState===WebSocket.OPEN)state.ws.send('ping');},25000);
-if('Notification' in window && Notification.permission==='default')Notification.requestPermission();
+// Notification auto-request removed — permission is requested manually via settings.

@@ -16,7 +16,6 @@ async function loadPlanUsage() {
     planData = await resp.json();
     renderPlanBlock('Daily', planData.daily);
     renderPlanBlock('Weekly', planData.weekly);
-    checkPlanAlerts(planData);
     if (planTimer) clearInterval(planTimer);
     planTimer = setInterval(tickPlanCountdown, 1000);
   } catch (e) { reportError('loadPlanUsage', e); }
@@ -56,19 +55,7 @@ function planBarColor(p) {
   return PLAN_C.green;
 }
 
-function checkPlanAlerts(d) {
-  if (!d) return;
-  ['daily', 'weekly'].forEach(p => {
-    const pct = d[p]?.percentage || 0;
-    if (pct >= 90 && Notification.permission === 'granted' && !state['_a_' + p]) {
-      new Notification('Claude 사용량 경고', {
-        body: `${p === 'daily' ? '일일' : '주간'} ${pct.toFixed(0)}% ` +
-              `(${fmt$(d[p].used_cost)} / ${fmt$(d[p].limit_cost)})`,
-      });
-      state['_a_' + p] = true;
-    }
-  });
-}
+// checkPlanAlerts — disabled: usage warning popup removed per user request.
 
 function tickPlanCountdown() {
   if (!planData) return;
