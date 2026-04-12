@@ -693,6 +693,8 @@ function debouncedRefresh() {
     // Only refresh Chart.js instances when actually visible — otherwise we
     // waste cycles creating/destroying offscreen chart objects.
     if (location.hash.startsWith('#/cost')) loadCharts();
+    // Append new messages to open conversation viewer
+    if (typeof convRefreshTail === 'function') convRefreshTail();
   }, 800);
 }
 
@@ -944,6 +946,15 @@ function handleWsMessage(msg) {
     // Detect assistant messages that reached end_turn — Claude is idle and
     // waiting for user input. Notify once per project per burst.
     notifyIdleFromBatch(msg.records || []);
+    // Check if any record belongs to the currently open session
+    if (state.currentSession && msg.records) {
+      for (const r of msg.records) {
+        if (r && r.session_id === state.currentSession) {
+          state.convNeedsRefresh = true;
+          break;
+        }
+      }
+    }
     debouncedRefresh();
   } else if (msg.type === 'scan_progress') {
     showScan(`스캔 중: ${msg.processed}/${msg.total}`);
@@ -1429,6 +1440,70 @@ document.addEventListener('click', (e) => {
   if (btn) convSetRoleFilter(btn.dataset.roleFilter);
 });
 
+// ─── Conversation viewer state ───────────────────────────────────────────
+state.convMessages = null;   // messages array of the open session
+state.convSession = null;    // session object of the open session
+let _convFocusIdx = -1;      // keyboard-navigated message index
+let _convSearchMatches = []; // inline search match elements
+let _convSearchIdx = -1;
+let _convSearchTimer = null;
+
+// Time gap divider between messages (>10 min gap)
+const _TIME_GAP_MS = 600000; // 10 minutes
+function _renderTimeGap(container, prevTs, curTs) {
+  if (!prevTs || !curTs) return;
+  const gap = new Date(curTs).getTime() - new Date(prevTs).getTime();
+  if (gap < _TIME_GAP_MS || isNaN(gap)) return;
+  const label = gap >= 86400000 ? Math.floor(gap / 86400000) + '\uC77C \uD6C4'
+    : gap >= 3600000 ? Math.floor(gap / 3600000) + '\uC2DC\uAC04 \uD6C4'
+    : Math.floor(gap / 60000) + '\uBD84 \uD6C4';
+  const div = document.createElement('div');
+  div.className = 'conv-time-gap';
+  div.textContent = label;
+  container.appendChild(div);
+}
+
+// Session statistics summary bar
+function renderConvStats(msgs, session) {
+  const el = document.getElementById('convStatsSummary');
+  if (!el) return;
+  if (!msgs || !msgs.length) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.textContent = '';
+  const totalCost = msgs.reduce((s, m) => s + (m.cost_usd || 0), 0);
+  const totalInput = msgs.reduce((s, m) => s + (m.input_tokens || 0), 0);
+  const totalOutput = msgs.reduce((s, m) => s + (m.output_tokens || 0), 0);
+  const totalCacheRead = msgs.reduce((s, m) => s + (m.cache_read_tokens || 0), 0);
+  const totalCacheCreate = msgs.reduce((s, m) => s + (m.cache_creation_tokens || 0), 0);
+  const turnMs = session.turn_duration_ms || 0;
+  const perHr = turnMs > 0 && totalCost > 0 ? totalCost / (turnMs / 3600000) : 0;
+  const models = new Set(msgs.filter(m => m.model).map(m => shortModel(m.model)));
+  const chip = (label, value, cls) => {
+    const s = document.createElement('span');
+    s.className = 'flex items-center gap-1 ' + (cls || '');
+    const l = document.createElement('span');
+    l.className = 'text-white/30';
+    l.textContent = label;
+    const v = document.createElement('span');
+    v.className = 'font-bold tabular-nums';
+    v.textContent = value;
+    s.append(l, v);
+    return s;
+  };
+  el.appendChild(chip('\uBE44\uC6A9', fmt$(totalCost), 'text-amber-400/80'));
+  el.appendChild(chip('\uC785\uB825', fmtTok(totalInput), 'text-white/55'));
+  el.appendChild(chip('\uCD9C\uB825', fmtTok(totalOutput), 'text-emerald-400/70'));
+  el.appendChild(chip('\uCE90\uC2DC\u2193', fmtTok(totalCacheRead), 'text-cyan-400/70'));
+  el.appendChild(chip('\uCE90\uC2DC\u2191', fmtTok(totalCacheCreate), 'text-purple-400/60'));
+  if (perHr > 0) el.appendChild(chip('$/hr', fmt$(perHr), perHr > 50 ? 'text-red-400/70' : 'text-white/50'));
+  if (models.size > 0) {
+    const mSpan = document.createElement('span');
+    mSpan.className = 'text-purple-300/60 text-[9px]';
+    mSpan.textContent = [...models].join(', ');
+    el.appendChild(mSpan);
+  }
+}
+
 // Render a single conversation message bubble into the container.
 // Used by both the initial load and "load more" pagination. All dynamic
 // values are fed through esc()/fmtTok()/fmt$() — no raw user input in
@@ -1580,13 +1655,21 @@ async function openConversation(sid,session,listItem){
     const a = msgs.filter(m => m.role === 'assistant').length;
     countLabel.textContent = `${fmtN(msgs.length)}건 (사용자 ${u} · 어시스턴트 ${a})`;
   }
+  // Store messages for export/stats
+  state.convMessages = msgs;
+  state.convSession = session;
   // Reset role filter to "all" on each session open
   convSetRoleFilter('all');
+  _convFocusIdx = -1;
   let prevBranch = null;
+  let prevTs = null;
   msgs.forEach(m=>{
+    _renderTimeGap(c, prevTs, m.timestamp);
     _renderSingleMessage(c, m, msgs, prevBranch);
     if (m.git_branch) prevBranch = m.git_branch;
+    prevTs = m.timestamp;
   });
+  renderConvStats(msgs, session);
   if(data.total>msgs.length){
     const loadMoreWrap=document.createElement('div');
     loadMoreWrap.className='text-center py-4';
@@ -1605,12 +1688,16 @@ async function openConversation(sid,session,listItem){
         if(!more.length){loadMoreWrap.remove();return;}
         loadMoreWrap.remove();
         let prevBr=prevBranch;
+        let prevT=msgs.length?msgs[msgs.length-1].timestamp:null;
         more.forEach(m=>{
+          _renderTimeGap(c,prevT,m.timestamp);
           _renderSingleMessage(c,m,msgs,prevBr);
           if(m.git_branch) prevBr=m.git_branch;
+          prevT=m.timestamp;
           msgs.push(m);
         });
         prevBranch=prevBr;
+        renderConvStats(msgs, session);
         if(data.total>msgs.length){
           const r2=data.total-msgs.length;
           info.textContent=`${fmtN(msgs.length)} / ${fmtN(data.total)}건 표시 중`;
@@ -2143,7 +2230,7 @@ function searchConversations(q) {
   convSearchTimer = setTimeout(async () => {
     try {
       if (state.convSource === 'claude-ai') {
-        const d = await safeFetch(`/api/claude-ai/search?q=${encodeURIComponent(q)}&limit=20`);
+        const d = await safeFetch(`/api/claude-ai/search?q=${encodeURIComponent(q)}&limit=20&_t=${Date.now()}`);
         box.textContent = '';
         if (!d.results?.length) {
           const empty = document.createElement('div');
@@ -2177,12 +2264,12 @@ function searchConversations(q) {
         box.classList.remove('hidden');
         return;
       }
-      const d = await safeFetch(`/api/sessions/search?q=${encodeURIComponent(q)}&limit=20`);
+      const d = await safeFetch(`/api/sessions/search?q=${encodeURIComponent(q)}&limit=20&_t=${Date.now()}`);
       if (!d.results?.length) { box.innerHTML='<div class="px-3 py-2 text-[10px] text-white/15">결과 없음</div>'; box.classList.remove('hidden'); return; }
       box.innerHTML = d.results.map(r => {
         const safeName = highlightTokens(esc(r.project_name || ''), q);
         const safePreview = highlightTokens(esc((r.content_preview || '').slice(0, 200)), q);
-        return `<div class="px-3 py-2 border-b border-white/[0.03] cursor-pointer spring hover:bg-white/[0.03]" onclick="openConvFromSearch('${esc(r.session_id)}')">
+        return `<div class="px-3 py-2 border-b border-white/[0.03] cursor-pointer spring hover:bg-white/[0.03]" onclick="openConvFromSearch('${esc(r.session_id)}',${r.id})">
           <div class="flex justify-between items-center">
             <span class="text-[10px] font-semibold text-accent/60">${safeName}</span>
             <span class="text-[9px] text-white/15">${r.role==='user'?'사용자':'AI'} · ${fmtTime(r.timestamp)}</span>
@@ -2205,12 +2292,63 @@ async function openCaiConvFromSearch(uuid) {
     openClaudeAiConversation(uuid, conv);
   } catch (e) { reportError('openCaiConvFromSearch', e); }
 }
-async function openConvFromSearch(sid) {
+async function openConvFromSearch(sid, messageId) {
+  const searchInput = document.getElementById('convSearch');
+  const keyword = searchInput?.value || '';
   document.getElementById('convSearchResults').classList.add('hidden');
   try {
     const s = await safeFetch(`/api/sessions/${sid}`);
-    openConversation(sid, s);
-  } catch(e) { console.error(e); }
+    if (messageId) {
+      // Find the position of the target message, then load a window around it
+      const pos = await safeFetch(`/api/sessions/${encodeURIComponent(sid)}/message-position?message_id=${messageId}`);
+      const targetOffset = Math.max(0, pos.position - 50); // load 50 before target
+      const data = await safeFetch(`/api/sessions/${encodeURIComponent(sid)}/messages?limit=500&offset=${targetOffset}`);
+      const msgs = data.messages || [];
+      // Render directly (bypass openConversation's default 200-limit load)
+      await openConversation(sid, s);
+      // If we loaded from a non-zero offset, the viewer already has the first 200.
+      // We need to reload with the correct window. Clear and re-render.
+      if (targetOffset > 0) {
+        const c = document.getElementById('convMessages');
+        c.textContent = '';
+        state.convMessages = msgs;
+        let prevBranch = null;
+        let prevTs = null;
+        msgs.forEach(m => {
+          _renderTimeGap(c, prevTs, m.timestamp);
+          _renderSingleMessage(c, m, msgs, prevBranch);
+          if (m.git_branch) prevBranch = m.git_branch;
+          prevTs = m.timestamp;
+        });
+        renderConvStats(msgs, s);
+        const countLabel = document.getElementById('convMsgCount');
+        if (countLabel) {
+          const u = msgs.filter(m => m.role === 'user').length;
+          const a = msgs.filter(m => m.role === 'assistant').length;
+          countLabel.textContent = `${fmtN(msgs.length)}\uAC74 (\uC0AC\uC6A9\uC790 ${u} \u00b7 \uC5B4\uC2DC\uC2A4\uD134\uD2B8 ${a}) \u2014 \uC624\uD504\uC14B ${fmtN(targetOffset)}`;
+        }
+      }
+      // Scroll to the target message
+      const targetEl = document.querySelector(`#convMessages [data-msg-role]`);
+      const allEls = document.querySelectorAll('#convMessages [data-msg-role]');
+      const targetLocalIdx = pos.position - targetOffset;
+      if (allEls[targetLocalIdx]) {
+        allEls[targetLocalIdx].classList.add('conv-msg-focused');
+        allEls[targetLocalIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        _convFocusIdx = targetLocalIdx;
+      }
+    } else {
+      await openConversation(sid, s);
+    }
+    // Auto-trigger inline search with the keyword
+    if (keyword) {
+      const inlineInput = document.getElementById('convInlineSearch');
+      if (inlineInput) {
+        inlineInput.value = keyword;
+        _convInlineSearch(keyword);
+      }
+    }
+  } catch(e) { console.error('openConvFromSearch:', e); }
 }
 
 // ─── Project Management ─────────────────────────────────────────────────
@@ -2782,6 +2920,22 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'g') { _gPending = true; setTimeout(() => _gPending = false, 900); return; }
 
+  // Conversation viewer: j/k message navigation, Ctrl+F inline search
+  if (location.hash.startsWith('#/conversations') && state.currentSession) {
+    if (e.key === 'j' || e.key === 'ArrowDown') {
+      e.preventDefault(); convFocusMessage(_convFocusIdx + 1); return;
+    }
+    if (e.key === 'k' || e.key === 'ArrowUp') {
+      e.preventDefault(); convFocusMessage(_convFocusIdx - 1); return;
+    }
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f' && location.hash.startsWith('#/conversations')) {
+    e.preventDefault();
+    const inp = document.getElementById('convInlineSearch');
+    if (inp) { inp.focus(); inp.select(); }
+    return;
+  }
+
   // Single-key shortcuts
   if (e.key === '/') {
     e.preventDefault();
@@ -2801,6 +2955,193 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 });
+
+// ─── Conversation inline search ──────────────────────────────────────────
+document.getElementById('convInlineSearch')?.addEventListener('input', (e) => {
+  clearTimeout(_convSearchTimer);
+  _convSearchTimer = setTimeout(() => _convInlineSearch(e.target.value), 200);
+});
+document.getElementById('convInlineSearch')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? convSearchPrev() : convSearchNext(); }
+  if (e.key === 'Escape') { e.preventDefault(); e.target.value = ''; _convInlineSearch(''); e.target.blur(); }
+});
+
+function _convInlineSearch(q) {
+  const container = document.getElementById('convMessages');
+  if (!container) return;
+  const all = container.querySelectorAll('[data-msg-role]');
+  // Clear previous
+  all.forEach(el => el.classList.remove('conv-search-hit', 'conv-search-current', 'conv-search-dim'));
+  _convSearchMatches = [];
+  _convSearchIdx = -1;
+  const info = document.getElementById('convSearchMatchInfo');
+
+  if (!q.trim()) {
+    if (info) info.textContent = '';
+    return;
+  }
+  const lq = q.toLowerCase();
+  // Search both DOM textContent AND the raw content_preview from message data
+  const msgs = state.convMessages || [];
+  all.forEach((el, i) => {
+    const domMatch = el.textContent.toLowerCase().includes(lq);
+    const dataMatch = i < msgs.length && (msgs[i].content_preview || '').toLowerCase().includes(lq);
+    if (domMatch || dataMatch) {
+      el.classList.add('conv-search-hit');
+      _convSearchMatches.push(el);
+    } else {
+      el.classList.add('conv-search-dim');
+    }
+  });
+  if (info) info.textContent = _convSearchMatches.length ? `0/${_convSearchMatches.length}` : '\uACB0\uACFC \uC5C6\uC74C';
+  if (_convSearchMatches.length) convSearchNext();
+}
+
+function convSearchNext() {
+  if (!_convSearchMatches.length) return;
+  if (_convSearchIdx >= 0) _convSearchMatches[_convSearchIdx].classList.remove('conv-search-current');
+  _convSearchIdx = (_convSearchIdx + 1) % _convSearchMatches.length;
+  _convSearchMatches[_convSearchIdx].classList.add('conv-search-current');
+  _convSearchMatches[_convSearchIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const info = document.getElementById('convSearchMatchInfo');
+  if (info) info.textContent = `${_convSearchIdx + 1}/${_convSearchMatches.length}`;
+}
+
+function convSearchPrev() {
+  if (!_convSearchMatches.length) return;
+  if (_convSearchIdx >= 0) _convSearchMatches[_convSearchIdx].classList.remove('conv-search-current');
+  _convSearchIdx = (_convSearchIdx - 1 + _convSearchMatches.length) % _convSearchMatches.length;
+  _convSearchMatches[_convSearchIdx].classList.add('conv-search-current');
+  _convSearchMatches[_convSearchIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const info = document.getElementById('convSearchMatchInfo');
+  if (info) info.textContent = `${_convSearchIdx + 1}/${_convSearchMatches.length}`;
+}
+
+// ─── Conversation keyboard navigation ───────────────────────────────────
+function convFocusMessage(idx) {
+  const container = document.getElementById('convMessages');
+  if (!container) return;
+  const all = container.querySelectorAll('[data-msg-role]');
+  if (!all.length) return;
+  // Remove previous focus
+  if (_convFocusIdx >= 0 && _convFocusIdx < all.length) all[_convFocusIdx].classList.remove('conv-msg-focused');
+  _convFocusIdx = Math.max(0, Math.min(idx, all.length - 1));
+  all[_convFocusIdx].classList.add('conv-msg-focused');
+  all[_convFocusIdx].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ─── Markdown export ─────────────────────────────────────────────────────
+function _buildConvMarkdown() {
+  const msgs = state.convMessages;
+  const session = state.convSession;
+  if (!msgs || !session) return '';
+  const lines = [];
+  lines.push('# ' + (session.project_name || 'Conversation'));
+  lines.push('');
+  lines.push('**Model**: ' + (session.model || '\u2014'));
+  lines.push('**Date**: ' + fmtTime(session.created_at) + ' ~ ' + fmtTime(session.updated_at));
+  lines.push('**Cost**: ' + fmt$(session.total_cost_usd));
+  lines.push('**Messages**: ' + fmtN(msgs.length));
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  for (const m of msgs) {
+    const role = m.role === 'user' ? '\uD83D\uDC64 User' : '\uD83E\uDD16 Assistant';
+    lines.push('## ' + role);
+    if (m.role === 'assistant' && m.model) lines.push('*' + shortModel(m.model) + (m.cost_usd ? ' \u00b7 ' + fmt$(m.cost_usd) : '') + '*');
+    lines.push('');
+    // Extract text content
+    let text = '';
+    try {
+      const content = typeof m.content === 'string' ? JSON.parse(m.content) : m.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'text') text += (block.text || '') + '\n\n';
+          else if (block.type === 'thinking') text += '<details><summary>Thinking</summary>\n\n' + (block.thinking || '') + '\n\n</details>\n\n';
+          else if (block.type === 'tool_use') text += '```json\n// Tool: ' + (block.name || '') + '\n' + JSON.stringify(block.input || {}, null, 2) + '\n```\n\n';
+          else if (block.type === 'tool_result') {
+            const rc = Array.isArray(block.content) ? block.content.map(c => c.text || '').join('\n') : (block.content || '');
+            text += '> **Tool Result**\n> ' + rc.split('\n').join('\n> ') + '\n\n';
+          }
+        }
+      } else {
+        text = m.content_preview || '';
+      }
+    } catch {
+      text = m.content_preview || '';
+    }
+    lines.push(text.trim());
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+function convCopyMarkdown() {
+  const md = _buildConvMarkdown();
+  if (!md) { showToast('\uB300\uD654\uB97C \uBA3C\uC800 \uC5F4\uC5B4\uC8FC\uC138\uC694', { type: 'warning' }); return; }
+  navigator.clipboard.writeText(md).then(
+    () => showToast('\uD074\uB9BD\uBCF4\uB4DC\uC5D0 \uBCF5\uC0AC\uB428', { type: 'success', duration: 1500 }),
+    () => showToast('\uBCF5\uC0AC \uC2E4\uD328', { type: 'error' })
+  );
+}
+
+function convDownloadMarkdown() {
+  const md = _buildConvMarkdown();
+  if (!md) { showToast('\uB300\uD654\uB97C \uBA3C\uC800 \uC5F4\uC5B4\uC8FC\uC138\uC694', { type: 'warning' }); return; }
+  const session = state.convSession;
+  const name = (session.project_name || 'conversation').replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
+  const filename = name + '_' + (session.id || '').slice(0, 8) + '.md';
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+  showToast(filename + ' \uB2E4\uC6B4\uB85C\uB4DC', { type: 'success', duration: 2000 });
+}
+
+// ─── WebSocket: auto-append new messages for open session ────────────────
+state.convNeedsRefresh = false;
+
+function convRefreshTail() {
+  if (!state.convNeedsRefresh || !state.currentSession || !state.convMessages) return;
+  state.convNeedsRefresh = false;
+  const sid = state.currentSession;
+  const currentCount = state.convMessages.length;
+  safeFetch('/api/sessions/' + encodeURIComponent(sid) + '/messages?limit=50&offset=' + currentCount)
+    .then(data => {
+      const more = data.messages || [];
+      if (!more.length) return;
+      const c = document.getElementById('convMessages');
+      if (!c) return;
+      const msgs = state.convMessages;
+      const nearBottom = c.scrollTop + c.clientHeight >= c.scrollHeight - 100;
+      let prevT = msgs.length ? msgs[msgs.length - 1].timestamp : null;
+      let prevBr = null;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].git_branch) { prevBr = msgs[i].git_branch; break; }
+      }
+      more.forEach(m => {
+        _renderTimeGap(c, prevT, m.timestamp);
+        _renderSingleMessage(c, m, msgs, prevBr);
+        if (m.git_branch) prevBr = m.git_branch;
+        prevT = m.timestamp;
+        msgs.push(m);
+      });
+      renderConvStats(msgs, state.convSession);
+      // Update message count
+      const countLabel = document.getElementById('convMsgCount');
+      if (countLabel) {
+        const u = msgs.filter(m => m.role === 'user').length;
+        const a = msgs.filter(m => m.role === 'assistant').length;
+        countLabel.textContent = fmtN(msgs.length) + '\uAC74 (\uC0AC\uC6A9\uC790 ' + u + ' \u00b7 \uC5B4\uC2DC\uC2A4\uD134\uD2B8 ' + a + ')';
+      }
+      if (nearBottom) c.scrollTop = c.scrollHeight;
+    })
+    .catch(() => {}); // silent — next WS batch will retry
+}
 
 // ─── Init ───────────────────────────────────────────────────────────────
 // Single source of truth for initial state: the URL hash decides the view

@@ -33,7 +33,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v63.css">
+<link rel="stylesheet" href="/static/app.v66.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -614,21 +614,31 @@ tailwind.config = {
     <!-- Viewer -->
     <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel flex flex-col overflow-hidden">
       <div id="convViewerHeader" class="bg-white/[0.02] rounded-t-bezel-inner px-5 py-3 border-b border-white/[0.05]">
-        <div class="text-xs text-white/20 text-center py-8">← 세션을 선택하세요</div>
+        <div class="text-xs text-white/20 text-center py-8">&larr; 세션을 선택하세요</div>
       </div>
+      <!-- Stats summary bar -->
+      <div id="convStatsSummary" class="hidden px-4 py-1.5 border-b border-white/[0.04] flex items-center gap-3 text-[10px] bg-white/[0.02] flex-wrap"></div>
       <!-- Navigation toolbar (U8) — visible only when a session is open -->
-      <div id="convNavBar" class="hidden px-4 py-2 border-b border-white/[0.04] flex items-center gap-2 text-[10px] bg-white/[0.02]">
+      <div id="convNavBar" class="hidden px-4 py-2 border-b border-white/[0.04] flex items-center gap-2 text-[10px] bg-white/[0.02] flex-wrap">
         <span class="text-white/30">보기</span>
         <button data-role-filter="all" class="conv-role-btn px-2 py-0.5 rounded-full border border-accent/40 bg-accent/15 text-accent font-bold">전체</button>
         <button data-role-filter="user" class="conv-role-btn px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">사용자</button>
         <button data-role-filter="assistant" class="conv-role-btn px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">어시스턴트</button>
         <span class="mx-1 text-white/15">|</span>
-        <button onclick="convCollapseAllTools()" class="px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">🗂 모두 접기</button>
-        <button onclick="convExpandAllTools()" class="px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">📂 모두 펼치기</button>
+        <button onclick="convCollapseAllTools()" class="px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">모두 접기</button>
+        <button onclick="convExpandAllTools()" class="px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">모두 펼치기</button>
+        <span class="mx-1 text-white/15">|</span>
+        <input id="convInlineSearch" placeholder="대화 내 검색…"
+               class="bg-white/5 border border-white/[0.07] rounded-full px-2.5 py-0.5 text-[10px] text-white/50 placeholder:text-white/15 outline-none focus:border-accent/30 spring w-28">
+        <span id="convSearchMatchInfo" class="text-[9px] text-white/30 tabular-nums"></span>
+        <button onclick="convSearchPrev()" title="이전 매치" class="text-white/40 hover:text-white/70 text-[10px] spring">&lsaquo;</button>
+        <button onclick="convSearchNext()" title="다음 매치" class="text-white/40 hover:text-white/70 text-[10px] spring">&rsaquo;</button>
         <span class="flex-1"></span>
         <span id="convMsgCount" class="text-white/30 tabular-nums"></span>
-        <button onclick="convJumpTop()" title="처음으로" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">↑</button>
-        <button onclick="convJumpBottom()" title="끝으로" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">↓</button>
+        <button onclick="convCopyMarkdown()" title="마크다운 복사" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring text-[11px]">&#x1F4CB;</button>
+        <button onclick="convDownloadMarkdown()" title="마크다운 다운로드" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring text-[11px]">&#x1F4BE;</button>
+        <button onclick="convJumpTop()" title="처음으로" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">&uarr;</button>
+        <button onclick="convJumpBottom()" title="끝으로" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">&darr;</button>
       </div>
       <div id="convMessages" class="flex-1 overflow-y-auto p-4 space-y-3 bg-white/[0.01] rounded-b-bezel-inner"></div>
     </div>
@@ -948,12 +958,12 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v63.js" defer></script>
-<script src="/static/sessions.v63.js" defer></script>
-<script src="/static/plan.v63.js" defer></script>
-<script src="/static/overview.v63.js" defer></script>
-<script src="/static/subagents.v63.js" defer></script>
-<script src="/static/charts.v63.js" defer></script>
-<script src="/static/timeline.v63.js" defer></script>
+<script src="/static/app.v66.js" defer></script>
+<script src="/static/sessions.v66.js" defer></script>
+<script src="/static/plan.v66.js" defer></script>
+<script src="/static/overview.v66.js" defer></script>
+<script src="/static/subagents.v66.js" defer></script>
+<script src="/static/charts.v66.js" defer></script>
+<script src="/static/timeline.v66.js" defer></script>
 </body>
 </html>

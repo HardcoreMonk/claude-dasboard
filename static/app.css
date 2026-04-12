@@ -426,6 +426,29 @@ body.theme-light #tlDateTo {
   color: rgba(0,0,0,.65);
 }
 
+/* ── Conversation viewer enhancements ── */
+.conv-time-gap {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0; color: rgba(255,255,255,.2);
+  font-size: 10px; font-weight: 600;
+}
+.conv-time-gap::before, .conv-time-gap::after {
+  content: ''; flex: 1; height: 1px;
+  background: rgba(255,255,255,.06);
+}
+body.theme-light .conv-time-gap { color: rgba(0,0,0,.25); }
+body.theme-light .conv-time-gap::before,
+body.theme-light .conv-time-gap::after { background: rgba(0,0,0,.08); }
+
+.conv-search-hit { box-shadow: inset 0 0 0 1px rgba(251,191,36,.4); border-radius: 1rem; }
+.conv-search-current { box-shadow: inset 0 0 0 2px rgba(251,191,36,.7); background: rgba(251,191,36,.06); }
+.conv-search-dim { opacity: .35; }
+body.theme-light .conv-search-hit { box-shadow: inset 0 0 0 1px rgba(180,83,9,.35); }
+body.theme-light .conv-search-current { box-shadow: inset 0 0 0 2px rgba(180,83,9,.5); background: rgba(180,83,9,.06); }
+
+.conv-msg-focused { box-shadow: inset 0 0 0 1.5px rgba(52,211,153,.5); border-radius: 1rem; }
+body.theme-light .conv-msg-focused { box-shadow: inset 0 0 0 1.5px rgba(4,120,87,.4); }
+
 /* ── Reduced motion (a11y) ── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

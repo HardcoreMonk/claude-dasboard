@@ -691,6 +691,33 @@ def api_session_search_messages(
     return {'results': [dict(r) for r in rows], 'query': q, 'fts': False}
 
 
+@app.get("/api/sessions/{session_id}/message-position")
+def api_message_position(session_id: str, message_id: int = Query(...)):
+    """Return the 0-based row offset of a message within its session.
+
+    Used by the frontend to load the right page of messages when jumping
+    from a search result to a specific message.
+    """
+    with read_db() as db:
+        row = db.execute(
+            'SELECT is_subagent FROM sessions WHERE id = ?', (session_id,)
+        ).fetchone()
+        is_sub = bool(row and row['is_subagent'])
+        side_filter = '' if is_sub else 'AND is_sidechain = 0'
+        pos = db.execute(f'''
+            SELECT COUNT(*) FROM messages
+            WHERE session_id = ? {side_filter}
+              AND (timestamp, id) < (
+                SELECT timestamp, id FROM messages WHERE id = ?
+              )
+        ''', (session_id, message_id)).fetchone()[0]
+        total = db.execute(
+            f'SELECT COUNT(*) FROM messages WHERE session_id = ? {side_filter}',
+            (session_id,),
+        ).fetchone()[0]
+    return {'position': pos, 'total': total, 'message_id': message_id}
+
+
 @app.get("/api/sessions/{session_id}")
 def api_session_detail(session_id: str):
     with read_db() as db:
