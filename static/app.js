@@ -685,7 +685,7 @@ function _playIdleChime() {
 
 // ─── Idle indicator (작업 완료 → 입력 대기) ────────────────────────────
 // When an assistant message with stop_reason === end_turn arrives, mark the
-// project as "idle, awaiting user input". The TOP 10 renderer picks this up
+// project as "idle, awaiting user input". The TOP 5 renderer picks this up
 // and prepends a small toast-style pill badge to the LEFT of the project
 // name. When a subsequent non-end_turn message arrives (tool_use means Claude
 // is working again, user means user replied), clear the badge.
@@ -2511,7 +2511,7 @@ function renderProjectMessages() {
 // Moved to static/subagents.js. Exposes: loadSubagentHeatmap,
 // loadSubagentSuccessMatrix (both called from #/subagents view).
 
-// ─── TOP 10 projects ──────────────────────────────────────────────────
+// ─── TOP 5 projects ───────────────────────────────────────────────────
 // Moved to static/overview.js (loadTopProjects).
 
 // ─── Utilities ──────────────────────────────────────────────────────────

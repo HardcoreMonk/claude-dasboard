@@ -3,7 +3,7 @@
 //   1. loadStats + renderStats (hero + secondary cost chips)
 //   2. loadPeriods + renderPeriod (day/week/month cards)
 //   3. loadForecast + burn-rate (hero 3 + secondary burn-out)
-//   4. loadTopProjects (TOP 10 list with drill-down)
+//   4. loadTopProjects (TOP 5 list with drill-down)
 //   5. drill helpers (drillToSessionsToday/Week)
 //
 // Loaded as a regular script after app.js. All functions become window.*
@@ -156,12 +156,12 @@ function drillToSessionsWeek() {
   if (g('advDateTo'))   g('advDateTo').value   = to;
 }
 
-// ─── TOP 10 projects ──────────────────────────────────────────────────
+// ─── TOP 5 projects ───────────────────────────────────────────────────
 // Preview cleanup is now done server-side (main.py:summarize_preview) and
 // delivered as last_message.summary_line. The frontend just renders it.
 async function loadTopProjects() {
   try {
-    const data = await safeFetch('/api/projects/top?limit=10&with_last_message=true');
+    const data = await safeFetch('/api/projects/top?limit=5&with_last_message=true');
     const projects = data.projects || [];
     const c = document.getElementById('topProjectsList');
     if (!projects.length) {
@@ -218,7 +218,7 @@ async function loadTopProjects() {
 }
 
 
-// ─── TOP 10 preview panel (right slide-in) ─────────────────────────────
+// ─── TOP 5 preview panel (right slide-in) ──────────────────────────────
 // State: which project is currently shown. When loadTopProjects runs via
 // debouncedRefresh, we re-populate the panel if its project is still in
 // the new list (so the content reflects the latest assistant message).

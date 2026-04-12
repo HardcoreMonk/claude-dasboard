@@ -110,13 +110,13 @@ tailwind.config = {
 <main class="pt-20 pb-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
 <!-- ─── OVERVIEW ─── -->
-<!-- 기본 레이아웃: TOP 10 프로젝트 전체 폭. 각 행 오른쪽에 눈 아이콘 버튼이
+<!-- 기본 레이아웃: TOP 5 프로젝트 전체 폭. 각 행 오른쪽에 눈 아이콘 버튼이
      있고, 해당 버튼 클릭 시에만 우측에서 drawer 형태의 preview 패널이
      fixed 위치로 슬라이드 in. 행 본체 클릭은 기존 프로젝트 모달로 드릴. -->
 <section class="view" id="view-overview">
   <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-      <span class="text-xs font-bold text-white/40">TOP 10 프로젝트 <span class="text-white/20 font-normal text-[10px]">행 클릭 → 프로젝트 상세, 👁 버튼 → 마지막 대화 미리보기</span></span>
+      <span class="text-xs font-bold text-white/40">TOP 5 프로젝트 <span class="text-white/20 font-normal text-[10px]">행 클릭 → 프로젝트 상세, 👁 버튼 → 마지막 대화 미리보기</span></span>
       <div id="topProjectsList" class="mt-3 space-y-1">
         <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
       </div>
@@ -664,7 +664,7 @@ tailwind.config = {
       <div class="flex items-center justify-between">
         <div>
           <div class="text-xs font-semibold text-white/80">입력 대기 뱃지 + 차임</div>
-          <div class="text-[10px] text-white/30">assistant end_turn 감지 시 TOP 10 행의 프로젝트 이름 좌측에 ⏳ 입력 대기 뱃지 + 짧은 차임 소리 (C5→G5)</div>
+          <div class="text-[10px] text-white/30">assistant end_turn 감지 시 TOP 5 행의 프로젝트 이름 좌측에 ⏳ 입력 대기 뱃지 + 짧은 차임 소리 (C5→G5)</div>
         </div>
         <button id="idleNotifyToggle" onclick="toggleIdleNotify()"
                 class="rounded-full px-4 py-1.5 text-[11px] font-bold spring">—</button>

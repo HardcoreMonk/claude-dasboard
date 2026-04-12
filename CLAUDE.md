@@ -19,7 +19,7 @@ tests/              3098줄  131 pytest (parser 37 · database 10 · watcher 9 �
 static/index.html    809줄  Tailwind 쉘 + drawer preview 패널 + idle notify 설정
 static/app.js       2683줄  core: state/ws/routing/utils/modals + h() + idle notify (batch-deferred chime) + Web Audio chime
 static/sessions.js   543줄  sessions domain: load, filters, presets, bulk, mgmt
-static/overview.js   333줄  hero/chips/forecast/top10 + slide drawer + active-first sort
+static/overview.js   333줄  hero/chips/forecast/top5 + slide drawer + active-first sort
 static/plan.js       190줄  plan usage + settings modal
 static/subagents.js  125줄  heatmap + success matrix
 static/charts.js     125줄  theme-aware Chart.js

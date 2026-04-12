@@ -843,7 +843,7 @@ def api_projects(
 
 @app.get("/api/projects/top")
 def api_projects_top(
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(5, ge=1, le=50),
     with_last_message: bool = Query(False),
     active_window_minutes: int = Query(30, ge=1, le=1440),
 ):
@@ -851,7 +851,7 @@ def api_projects_top(
     ``active_window_minutes`` minutes are surfaced first (sorted by most
     recent activity); the remaining slots are filled by cost-ranked
     projects. Set ``with_last_message=true`` to attach the most recent
-    assistant message preview for the overview TOP 10 widget.
+    assistant message preview for the overview TOP 5 widget.
     """
     # Fetch a wider candidate pool so we can re-rank in Python: enough that
     # actives + top-by-cost never loses a legitimate entry.
