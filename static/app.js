@@ -788,9 +788,9 @@ function notifyIdleFromBatch(records) {
   if (!Array.isArray(records) || !records.length) return;
   if (_prefs.idleNotify === false) return;  // opt-out via settings
   let changed = false;
-  // Collect projects that became newly idle in THIS batch. Chimes are
-  // deferred until after the entire batch is processed so that an
-  // intermediate end_turn followed by more tool_use in the same batch
+  // Collect projects that became newly idle (chime-worthy) in THIS batch.
+  // Chimes are deferred until after the entire batch is processed so that
+  // an intermediate end_turn followed by more tool_use in the same batch
   // does NOT produce a spurious chime.
   const newlyIdle = new Set();
   for (const r of records) {
@@ -804,17 +804,15 @@ function notifyIdleFromBatch(records) {
 
     if (r.stop_reason === 'end_turn') {
       if (r.is_subagent) {
-        // Subagent finished — does NOT mean the project is idle. The
-        // parent session will receive the result and continue working.
-        // Just clear any existing idle flag (subagent was active).
+        // Subagent finished — parent will receive the result and continue.
+        // Clear any active status (don't mark idle).
         if (state.idleProjects[key]) {
           delete state.idleProjects[key];
           changed = true;
         }
         newlyIdle.delete(key);
       } else {
-        // Parent/main session finished its turn — tentatively flag as
-        // idle. Chime plays only if STILL idle after the full batch.
+        // Parent/main session finished its turn — flag as idle.
         state.idleProjects[key] = {
           ts: Date.now(),
           preview: (r.preview || '').slice(0, 160),
@@ -826,38 +824,50 @@ function notifyIdleFromBatch(records) {
         newlyIdle.add(key);
       }
     } else if (r.stop_reason === 'tool_use') {
-      // Claude called a tool. Delay-flag as idle: if nothing else arrives
-      // for this project within 5s, treat it as "awaiting permission /
-      // tool confirmation". This catches Bash command_substitution prompts
-      // that block until the user approves.
-      const rec = {
-        key,
-        project_name: r.project_name,
-        project_path: r.project_path,
-        preview: r.preview || '[Tool] 권한 승인 대기 중',
-      };
-      const handle = setTimeout(() => {
-        _pendingToolUseTimers.delete(rec.key);
-        // Re-check opt-out — user may have toggled off in the meantime
-        if (_prefs.idleNotify === false) return;
-        state.idleProjects[rec.key] = {
+      if (r.is_subagent) {
+        // Subagent called a tool — subagent is actively working.
+        state.idleProjects[key] = {
           ts: Date.now(),
-          preview: rec.preview.slice(0, 160),
-          project_name: rec.project_name,
-          project_path: rec.project_path,
-          reason: 'tool_use',
+          preview: (r.preview || '').slice(0, 160),
+          project_name: r.project_name,
+          project_path: r.project_path,
+          reason: 'active_subagent',
         };
-        _playIdleChime();
-        if (typeof loadTopProjects === 'function') loadTopProjects();
-      }, TOOL_USE_IDLE_DELAY_MS);
-      _pendingToolUseTimers.set(key, handle);
-      // Also clear any EXISTING idle flag for this project — Claude is
-      // actively working again (no longer end_turn idle).
-      if (state.idleProjects[key]) {
-        delete state.idleProjects[key];
         changed = true;
+        newlyIdle.delete(key);
+      } else {
+        // Parent called a tool — mark as "active_tool" immediately,
+        // then after 15s silence escalate to "idle_tool_use" (permission).
+        state.idleProjects[key] = {
+          ts: Date.now(),
+          preview: (r.preview || '').slice(0, 160),
+          project_name: r.project_name,
+          project_path: r.project_path,
+          reason: 'active_tool',
+        };
+        changed = true;
+        newlyIdle.delete(key);
+        const rec = {
+          key,
+          project_name: r.project_name,
+          project_path: r.project_path,
+          preview: r.preview || '[Tool] 권한 승인 대기 중',
+        };
+        const handle = setTimeout(() => {
+          _pendingToolUseTimers.delete(rec.key);
+          if (_prefs.idleNotify === false) return;
+          state.idleProjects[rec.key] = {
+            ts: Date.now(),
+            preview: rec.preview.slice(0, 160),
+            project_name: rec.project_name,
+            project_path: rec.project_path,
+            reason: 'tool_use',
+          };
+          _playIdleChime();
+          if (typeof loadTopProjects === 'function') loadTopProjects();
+        }, TOOL_USE_IDLE_DELAY_MS);
+        _pendingToolUseTimers.set(key, handle);
       }
-      newlyIdle.delete(key);
     } else if (r.stop_reason) {
       // Any other stop_reason (max_tokens, stop_sequence, refusal) — treat
       // as "done working", clear the idle flag if set.

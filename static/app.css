@@ -238,6 +238,12 @@ body.theme-light .text-red-400,
 body.theme-light .text-red-200 { color: #b91c1c !important; }
 body.theme-light .text-amber-200 { color: #92400e !important; }
 body.theme-light .text-emerald-200 { color: #047857 !important; }
+body.theme-light .text-blue-300,
+body.theme-light .text-blue-300\/90,
+body.theme-light .text-blue-400 { color: #1d4ed8 !important; }
+body.theme-light .bg-blue-500\/10,
+body.theme-light .bg-blue-500\/15 { background: rgba(59,130,246,.18) !important; }
+body.theme-light .ring-blue-500\/40 { --tw-ring-color: rgba(59,130,246,.40) !important; }
 
 /* ── Additional backgrounds ── */
 body.theme-light .bg-emerald-500\/\[0\.02\] { background: rgba(16,185,129,.06) !important; }

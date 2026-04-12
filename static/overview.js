@@ -183,14 +183,23 @@ async function loadTopProjects() {
       const liveBadge = p.is_active
         ? `<span class="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300/90 ring-1 ring-emerald-500/40 text-[9px] font-bold uppercase tracking-wider align-middle" title="최근 30분 이내 활동"><span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>LIVE</span>`
         : '';
-      // Idle badge — shown to the LEFT of the project name when Claude has
-      // just finished an assistant turn (stop_reason === end_turn) and is
-      // waiting for user input. Cleared when the next activity arrives.
+      // Status badge — shown to the LEFT of the project name. Different
+      // styles for different states: idle (amber), active tool (cyan),
+      // active subagent (blue).
       const idleKey = (p.project_name || '') + '|' + (p.project_path || '');
       const idleEntry = (state.idleProjects && state.idleProjects[idleKey]) || null;
-      const idleBadge = idleEntry
-        ? `<span class="mr-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300/95 ring-1 ring-amber-500/40 text-[9px] font-bold uppercase tracking-wider align-middle animate-pulse" title="${esc(idleEntry.preview || '응답 완료 — 입력 대기 중')}"><iconify-icon icon="solar:hourglass-line-linear" width="10" class="inline"></iconify-icon>입력 대기</span>`
-        : '';
+      let idleBadge = '';
+      if (idleEntry) {
+        const STATUS_BADGE = {
+          'end_turn':        { label: '입력 대기',       icon: 'solar:hourglass-line-linear',    bg: 'bg-amber-500/15', text: 'text-amber-300/95', ring: 'ring-amber-500/40',   pulse: true  },
+          'tool_use':        { label: '권한 승인 대기',  icon: 'solar:shield-check-linear',      bg: 'bg-amber-500/15', text: 'text-amber-300/95', ring: 'ring-amber-500/40',   pulse: true  },
+          'active_subagent': { label: '에이전트 작업 중', icon: 'solar:cpu-bolt-linear',          bg: 'bg-blue-500/15',  text: 'text-blue-300/90',  ring: 'ring-blue-500/40',    pulse: true  },
+          'active_tool':     { label: '도구 실행 중',    icon: 'solar:settings-minimalistic-linear', bg: 'bg-cyan-500/15',  text: 'text-cyan-300/90',  ring: 'ring-cyan-500/30',    pulse: false },
+        };
+        const cfg = STATUS_BADGE[idleEntry.reason] || STATUS_BADGE['end_turn'];
+        const title = esc(idleEntry.preview || cfg.label);
+        idleBadge = `<span class="mr-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full ${cfg.bg} ${cfg.text} ring-1 ${cfg.ring} text-[9px] font-bold uppercase tracking-wider align-middle${cfg.pulse ? ' animate-pulse' : ''}" title="${title}"><iconify-icon icon="${cfg.icon}" width="10" class="inline"></iconify-icon>${cfg.label}</span>`;
+      }
       const row = document.createElement('div');
       row.className = 'grid grid-cols-[28px_1fr_auto_auto_auto] items-start gap-2 py-4 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-2 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
       row.title = '클릭하여 프로젝트 상세 보기';
