@@ -143,9 +143,10 @@ body.theme-light .border-white\/\[0\.07\] { border-color: rgba(0,0,0,.10) !impor
 body.theme-light .text-white\/90, body.theme-light .text-white\/85, body.theme-light .text-white\/80 { color: rgba(0,0,0,.88) !important; }
 body.theme-light .text-white\/75, body.theme-light .text-white\/70, body.theme-light .text-white\/65 { color: rgba(0,0,0,.72) !important; }
 body.theme-light .text-white\/60, body.theme-light .text-white\/55 { color: rgba(0,0,0,.62) !important; }
-body.theme-light .text-white\/50, body.theme-light .text-white\/45, body.theme-light .text-white\/40 { color: rgba(0,0,0,.50) !important; }
-body.theme-light .text-white\/35, body.theme-light .text-white\/30 { color: rgba(0,0,0,.38) !important; }
-body.theme-light .text-white\/25, body.theme-light .text-white\/20, body.theme-light .text-white\/15 { color: rgba(0,0,0,.28) !important; }
+body.theme-light .text-white\/50, body.theme-light .text-white\/45, body.theme-light .text-white\/40 { color: rgba(0,0,0,.64) !important; }
+body.theme-light .text-white\/35, body.theme-light .text-white\/30 { color: rgba(0,0,0,.56) !important; }
+body.theme-light .text-white\/25, body.theme-light .text-white\/20, body.theme-light .text-white\/15 { color: rgba(0,0,0,.56) !important; }
+body.theme-light .text-white\/10, body.theme-light .text-white\/5 { color: rgba(0,0,0,.36) !important; }
 body.theme-light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); }
 body.theme-light table > thead { background: rgba(246,247,249,.90); }
 body.theme-light .bg-\[\#111\],
@@ -172,9 +173,11 @@ body.theme-light .text-purple-400\/60 { color: #6d28d9 !important; }
 body.theme-light .text-red-300\/80,
 body.theme-light .text-red-400\/80,
 body.theme-light .text-red-400\/85 { color: #b91c1c !important; }
-body.theme-light .text-accent { color: #047857 !important; }
+body.theme-light .text-accent { color: #065f46 !important; }
 body.theme-light .text-accent\/60,
-body.theme-light .text-accent\/80 { color: #047857 !important; }
+body.theme-light .text-accent\/80 { color: #065f46 !important; }
+/* Nav pill active state — must contrast on white nav bg */
+body.theme-light .nav-pill.active { color: #065f46 !important; }
 /* Pill badge backgrounds — slightly tinted instead of white */
 body.theme-light .bg-amber-500\/10,
 body.theme-light .bg-amber-500\/15 { background: rgba(245,158,11,.18) !important; }
@@ -213,12 +216,14 @@ body.theme-light .ring-accent\/30 { --tw-ring-color: rgba(16,185,129,.35) !impor
 
 /* ── Base accent text colors without opacity — remap to dark-on-light ── */
 body.theme-light .text-amber-400,
-body.theme-light .text-amber-300 { color: #b45309 !important; }
+body.theme-light .text-amber-300,
+body.theme-light .text-orange-400 { color: #b45309 !important; }
 body.theme-light .text-amber-300\/45,
 body.theme-light .text-amber-300\/95 { color: #92400e !important; }
 body.theme-light .text-emerald-400,
 body.theme-light .text-emerald-300,
-body.theme-light .text-emerald-300\/90 { color: #047857 !important; }
+body.theme-light .text-emerald-300\/85,
+body.theme-light .text-emerald-300\/90 { color: #065f46 !important; }
 body.theme-light .text-cyan-400,
 body.theme-light .text-cyan-300,
 body.theme-light .text-cyan-300\/80,
