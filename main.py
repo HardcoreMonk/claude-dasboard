@@ -86,15 +86,18 @@ def detect_plan() -> dict:
 class ConnectionManager:
     def __init__(self):
         self._conns: list[WebSocket] = []
+        self._locks: dict[WebSocket, asyncio.Lock] = {}
 
     async def connect(self, ws: WebSocket):
         await ws.accept()
         self._conns.append(ws)
+        self._locks[ws] = asyncio.Lock()
         logger.info("WS connected (%d total)", len(self._conns))
         if _PROMETHEUS_OK:
             METRIC_WS.set(len(self._conns))
 
     def disconnect(self, ws: WebSocket):
+        self._locks.pop(ws, None)
         try:
             self._conns.remove(ws)
         except ValueError:
@@ -102,20 +105,29 @@ class ConnectionManager:
         if _PROMETHEUS_OK:
             METRIC_WS.set(len(self._conns))
 
+    def get_lock(self, ws: WebSocket) -> asyncio.Lock:
+        return self._locks.get(ws) or asyncio.Lock()
+
     async def broadcast(self, data: dict):
         if not self._conns:
             return
         payload = json.dumps(data)
         dead: list[WebSocket] = []
         for ws in list(self._conns):
+            lock = self._locks.get(ws)
             try:
-                await ws.send_text(payload)
+                if lock:
+                    async with lock:
+                        await ws.send_text(payload)
+                else:
+                    await ws.send_text(payload)
             except Exception as exc:
                 logger.warning("WS send failed, removing client: %s", exc)
                 dead.append(ws)
         for ws in dead:
             try:
                 self._conns.remove(ws)
+                self._locks.pop(ws, None)
             except ValueError:
                 pass
 
@@ -388,17 +400,21 @@ async def websocket_endpoint(ws: WebSocket):
         await ws.close(code=4001, reason="Unauthorized")
         return
     await manager.connect(ws)
+    lock = manager.get_lock(ws)
     try:
         stats = _get_stats()
-        await ws.send_text(json.dumps({'type': 'init', 'data': stats}))
+        async with lock:
+            await ws.send_text(json.dumps({'type': 'init', 'data': stats}))
         while True:
             try:
                 msg = await asyncio.wait_for(ws.receive_text(), timeout=30)
                 if msg == 'ping':
-                    await ws.send_text('pong')
+                    async with lock:
+                        await ws.send_text('pong')
             except asyncio.TimeoutError:
                 try:
-                    await ws.send_text(json.dumps({'type': 'ping'}))
+                    async with lock:
+                        await ws.send_text(json.dumps({'type': 'ping'}))
                 except Exception:
                     break
     except WebSocketDisconnect:

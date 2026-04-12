@@ -698,21 +698,25 @@ function _idleKey(p) {
   return (p.project_name || '') + '|' + (p.project_path || '');
 }
 
-// Per-session timers for pending tool_use messages. When Claude calls a
+// Per-project timers for pending tool_use messages. When Claude calls a
 // tool (especially Bash with command_substitution), Claude Code may show
 // the user a "Do you want to proceed?" permission prompt. From the
 // dashboard's view, all we see is an assistant message with stop_reason=
 // 'tool_use' followed by silence — there's no explicit marker. We use a
-// 5-second idle window: if no follow-up arrives for the session, treat it
-// as "waiting for user input" (likely a permission prompt or confirmation).
-const _pendingToolUseTimers = new Map();  // sessionId → setTimeout handle
+// 5-second idle window: if no follow-up arrives for the *project*, treat
+// it as "waiting for user input" (likely a permission prompt or
+// confirmation).
+//
+// Keyed by project key (not session_id) so that subagent activity in the
+// same project correctly cancels the parent session's pending timer.
+const _pendingToolUseTimers = new Map();  // projectKey → setTimeout handle
 const TOOL_USE_IDLE_DELAY_MS = 5000;
 
-function _cancelPendingToolUse(sid) {
-  const handle = _pendingToolUseTimers.get(sid);
+function _cancelPendingToolUse(projectKey) {
+  const handle = _pendingToolUseTimers.get(projectKey);
   if (handle) {
     clearTimeout(handle);
-    _pendingToolUseTimers.delete(sid);
+    _pendingToolUseTimers.delete(projectKey);
   }
 }
 
@@ -720,18 +724,24 @@ function notifyIdleFromBatch(records) {
   if (!Array.isArray(records) || !records.length) return;
   if (_prefs.idleNotify === false) return;  // opt-out via settings
   let changed = false;
+  // Collect projects that became newly idle in THIS batch. Chimes are
+  // deferred until after the entire batch is processed so that an
+  // intermediate end_turn followed by more tool_use in the same batch
+  // does NOT produce a spurious chime.
+  const newlyIdle = new Set();
   for (const r of records) {
     if (!r || r.type !== 'new_message') continue;
     const key = _idleKey(r);
     if (!key) continue;
-    const sid = r.session_id;
 
-    // Any new message for this session cancels a previously-scheduled
-    // tool_use idle timer — Claude is still active.
-    if (sid) _cancelPendingToolUse(sid);
+    // Any new message for this project cancels a previously-scheduled
+    // tool_use idle timer — Claude (or a subagent) is still active.
+    _cancelPendingToolUse(key);
 
     if (r.stop_reason === 'end_turn') {
-      // Claude finished its turn — immediately flag as idle.
+      // Claude finished its turn — tentatively flag as idle. The chime
+      // will only play if the project is STILL idle after all records in
+      // this batch have been processed.
       state.idleProjects[key] = {
         ts: Date.now(),
         preview: (r.preview || '').slice(0, 160),
@@ -740,41 +750,40 @@ function notifyIdleFromBatch(records) {
         reason: 'end_turn',
       };
       changed = true;
-      _playIdleChime();
+      newlyIdle.add(key);
     } else if (r.stop_reason === 'tool_use') {
       // Claude called a tool. Delay-flag as idle: if nothing else arrives
-      // for this session within 5s, treat it as "awaiting permission /
+      // for this project within 5s, treat it as "awaiting permission /
       // tool confirmation". This catches Bash command_substitution prompts
       // that block until the user approves.
-      if (sid) {
-        const rec = {
-          key,
-          project_name: r.project_name,
-          project_path: r.project_path,
-          preview: r.preview || '[Tool] 권한 승인 대기 중',
+      const rec = {
+        key,
+        project_name: r.project_name,
+        project_path: r.project_path,
+        preview: r.preview || '[Tool] 권한 승인 대기 중',
+      };
+      const handle = setTimeout(() => {
+        _pendingToolUseTimers.delete(rec.key);
+        // Re-check opt-out — user may have toggled off in the meantime
+        if (_prefs.idleNotify === false) return;
+        state.idleProjects[rec.key] = {
+          ts: Date.now(),
+          preview: rec.preview.slice(0, 160),
+          project_name: rec.project_name,
+          project_path: rec.project_path,
+          reason: 'tool_use',
         };
-        const handle = setTimeout(() => {
-          _pendingToolUseTimers.delete(sid);
-          // Re-check opt-out — user may have toggled off in the meantime
-          if (_prefs.idleNotify === false) return;
-          state.idleProjects[rec.key] = {
-            ts: Date.now(),
-            preview: rec.preview.slice(0, 160),
-            project_name: rec.project_name,
-            project_path: rec.project_path,
-            reason: 'tool_use',
-          };
-          _playIdleChime();
-          if (typeof loadTopProjects === 'function') loadTopProjects();
-        }, TOOL_USE_IDLE_DELAY_MS);
-        _pendingToolUseTimers.set(sid, handle);
-      }
+        _playIdleChime();
+        if (typeof loadTopProjects === 'function') loadTopProjects();
+      }, TOOL_USE_IDLE_DELAY_MS);
+      _pendingToolUseTimers.set(key, handle);
       // Also clear any EXISTING idle flag for this project — Claude is
       // actively working again (no longer end_turn idle).
       if (state.idleProjects[key]) {
         delete state.idleProjects[key];
         changed = true;
       }
+      newlyIdle.delete(key);
     } else if (r.stop_reason) {
       // Any other stop_reason (max_tokens, stop_sequence, refusal) — treat
       // as "done working", clear the idle flag if set.
@@ -782,7 +791,14 @@ function notifyIdleFromBatch(records) {
         delete state.idleProjects[key];
         changed = true;
       }
+      newlyIdle.delete(key);
     }
+  }
+  // Play chimes only for projects that are STILL idle after processing
+  // the entire batch. This prevents spurious chimes when an intermediate
+  // end_turn is immediately followed by more tool_use in the same batch.
+  for (const key of newlyIdle) {
+    if (state.idleProjects[key]) _playIdleChime();
   }
   if (changed) {
     if (typeof loadTopProjects === 'function') loadTopProjects();

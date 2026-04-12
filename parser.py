@@ -359,22 +359,29 @@ def _ensure_session(sid: str, file_path: str, record: dict, db: sqlite3.Connecti
     if cur.rowcount > 0:
         return project_path, project_name
 
-    # Existing row — two possible heals:
-    #   a) project_path drifted (from pre-v4 dash-decoding); fix it.
-    #   b) legacy row tagged as its own subagent (parent_session_id = id);
-    #      clear the flag. Only touch the row when we can prove a mismatch.
-    need_path_update = (
-        project_path and record.get('cwd') and
-        (db.execute('SELECT project_path FROM sessions WHERE id = ?', (sid,))
-           .fetchone() or {'project_path': ''})['project_path'] != project_path
-    )
-    if need_path_update:
+    # Existing row — return the STORED project identity so that subsequent
+    # records with a different cwd (subdir, subagent, missing cwd) don't
+    # cause the project name to drift at runtime.  Only back-fill if the
+    # stored values are empty (legacy rows from before cwd tracking).
+    row = db.execute(
+        'SELECT project_path, project_name FROM sessions WHERE id = ?',
+        (sid,),
+    ).fetchone()
+    stored_path = (row['project_path'] if row else '') or ''
+    stored_name = (row['project_name'] if row else '') or ''
+
+    if stored_path and stored_name:
+        return stored_path, stored_name
+
+    # Back-fill: stored values are empty — upgrade with current record's cwd.
+    if project_path and project_name:
         db.execute(
             'UPDATE sessions SET project_path = ?, project_name = ? WHERE id = ?',
             (project_path, project_name, sid),
         )
+        return project_path, project_name
 
-    return project_path, project_name
+    return stored_path or project_path, stored_name or project_name
 
 
 def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection) -> Optional[dict]:

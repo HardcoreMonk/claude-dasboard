@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_FAST = 3.0    # fallback polling when watchdog unavailable
 POLL_INTERVAL_SLOW = 30.0   # safety-net polling while watchdog is active
+OBSERVER_HEALTH_INTERVAL = 60.0  # check observer liveness every 60s
 MAX_RETRIES = 3
 SCAN_BATCH = 8              # parallel file-parse workers during initial scan
 
@@ -83,9 +84,16 @@ class _JsonlEventHandler(FileSystemEventHandler if _WATCHDOG_OK else object):
         if not path.endswith('.jsonl'):
             return
         try:
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, path)
-        except RuntimeError:
-            pass  # loop closing
+            self._loop.call_soon_threadsafe(self._safe_put, path)
+        except (RuntimeError, AttributeError):
+            pass  # loop closing or queue not yet initialised
+
+    def _safe_put(self, path: str):
+        """Called on the event-loop thread by call_soon_threadsafe."""
+        try:
+            self._queue.put_nowait(path)
+        except asyncio.QueueFull:
+            pass  # back-pressure: safety poll will catch up
 
     def on_modified(self, event):
         if not getattr(event, 'is_directory', False):
@@ -189,13 +197,35 @@ class ClaudeFileWatcher:
         await self._broadcast({'type': 'scan_complete', 'total': total})
         logger.info("Initial scan complete: %d files", total)
 
+    def _check_observer_health(self):
+        """Restart watchdog observer if it died at runtime."""
+        if not _WATCHDOG_OK:
+            return
+        if self._observer is not None and not self._observer.is_alive():
+            logger.warning("watchdog observer died — restarting")
+            try:
+                self._observer.stop()
+            except Exception:
+                pass
+            self._observer = None
+            self._start_observer()
+
     async def _event_loop(self):
         """Primary driver: drain watchdog events, periodic safety-net poll."""
         loop = asyncio.get_event_loop()
         poll_interval = POLL_INTERVAL_SLOW if self._observer else POLL_INTERVAL_FAST
+        last_health_check = loop.time()
         logger.info("Watcher event loop: poll every %.0fs, watchdog=%s",
                     poll_interval, bool(self._observer))
         while True:
+            # Periodic observer health check
+            now = loop.time()
+            if now - last_health_check >= OBSERVER_HEALTH_INTERVAL:
+                self._check_observer_health()
+                # Adjust poll interval if observer state changed
+                poll_interval = POLL_INTERVAL_SLOW if self._observer else POLL_INTERVAL_FAST
+                last_health_check = now
+
             try:
                 path = await asyncio.wait_for(
                     self._event_queue.get(), timeout=poll_interval)

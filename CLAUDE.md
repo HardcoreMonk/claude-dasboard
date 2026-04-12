@@ -6,21 +6,21 @@
 ## 파일 라인맵
 
 ```
-main.py             2074줄  FastAPI 47 routes + /metrics + WS + summarize_preview + 미들웨어
-database.py          745줄  WAL + thread-local + v1→v11 마이그레이션 + FTS5 × 2
-parser.py            501줄  JSONL 파싱, cwd 식별, subagent split, PARSE_STATS 카운터
-watcher.py           341줄  watchdog + safety poll + WatcherMetrics 의존성 주입
-import_claude_ai.py  287줄  일회성 CLI — claude.ai export 인포터 (update detection)
+main.py             2124줄  FastAPI 47 routes + /metrics + WS (per-conn lock) + summarize_preview + _iso_to_epoch
+database.py          750줄  WAL + thread-local + v1→v11 마이그레이션 + FTS5 × 2 + auto_vacuum=INCREMENTAL
+parser.py            535줄  JSONL 파싱, cwd 식별 (최초 고정), subagent split, PARSE_STATS, stop_reason+preview forwarding
+watcher.py           371줄  watchdog (health check + auto-restart) + safety poll + WatcherMetrics 의존성 주입
+import_claude_ai.py  282줄  일회성 CLI — claude.ai export 인포터 (update detection)
 backup.sh · restore.sh · rebuild.sh           DR 스크립트 (백업/복원/재빌드)
 claude-dashboard-retention.{service,timer}    주간 retention 타이머
-tests/              2615줄  131 pytest (parser 37 · database 10 · watcher 9 · api 33 · contract 31 · backup 3 · e2e 8)
+tests/              3098줄  131 pytest (parser 37 · database 10 · watcher 9 · api 33 · contract 31 · backup 3 · e2e 8)
 
-# Frontend — 6 파일 모듈화
-static/index.html    766줄  Tailwind 쉘 + 2-col 개요 레이아웃
-static/app.js       2465줄  core: state/ws/routing/utils/modals + h() DOM helper
+# Frontend — 7 파일 모듈화 (sessions.js 추가 후)
+static/index.html    809줄  Tailwind 쉘 + drawer preview 패널 + idle notify 설정
+static/app.js       2683줄  core: state/ws/routing/utils/modals + h() + idle notify (batch-deferred chime) + Web Audio chime
 static/sessions.js   543줄  sessions domain: load, filters, presets, bulk, mgmt
+static/overview.js   333줄  hero/chips/forecast/top10 + slide drawer + active-first sort
 static/plan.js       190줄  plan usage + settings modal
-static/overview.js   190줄  hero/chips/forecast/top10
 static/subagents.js  125줄  heatmap + success matrix
 static/charts.js     125줄  theme-aware Chart.js
 static/app.css       298줄  스타일 + 라이트모드 + 반응형
@@ -61,9 +61,10 @@ pyproject.toml               ruff + pytest 설정
 - SQL 읽기 시 `cost_micro * 1.0 / 1000000 AS cost_usd` 로 변환.
 - **float 로 누적하는 새 코드를 추가하지 말 것.**
 
-### 프로젝트 식별은 cwd 가 정답
+### 프로젝트 식별은 cwd 가 정답 — 최초 값 고정
 - JSONL 레코드의 `cwd` 필드가 1차 소스. `Path(cwd).name` 이 display name (`project_name`), 원본이 `project_path`.
 - parser 는 cwd 우선, fallback 으로만 디렉터리 dash 인코딩 추정.
+- **세션의 `project_path`/`project_name` 은 최초 INSERT 시 결정되며 이후 변경되지 않는다.** 후속 레코드의 `cwd` 가 서브디렉터리·subagent 등으로 달라져도 무시. 빈 값 back-fill 만 허용.
 - 디렉터리명에서 프로젝트를 역산하면 `claude-dashboard` ↔ `dashboard` 같은 손실이 생긴다 — **하지 말 것.**
 
 ### session.model 은 real model 일 때만 갱신
@@ -91,7 +92,7 @@ pyproject.toml               ruff + pytest 설정
 
 ## 마이그레이션 (`PRAGMA user_version` 기반)
 
-`SCHEMA_VERSION=9`. `init_db()` 가 시작 시 차분 적용 (v0→v9). 새 마이그레이션 추가 시:
+`SCHEMA_VERSION=11`. `init_db()` 가 시작 시 차분 적용 (v0→v11). 새 마이그레이션 추가 시:
 
 1. `SCHEMA_VERSION` 을 bump.
 2. `v(N-1)_to_v(N)()` 함수를 `database.py` 에 추가.
@@ -120,6 +121,7 @@ pyproject.toml               ruff + pytest 설정
 - 미들웨어 스택: **metrics (외부) → auth (내부) → route**. 순서를 뒤집으면 401 이 메트릭에서 누락된다.
 - `http_requests_total{method,path,status}` 은 **라우트 템플릿** 기반 (path param 을 그대로 쓰면 cardinality 폭발).
 - 새 WebSocket 연결이 추가되면 `dashboard_ws_connections` 게이지를 increment/decrement 할 것.
+- **WebSocket concurrent write 방지**: `ConnectionManager` 가 per-connection `asyncio.Lock` 을 관리. `broadcast()` 와 keepalive ping 모두 이 lock 을 통과해야 한다.
 
 ## 보안 체크리스트
 
@@ -134,7 +136,8 @@ pyproject.toml               ruff + pytest 설정
 
 ## 프런트 수정 시
 
-- 캐시버스팅: `static/index.html` 안의 `?v=N` 을 bump (현재 v=16).
+- 캐시버스팅: **파일명 기반** — `/static/app.vN.js` / `app.vN.css`. `index.html` 의 `.vN` 을 일괄 bump (현재 v=49). 서버의 `/static/{path:path}` 라우트가 정규식으로 `.vN` 을 strip 해 실제 파일을 서빙한다.
+- SPA 엔트리 HTML (`/`) 은 `Cache-Control: no-store` — 브라우저가 stale HTML 을 들고 stale 에셋을 참조하는 것을 막는다.
 - 정렬/필터 파라미터는 URL hash 에 반영되어야 한다 (`#/sessions?sort=cost&order=desc`).
 - WebSocket 이벤트는 `debouncedRefresh` 로 batch. 개별 refresh 로 돌리지 말 것.
 - 토스트는 `reportError(ctx, e)` / `toast.success(...)` 로 5 초 dedupe.
