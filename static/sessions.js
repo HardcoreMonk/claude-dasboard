@@ -383,7 +383,7 @@ function renderSessions(data){
       <td class="px-3 py-3 text-right text-white/55 tabular-nums">${fmtTok(s.total_input_tokens||0)}</td>
       <td class="px-3 py-3 text-right text-emerald-400/75 tabular-nums">${fmtTok(s.total_output_tokens||0)}</td>
       <td class="px-3 py-3 text-right text-cyan-400/75 tabular-nums" title="읽기 ${fmtN(s.total_cache_read_tokens||0)} / 생성 ${fmtN(s.total_cache_creation_tokens||0)}">${fmtTok(s.total_cache_read_tokens||0)}</td>
-      <td class="px-3 py-3 text-right"><span class="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/85 font-bold tabular-nums">${fmt$(s.total_cost_usd)}</span></td>
+      <td class="px-3 py-3 text-right"><span class="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/85 font-bold tabular-nums">${fmt$(s.total_cost_usd)}</span>${(()=>{const ms=s.turn_duration_ms||0;if(ms<=0||!(s.total_cost_usd>0))return '';const perHr=s.total_cost_usd/(ms/3600000);return '<div class="text-[9px] text-white/25 tabular-nums mt-0.5" title="비용 효율 ($/시간)">'+fmt$(perHr)+'/hr</div>';})()}</td>
       <td class="px-3 py-3 text-right">
         <div class="tabular-nums text-white/70">${fmtN(mc)}</div>
         ${msgSubtext}

@@ -144,7 +144,7 @@ function onViewChange(view) {
   if (view === 'conversations') loadConvList();
   if (view === 'models') loadModels();
   if (view === 'projects') loadProjects();
-  if (view === 'subagents') { loadSubagentHeatmap(); loadSubagentSuccessMatrix(); }
+  if (view === 'subagents') { loadSubagentHeatmap(); loadSubagentDetails(); loadSubagentSuccessMatrix(); }
   if (view === 'export') loadDbSize();
 }
 

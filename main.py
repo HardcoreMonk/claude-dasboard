@@ -623,6 +623,7 @@ def api_sessions(
                    s.is_subagent, s.parent_session_id,
                    s.agent_type, s.agent_description, s.version,
                    s.final_stop_reason, s.tags,
+                   s.turn_duration_ms,
                    {_DURATION_SQL} AS duration_seconds,
                    (SELECT COUNT(*) FROM sessions c
                     WHERE c.parent_session_id = s.id AND c.is_subagent = 1) AS subagent_count,

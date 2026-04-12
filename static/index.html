@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v53.css">
+<link rel="stylesheet" href="/static/app.v54.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -309,7 +309,7 @@ tailwind.config = {
     <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
         <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-white/40">모델 분포</span>
+          <span class="text-xs font-bold text-white/40">모델별 비용</span>
           <button class="text-white/25 hover:text-white/60 spring text-xs" onclick="downloadChart('models','models-chart.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
         </div>
         <div class="chart-h mt-3"><canvas id="chartModels"></canvas></div>
@@ -375,7 +375,53 @@ tailwind.config = {
       </div>
     </div>
   </div>
-  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d1 mt-3">
+  <!-- Totals + by_type summary -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3 anim-in anim-d1">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">유형별 요약</span>
+        <div id="subagentByType" class="mt-3 overflow-x-auto">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">종료 사유 분포</span>
+        <div id="subagentByStopReason" class="mt-3 overflow-x-auto">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Top by cost + duration + parents -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mt-3 anim-in anim-d2">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">비용 TOP 10</span>
+        <div id="subagentTopCost" class="mt-3 space-y-1">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">최장 소요 TOP 10</span>
+        <div id="subagentTopDuration" class="mt-3 space-y-1">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">최다 subagent 부모</span>
+        <div id="subagentTopParents" class="mt-3 space-y-1">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d3 mt-3">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
       <span class="text-xs font-bold text-white/40">SUBAGENT 종료 매트릭스 <span class="text-white/25 font-normal">(agentType × stop_reason)</span></span>
       <div id="subagentSuccessMatrix" class="mt-3 overflow-x-auto">
@@ -821,11 +867,11 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v53.js" defer></script>
-<script src="/static/sessions.v53.js" defer></script>
-<script src="/static/plan.v53.js" defer></script>
-<script src="/static/overview.v53.js" defer></script>
-<script src="/static/subagents.v53.js" defer></script>
-<script src="/static/charts.v53.js" defer></script>
+<script src="/static/app.v54.js" defer></script>
+<script src="/static/sessions.v54.js" defer></script>
+<script src="/static/plan.v54.js" defer></script>
+<script src="/static/overview.v54.js" defer></script>
+<script src="/static/subagents.v54.js" defer></script>
+<script src="/static/charts.v54.js" defer></script>
 </body>
 </html>

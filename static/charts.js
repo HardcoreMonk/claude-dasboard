@@ -101,10 +101,10 @@ async function loadUsageChart(){
 }
 async function loadModelChart(){
   const data=await safeFetch('/api/models');const rows=data.models||[];
-  const labels=rows.map(r=>shortModel(r.model)),vals=rows.map(r=>r.message_count||0);
+  const labels=rows.map(r=>shortModel(r.model)),vals=rows.map(r=>parseFloat((r.cost_usd||0).toFixed(4)));
   const pal=[CC.emerald,CC.blue,CC.amber,CC.rose,CC.cyan,CC.purple];
   if(state.charts.models)state.charts.models.destroy();
-  state.charts.models=new Chart(document.getElementById('chartModels'),{type:'doughnut',data:{labels,datasets:[{data:vals,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'65%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:6})},tooltip:tooltipOpts()}}});
+  state.charts.models=new Chart(document.getElementById('chartModels'),{type:'doughnut',data:{labels,datasets:[{data:vals,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'65%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:6})},tooltip:tooltipOpts({callbacks:{label:c=>` ${c.label}: $${c.raw.toFixed(2)}`}})}}});
 }
 async function loadDailyCostChart(){
   const data=await safeFetch('/api/usage/daily?days=30');const rows=data.data||[];
