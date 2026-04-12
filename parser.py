@@ -491,6 +491,9 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection) -> 
         # "input awaiting" notification when stop_reason === 'end_turn'.
         'stop_reason': stop_reason,
         'preview': preview[:300],
+        # Subagent flag: lets the frontend skip idle detection for subagent
+        # end_turn (subagent finishing ≠ project awaiting user input).
+        'is_subagent': is_subagent_file(file_path),
     }
 
 

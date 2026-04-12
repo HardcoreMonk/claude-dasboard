@@ -710,7 +710,7 @@ function _idleKey(p) {
 // Keyed by project key (not session_id) so that subagent activity in the
 // same project correctly cancels the parent session's pending timer.
 const _pendingToolUseTimers = new Map();  // projectKey → setTimeout handle
-const TOOL_USE_IDLE_DELAY_MS = 5000;
+const TOOL_USE_IDLE_DELAY_MS = 15000;
 
 function _cancelPendingToolUse(projectKey) {
   const handle = _pendingToolUseTimers.get(projectKey);
@@ -739,18 +739,28 @@ function notifyIdleFromBatch(records) {
     _cancelPendingToolUse(key);
 
     if (r.stop_reason === 'end_turn') {
-      // Claude finished its turn — tentatively flag as idle. The chime
-      // will only play if the project is STILL idle after all records in
-      // this batch have been processed.
-      state.idleProjects[key] = {
-        ts: Date.now(),
-        preview: (r.preview || '').slice(0, 160),
-        project_name: r.project_name,
-        project_path: r.project_path,
-        reason: 'end_turn',
-      };
-      changed = true;
-      newlyIdle.add(key);
+      if (r.is_subagent) {
+        // Subagent finished — does NOT mean the project is idle. The
+        // parent session will receive the result and continue working.
+        // Just clear any existing idle flag (subagent was active).
+        if (state.idleProjects[key]) {
+          delete state.idleProjects[key];
+          changed = true;
+        }
+        newlyIdle.delete(key);
+      } else {
+        // Parent/main session finished its turn — tentatively flag as
+        // idle. Chime plays only if STILL idle after the full batch.
+        state.idleProjects[key] = {
+          ts: Date.now(),
+          preview: (r.preview || '').slice(0, 160),
+          project_name: r.project_name,
+          project_path: r.project_path,
+          reason: 'end_turn',
+        };
+        changed = true;
+        newlyIdle.add(key);
+      }
     } else if (r.stop_reason === 'tool_use') {
       // Claude called a tool. Delay-flag as idle: if nothing else arrives
       // for this project within 5s, treat it as "awaiting permission /
