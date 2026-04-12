@@ -5,12 +5,11 @@ body { font-feature-settings: 'ss01','tnum'; }
 ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.08); border-radius:4px; }
 ::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,.15); }
 
-/* ── WCAG AA contrast floor ── */
+/* ── WCAG AA contrast floor (dark theme only) ── */
 /* Raise text-white/25~35 to minimum /45 for 4.5:1 ratio on #0a0a0a */
-.text-white\/25  { color: rgba(255,255,255,.45) !important; }
-.text-white\/30  { color: rgba(255,255,255,.45) !important; }
-.text-white\/35  { color: rgba(255,255,255,.48) !important; }
-.text-white\/\[0\.07\] { /* ring/border — keep subtle, not text */ }
+body:not(.theme-light) .text-white\/25  { color: rgba(255,255,255,.45) !important; }
+body:not(.theme-light) .text-white\/30  { color: rgba(255,255,255,.45) !important; }
+body:not(.theme-light) .text-white\/35  { color: rgba(255,255,255,.48) !important; }
 
 /* ── Animations ── */
 @keyframes fadeInUp {
@@ -193,6 +192,75 @@ body.theme-light .bg-red-500\/\[0\.06\] { background: rgba(220,38,38,.14) !impor
 body.theme-light .bg-accent\/10,
 body.theme-light .bg-accent\/15,
 body.theme-light .bg-accent\/20 { background: rgba(16,185,129,.18) !important; }
+
+/* ── Ring colors — all colored rings need light-theme mapping ── */
+body.theme-light .ring-emerald-500\/30,
+body.theme-light .ring-emerald-500\/40 { --tw-ring-color: rgba(16,185,129,.40) !important; }
+body.theme-light .ring-amber-500\/30,
+body.theme-light .ring-amber-500\/40 { --tw-ring-color: rgba(245,158,11,.40) !important; }
+body.theme-light .ring-cyan-500\/15,
+body.theme-light .ring-cyan-500\/20,
+body.theme-light .ring-cyan-500\/25,
+body.theme-light .ring-cyan-500\/30 { --tw-ring-color: rgba(6,182,212,.35) !important; }
+body.theme-light .ring-purple-500\/10,
+body.theme-light .ring-purple-500\/15,
+body.theme-light .ring-purple-500\/25 { --tw-ring-color: rgba(147,51,234,.30) !important; }
+body.theme-light .ring-red-500\/20,
+body.theme-light .ring-red-500\/25,
+body.theme-light .ring-red-500\/30 { --tw-ring-color: rgba(220,38,38,.30) !important; }
+body.theme-light .ring-accent\/20,
+body.theme-light .ring-accent\/30 { --tw-ring-color: rgba(16,185,129,.35) !important; }
+
+/* ── Base accent text colors without opacity — remap to dark-on-light ── */
+body.theme-light .text-amber-400,
+body.theme-light .text-amber-300 { color: #b45309 !important; }
+body.theme-light .text-amber-300\/45,
+body.theme-light .text-amber-300\/95 { color: #92400e !important; }
+body.theme-light .text-emerald-400,
+body.theme-light .text-emerald-300,
+body.theme-light .text-emerald-300\/90 { color: #047857 !important; }
+body.theme-light .text-cyan-400,
+body.theme-light .text-cyan-300,
+body.theme-light .text-cyan-300\/80,
+body.theme-light .text-cyan-200,
+body.theme-light .text-cyan-200\/90 { color: #0e7490 !important; }
+body.theme-light .text-purple-300,
+body.theme-light .text-purple-300\/75,
+body.theme-light .text-purple-400\/70,
+body.theme-light .text-purple-400\/80 { color: #6d28d9 !important; }
+body.theme-light .text-red-300,
+body.theme-light .text-red-400,
+body.theme-light .text-red-200 { color: #b91c1c !important; }
+body.theme-light .text-amber-200 { color: #92400e !important; }
+body.theme-light .text-emerald-200 { color: #047857 !important; }
+
+/* ── Additional backgrounds ── */
+body.theme-light .bg-emerald-500\/\[0\.02\] { background: rgba(16,185,129,.06) !important; }
+body.theme-light .bg-cyan-500\/\[0\.04\],
+body.theme-light .bg-cyan-500\/\[0\.06\] { background: rgba(6,182,212,.12) !important; }
+body.theme-light .bg-amber-500\/\[0\.08\] { background: rgba(245,158,11,.14) !important; }
+body.theme-light .bg-red-500\/20 { background: rgba(220,38,38,.16) !important; }
+body.theme-light .bg-black\/40 { background: rgba(0,0,0,.06) !important; }
+body.theme-light .bg-black\/60 { background: rgba(0,0,0,.35) !important; }
+
+/* ── Scrollbar ── */
+body.theme-light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12) !important; }
+body.theme-light ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.22) !important; }
+
+/* ── Table hover on light bg ── */
+body.theme-light tbody tr:hover { background: rgba(0,0,0,.03) !important; }
+
+/* ── Persistent error banner on light bg ── */
+body.theme-light #persistentErrorBanner {
+  background: rgba(220,38,38,.08) !important;
+  border: 1px solid rgba(220,38,38,.25) !important;
+  color: #991b1b !important;
+}
+
+/* ── Focus ring on light ── */
+body.theme-light :focus-visible {
+  outline-color: #047857;
+}
 
 /* claude.ai 소스 토글 & 배지 — 라이트모드 가독성 */
 body.theme-light .conv-source-btn {
