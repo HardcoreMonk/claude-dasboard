@@ -99,7 +99,7 @@ function sortPillHtml(view, col, label, size = 'text-[10px]') {
 }
 
 // ─── Navigation + URL hash routing ─────────────────────────────────────
-const VALID_VIEWS = new Set(['overview','cost','sessions','conversations','models','projects','subagents','export']);
+const VALID_VIEWS = new Set(['overview','cost','sessions','conversations','models','projects','subagents','timeline','export']);
 
 function showView(view, { updateHash = true } = {}) {
   if (!VALID_VIEWS.has(view)) view = 'overview';
@@ -140,11 +140,15 @@ function onViewChange(view) {
   } else {
     loadCharts();
   }
+  if (view !== 'timeline' && state.charts.timeline) {
+    state.charts.timeline.destroy(); state.charts.timeline = null;
+  }
   if (view === 'sessions') loadSessions();
   if (view === 'conversations') loadConvList();
   if (view === 'models') loadModels();
   if (view === 'projects') loadProjects();
   if (view === 'subagents') { loadSubagentHeatmap(); loadSubagentDetails(); loadSubagentSuccessMatrix(); }
+  if (view === 'timeline' && typeof loadTimeline === 'function') loadTimeline();
   if (view === 'export') loadDbSize();
 }
 
@@ -169,10 +173,21 @@ function applyHash() {
 
 window.addEventListener('hashchange', applyHash);
 
-// ─── Safe Fetch (retry + timeout) ───────────────────────────────────────
+// ─── Safe Fetch (retry + timeout + deduplication) ───────────────────────
 const FETCH_MAX_RETRIES = 3;
 const FETCH_TIMEOUT_MS = 15000;
+const _inflightRequests = new Map();  // url → Promise
 async function safeFetch(url) {
+  // Deduplicate: if an identical GET is already in-flight, piggyback on it
+  const existing = _inflightRequests.get(url);
+  if (existing) return existing;
+  const promise = _safeFetchInner(url).finally(() => {
+    _inflightRequests.delete(url);
+  });
+  _inflightRequests.set(url, promise);
+  return promise;
+}
+async function _safeFetchInner(url) {
   let lastErr;
   for (let attempt = 0; attempt < FETCH_MAX_RETRIES; attempt++) {
     try {
@@ -388,6 +403,7 @@ function _cmdkStaticItems() {
     { label: '모델',      hint: '모델 분석', icon: 'solar:cpu-bolt-linear', action: () => showView('models') },
     { label: '프로젝트',   hint: '프로젝트 목록', icon: 'solar:folder-open-linear', action: () => showView('projects') },
     { label: 'Subagent',  hint: '히트맵 + 종료 매트릭스', icon: 'solar:widget-2-linear', action: () => showView('subagents') },
+    { label: '타임라인',  hint: '작업 Gantt 차트', icon: 'solar:calendar-linear', action: () => showView('timeline') },
     { label: '관리',      hint: 'CSV / 백업 / 보존', icon: 'solar:database-linear', action: () => showView('export') },
     { label: '예산 설정',  hint: '플랜/예산 편집', icon: 'solar:settings-linear', action: () => openPlanSettings() },
     { label: '다크/라이트 전환', hint: '테마 토글', icon: 'solar:sun-linear', action: () => toggleTheme() },
@@ -1413,6 +1429,41 @@ document.addEventListener('click', (e) => {
   if (btn) convSetRoleFilter(btn.dataset.roleFilter);
 });
 
+// Render a single conversation message bubble into the container.
+// Used by both the initial load and "load more" pagination. All dynamic
+// values are fed through esc()/fmtTok()/fmt$() — no raw user input in
+// the HTML fragments.
+function _renderSingleMessage(container, m, allMsgs, prevBr) {
+  const w = document.createElement('div');
+  w.dataset.msgRole = m.role;
+  w.className = 'flex flex-col ' + (m.role === 'user' ? 'items-end' : 'items-start');
+  const b = document.createElement('div');
+  b.className = 'max-w-[92%] px-4 py-3 rounded-2xl text-[12px] leading-relaxed ' + (m.role === 'user' ? 'bg-accent/10 ring-1 ring-accent/20 text-white/85' : 'bg-white/[0.04] ring-1 ring-white/[0.06] text-white/75');
+  b.innerHTML = renderContent(m);  // renderContent returns sanitised HTML
+  const meta = document.createElement('div');
+  meta.className = 'text-[9px] text-white/30 mt-1 flex gap-2 items-center px-1 flex-wrap';
+  const parts = [`<span>${m.role === 'user' ? '사용자' : '어시스턴트'}</span>`, `<span>${fmtTime(m.timestamp)}</span>`];
+  if (m.role === 'assistant') {
+    if (m.input_tokens || m.output_tokens) parts.push(`<span class="text-cyan-400/60">↑${fmtTok(m.input_tokens)} ↓${fmtTok(m.output_tokens)}</span>`);
+    if (m.cache_read_tokens || m.cache_creation_tokens) parts.push(`<span class="text-purple-400/55" title="cache_read/cache_creation">cache ↓${fmtTok(m.cache_read_tokens || 0)}·↑${fmtTok(m.cache_creation_tokens || 0)}</span>`);
+    if (m.cost_usd) parts.push(`<span class="text-amber-400/75">${fmt$(m.cost_usd)}</span>`);
+    if (m.model) parts.push(`<span class="text-purple-400/60">${esc(shortModel(m.model))}</span>`);
+    if (m.stop_reason) parts.push(stopReasonBadge(m.stop_reason));
+  }
+  if (m.parent_uuid) {
+    const parentIdx = allMsgs.findIndex(x => x.uuid === m.parent_uuid || x.message_uuid === m.parent_uuid);
+    const myIdx = allMsgs.indexOf(m);
+    if (parentIdx >= 0 && parentIdx !== myIdx - 1) {
+      parts.push(`<span class="text-amber-400/55 font-mono" title="parent ${m.parent_uuid.slice(0, 8)} — ${myIdx - parentIdx}단계 차이">↳ ${(m.parent_uuid || '').slice(0, 8)}</span>`);
+    }
+  }
+  if (m.git_branch && m.git_branch !== prevBr) {
+    parts.push(`<span class="text-cyan-400/55 font-mono">⎇ ${esc(m.git_branch)}</span>`);
+  }
+  meta.innerHTML = parts.join(' · ');  // all values pre-escaped
+  w.appendChild(b); w.appendChild(meta); container.appendChild(w);
+}
+
 async function openConversation(sid,session,listItem){
   document.querySelectorAll('#convListBody > div').forEach(i=>i.classList.remove('bg-accent/5','border-l-2','border-accent'));
   if(listItem){listItem.classList.add('bg-accent/5','border-l-2','border-accent');}
@@ -1533,47 +1584,45 @@ async function openConversation(sid,session,listItem){
   convSetRoleFilter('all');
   let prevBranch = null;
   msgs.forEach(m=>{
-    const w=document.createElement('div');
-    w.dataset.msgRole = m.role;
-    w.className='flex flex-col '+(m.role==='user'?'items-end':'items-start');
-    const b=document.createElement('div');
-    b.className='max-w-[92%] px-4 py-3 rounded-2xl text-[12px] leading-relaxed '+(m.role==='user'?'bg-accent/10 ring-1 ring-accent/20 text-white/85':'bg-white/[0.04] ring-1 ring-white/[0.06] text-white/75');
-    b.innerHTML=renderContent(m);
-    const meta=document.createElement('div');
-    meta.className='text-[9px] text-white/30 mt-1 flex gap-2 items-center px-1 flex-wrap';
-    const parts=[`<span>${m.role==='user'?'사용자':'어시스턴트'}</span>`,`<span>${fmtTime(m.timestamp)}</span>`];
-    if(m.role==='assistant'){
-      if(m.input_tokens||m.output_tokens)parts.push(`<span class="text-cyan-400/60">↑${fmtTok(m.input_tokens)} ↓${fmtTok(m.output_tokens)}</span>`);
-      if(m.cache_read_tokens||m.cache_creation_tokens)parts.push(`<span class="text-purple-400/55" title="cache_read/cache_creation">cache ↓${fmtTok(m.cache_read_tokens||0)}·↑${fmtTok(m.cache_creation_tokens||0)}</span>`);
-      if(m.cost_usd)parts.push(`<span class="text-amber-400/75">${fmt$(m.cost_usd)}</span>`);
-      if(m.model)parts.push(`<span class="text-purple-400/60">${esc(shortModel(m.model))}</span>`);
-      if(m.stop_reason)parts.push(stopReasonBadge(m.stop_reason));
-    }
-    // B5: parent_uuid indicator when the chain forks or skips messages.
-    // Linear conversations are uninteresting (each parent points at the
-    // immediate predecessor) so we only show the link when the parent is
-    // NOT the previous message in the rendered list.
-    if (m.parent_uuid) {
-      const parentIdx = msgs.findIndex(x => x.uuid === m.parent_uuid || x.message_uuid === m.parent_uuid);
-      const myIdx = msgs.indexOf(m);
-      if (parentIdx >= 0 && parentIdx !== myIdx - 1) {
-        parts.push(`<span class="text-amber-400/55 font-mono" title="parent ${m.parent_uuid.slice(0,8)} — ${myIdx - parentIdx}단계 차이">↳ ${(m.parent_uuid||'').slice(0,8)}</span>`);
-      }
-    }
-    // Show branch label only when it changes — avoids clutter when whole
-    // session stays on one branch.
-    if (m.git_branch && m.git_branch !== prevBranch) {
-      parts.push(`<span class="text-cyan-400/55 font-mono">⎇ ${esc(m.git_branch)}</span>`);
-      prevBranch = m.git_branch;
-    }
-    meta.innerHTML=parts.join(' · ');
-    w.appendChild(b);w.appendChild(meta);c.appendChild(w);
+    _renderSingleMessage(c, m, msgs, prevBranch);
+    if (m.git_branch) prevBranch = m.git_branch;
   });
   if(data.total>msgs.length){
-    const h=document.createElement('div');
-    h.className='text-center text-[10px] text-white/30 py-3';
-    h.textContent=`${fmtN(msgs.length)} / ${fmtN(data.total)}건 표시 중`;
-    c.appendChild(h);
+    const loadMoreWrap=document.createElement('div');
+    loadMoreWrap.className='text-center py-4';
+    const remaining=data.total-msgs.length;
+    const info=document.createElement('div');
+    info.className='text-[10px] text-white/30 mb-2';
+    info.textContent=`${fmtN(msgs.length)} / ${fmtN(data.total)}건 표시 중`;
+    const btn=document.createElement('button');
+    btn.className='px-4 py-1.5 rounded-full bg-accent/10 text-accent border border-accent/30 text-[11px] font-bold spring hover:scale-[1.02]';
+    btn.textContent=`다음 ${fmtN(Math.min(remaining,200))}건 로드`;
+    btn.addEventListener('click',async()=>{
+      btn.disabled=true;btn.textContent='로딩 중…';
+      try{
+        const next=await safeFetch(`/api/sessions/${sid}/messages?limit=200&offset=${msgs.length}`);
+        const more=next.messages||[];
+        if(!more.length){loadMoreWrap.remove();return;}
+        loadMoreWrap.remove();
+        let prevBr=prevBranch;
+        more.forEach(m=>{
+          _renderSingleMessage(c,m,msgs,prevBr);
+          if(m.git_branch) prevBr=m.git_branch;
+          msgs.push(m);
+        });
+        prevBranch=prevBr;
+        if(data.total>msgs.length){
+          const r2=data.total-msgs.length;
+          info.textContent=`${fmtN(msgs.length)} / ${fmtN(data.total)}건 표시 중`;
+          btn.textContent=`다음 ${fmtN(Math.min(r2,200))}건 로드`;
+          btn.disabled=false;
+          c.appendChild(loadMoreWrap);
+        }
+      }catch(e){btn.textContent='로드 실패 — 재시도';btn.disabled=false;}
+    });
+    loadMoreWrap.appendChild(info);
+    loadMoreWrap.appendChild(btn);
+    c.appendChild(loadMoreWrap);
   }
   c.scrollTop=c.scrollHeight;
   const cn=document.querySelector('[data-view="conversations"]');
@@ -1704,14 +1753,14 @@ function fmtDurationSec(s) {
 function stopReasonBadge(reason) {
   if (!reason) return '';
   const map = {
-    end_turn:      { icon: '✓', cls: 'text-emerald-400/85', title: '정상 완료 (end_turn)' },
-    tool_use:      { icon: '🔧', cls: 'text-cyan-400/85',    title: 'tool_use 중 종료' },
-    stop_sequence: { icon: '⏹', cls: 'text-white/60',        title: 'stop_sequence 일치' },
-    max_tokens:    { icon: '⚠', cls: 'text-amber-400/85',    title: 'max_tokens 한계 도달' },
-    refusal:       { icon: '⛔', cls: 'text-red-400/85',      title: '거절됨' },
+    end_turn:      { icon: '✓', label: '완료',   cls: 'text-emerald-400/85', title: '정상 완료 (end_turn)' },
+    tool_use:      { icon: '🔧', label: '도구',   cls: 'text-cyan-400/85',    title: 'tool_use 중 종료' },
+    stop_sequence: { icon: '⏹', label: '시퀀스', cls: 'text-white/60',        title: 'stop_sequence 일치' },
+    max_tokens:    { icon: '⚠', label: '초과',   cls: 'text-amber-400/85',    title: 'max_tokens 한계 도달' },
+    refusal:       { icon: '⛔', label: '거절',   cls: 'text-red-400/85',      title: '거절됨' },
   };
-  const m = map[reason] || { icon: '?', cls: 'text-white/40', title: reason };
-  return `<span class="${m.cls} text-[11px] font-bold" title="${esc(m.title)}">${m.icon}</span>`;
+  const m = map[reason] || { icon: '?', label: reason, cls: 'text-white/40', title: reason };
+  return `<span class="${m.cls} text-[11px] font-bold" title="${esc(m.title)}">${m.icon}<span class="sr-only">${esc(m.label)}</span></span>`;
 }
 
 function renderSubagentCard(block) {
@@ -2688,7 +2737,7 @@ function fmtTime(ts){if(!ts)return'—';const d=new Date(ts);if(isNaN(d))return 
 //   ?           → show help overlay
 const NAV_KEY_MAP = {
   o: 'overview', b: 'cost', s: 'sessions', c: 'conversations',
-  m: 'models', p: 'projects', u: 'subagents', e: 'export',
+  m: 'models', p: 'projects', u: 'subagents', t: 'timeline', e: 'export',
 };
 let _gPending = false;
 
@@ -2757,10 +2806,10 @@ document.addEventListener('keydown', (e) => {
 // Single source of truth for initial state: the URL hash decides the view
 // (and triggers `onViewChange` → chart loading for overview). The WS onopen
 // handler refreshes scalar data on every (re)connect. No other boot calls.
-applyHash();
-// renderPresetSelect lives in sessions.js which is loaded AFTER this file.
-// Defer the call to window 'load' so every module is parsed first.
+// Defer applyHash to 'load' so that all deferred modules (sessions.js,
+// timeline.js, etc.) are parsed before the first view is activated.
 window.addEventListener('load', () => {
+  applyHash();
   if (typeof renderPresetSelect === 'function') renderPresetSelect();
 });
 connectWS();

@@ -28,7 +28,11 @@ function themeColors() {
     tooltipBody:  'rgba(255,255,255,.5)',
   };
 }
-const CHART_D={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},animation:{duration:400}};
+const _prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const CHART_D={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},animation:{duration:_prefersReducedMotion?0:400}};
+// Color-blind friendly: add distinct border dash patterns per dataset.
+// Applied to line charts where overlapping series can be hard to distinguish.
+const CB_DASHES = [[], [6,3], [2,2], [8,4,2,4], [4,4]];
 function grd(){return{color:themeColors().gridColor,drawBorder:false};}
 function tck(){return{color:themeColors().tickColor,font:{size:11,family:'Pretendard'}};}
 function legendLabels(extra={}){return{color:themeColors().legendColor,boxWidth:10,font:{size:11,family:'Pretendard'},...extra};}
@@ -94,9 +98,9 @@ async function loadUsageChart(){
   const labels=rows.map(r=>r.hour||r.date||''),inp=rows.map(r=>r.input_tokens||0),out=rows.map(r=>r.output_tokens||0),cr=rows.map(r=>r.cache_read_tokens||0);
   if(state.charts.usage)state.charts.usage.destroy();
   state.charts.usage=new Chart(document.getElementById('chartUsage'),{type:'line',data:{labels,datasets:[
-    {label:'입력',data:inp,borderColor:CC.blue,backgroundColor:'rgba(96,165,250,.08)',fill:true,tension:.3,pointRadius:1.5,borderWidth:1.5},
-    {label:'출력',data:out,borderColor:CC.emerald,backgroundColor:'rgba(52,211,153,.06)',fill:true,tension:.3,pointRadius:1.5,borderWidth:1.5},
-    {label:'캐시',data:cr,borderColor:CC.cyan,backgroundColor:'rgba(34,211,238,.04)',fill:true,tension:.3,pointRadius:1,borderWidth:1,borderDash:[4,2]},
+    {label:'입력',data:inp,borderColor:CC.blue,backgroundColor:'rgba(96,165,250,.08)',fill:true,tension:.3,pointRadius:2,pointStyle:'circle',borderWidth:1.5,borderDash:CB_DASHES[0]},
+    {label:'출력',data:out,borderColor:CC.emerald,backgroundColor:'rgba(52,211,153,.06)',fill:true,tension:.3,pointRadius:2,pointStyle:'rect',borderWidth:1.5,borderDash:CB_DASHES[1]},
+    {label:'캐시',data:cr,borderColor:CC.cyan,backgroundColor:'rgba(34,211,238,.04)',fill:true,tension:.3,pointRadius:2,pointStyle:'triangle',borderWidth:1,borderDash:CB_DASHES[2]},
   ]},options:{...CHART_D,plugins:{legend:{display:true,position:'top',align:'end',labels:legendLabels()},tooltip:tooltipOpts({callbacks:{label:c=>`${c.dataset.label}: ${fmtTok(c.raw)}`}})},scales:{x:{grid:grd(),ticks:{...tck(),maxTicksLimit:8,maxRotation:0}},y:{grid:grd(),ticks:{...tck(),callback:v=>fmtTok(v)}}}}});
 }
 async function loadModelChart(){

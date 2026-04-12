@@ -28,10 +28,12 @@ tailwind.config = {
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v59.css">
+<link rel="stylesheet" href="/static/app.v63.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -63,6 +65,9 @@ tailwind.config = {
   </button>
   <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="subagents">
     <iconify-icon icon="solar:widget-2-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>Subagent
+  </button>
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="timeline">
+    <iconify-icon icon="solar:calendar-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>타임라인
   </button>
   <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="export">
     <iconify-icon icon="solar:database-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>관리
@@ -426,6 +431,82 @@ tailwind.config = {
       <span class="text-xs font-bold text-white/40">SUBAGENT 종료 매트릭스 <span class="text-white/25 font-normal">(agentType × stop_reason)</span></span>
       <div id="subagentSuccessMatrix" class="mt-3 overflow-x-auto">
         <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── WORK TIMELINE (Gantt) ─── -->
+<section class="view hidden" id="view-timeline">
+  <!-- Gantt chart card -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">Work Timeline</span>
+        <div class="flex items-center gap-1.5 flex-wrap" id="timelineControls">
+          <button class="tl-range px-2.5 py-1 rounded-full text-[10px] font-semibold spring border" data-range="today">오늘</button>
+          <button class="tl-range active bg-accent/15 text-accent border-accent/30 px-2.5 py-1 rounded-full text-[10px] font-semibold spring border" data-range="7d">7일</button>
+          <button class="tl-range px-2.5 py-1 rounded-full text-[10px] font-semibold spring border" data-range="14d">14일</button>
+          <button class="tl-range px-2.5 py-1 rounded-full text-[10px] font-semibold spring border" data-range="30d">30일</button>
+          <input type="date" id="tlDateFrom" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="시작 날짜">
+          <span class="text-white/20 text-[10px]">~</span>
+          <input type="date" id="tlDateTo" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="종료 날짜">
+          <label class="text-[10px] text-white/30 flex items-center gap-1 ml-2 cursor-pointer select-none">
+            <input type="checkbox" id="tlShowSubagents" class="cursor-pointer"> Subagents
+          </label>
+          <button id="tlResetZoom" class="hidden px-2 py-1 rounded-full text-[10px] font-semibold spring border border-amber-500/30 bg-amber-500/10 text-amber-300 ml-1">줌 리셋</button>
+        </div>
+      </div>
+      <div class="relative" id="timelineChartWrap" style="min-height:200px;">
+        <canvas id="chartTimeline"></canvas>
+      </div>
+      <div class="flex items-center gap-4 mt-3 text-[10px] text-white/30 flex-wrap" id="timelineLegend"></div>
+    </div>
+  </div>
+  <!-- Hover detail card (positioned absolutely) -->
+  <div id="tlHoverCard" class="hidden fixed z-50 bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-xl shadow-[0_10px_30px_rgba(0,0,0,.6)] p-3 w-72 text-[11px] pointer-events-none"></div>
+  <!-- Row 2: Heatmap + Efficiency + Concurrency -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+    <!-- Heatmap card -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d1">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">요일 × 시간 히트맵</span>
+        <div id="tlHeatmapWrap" class="mt-3 overflow-x-auto">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+    <!-- Efficiency card -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d2">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">프로젝트 효율 분석</span>
+        <div id="tlEfficiency" class="mt-3">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Row 3: Daily report + Trend comparison -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+    <!-- Daily report -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d3">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold text-white/40 uppercase tracking-widest">일간 리포트</span>
+          <input type="date" id="tlReportDate" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="리포트 날짜">
+        </div>
+        <div id="tlDailyReport">
+          <div class="text-center text-white/15 text-xs py-6">날짜를 선택하세요</div>
+        </div>
+      </div>
+    </div>
+    <!-- Trend comparison -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d4">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">이번 주 vs 저번 주</span>
+        <div class="relative chart-h mt-3">
+          <canvas id="chartTrend"></canvas>
+        </div>
       </div>
     </div>
   </div>
@@ -853,7 +934,7 @@ tailwind.config = {
       <div class="flex items-center justify-between"><span class="text-white/50">모달 닫기·검색 해제</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">Esc</kbd></span></div>
       <div class="flex items-center justify-between"><span class="text-white/50">도움말</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">?</kbd></span></div>
       <div class="pt-2 text-[10px] text-white/30 border-t border-white/[0.05] mt-2 pt-3">
-        o=개요 · b=비용 · s=세션 · c=대화 · m=모델 · p=프로젝트 · u=Subagent · e=관리
+        o=개요 · b=비용 · s=세션 · c=대화 · m=모델 · p=프로젝트 · u=Subagent · t=타임라인 · e=관리
       </div>
     </div>
   </div>
@@ -867,11 +948,12 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v59.js" defer></script>
-<script src="/static/sessions.v59.js" defer></script>
-<script src="/static/plan.v59.js" defer></script>
-<script src="/static/overview.v59.js" defer></script>
-<script src="/static/subagents.v59.js" defer></script>
-<script src="/static/charts.v59.js" defer></script>
+<script src="/static/app.v63.js" defer></script>
+<script src="/static/sessions.v63.js" defer></script>
+<script src="/static/plan.v63.js" defer></script>
+<script src="/static/overview.v63.js" defer></script>
+<script src="/static/subagents.v63.js" defer></script>
+<script src="/static/charts.v63.js" defer></script>
+<script src="/static/timeline.v63.js" defer></script>
 </body>
 </html>

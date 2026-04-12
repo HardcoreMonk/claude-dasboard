@@ -823,6 +823,79 @@ _PROJECTS_SORT_MAP = {
     'last_active': 'last_active',
 }
 
+# ─── Work timeline (Gantt) ────────────────────────────────────────────────────
+
+@app.get("/api/timeline")
+def api_timeline(
+    date_from: str = Query(..., min_length=10, max_length=30),
+    date_to: str = Query(..., min_length=10, max_length=30),
+    include_subagents: bool = Query(False),
+    limit: int = Query(2000, ge=1, le=5000),
+):
+    """Return sessions with start/end times for Gantt-style timeline rendering.
+
+    Unlike ``/api/sessions``, this endpoint is unpaginated (up to *limit* rows)
+    and returns only the columns needed for timeline visualisation.
+    """
+    # Normalise date_to to end-of-day if only a date was supplied
+    dt = date_to if len(date_to) > 10 else date_to + 'T23:59:59Z'
+    sub_filter = '' if include_subagents else 'AND is_subagent = 0'
+    with read_db() as db:
+        off = _tz_offset(db)
+        rows = db.execute(f'''
+            SELECT id, project_name, project_path, created_at, updated_at,
+                   cost_micro * 1.0 / 1000000 AS cost_usd,
+                   model, is_subagent,
+                   {_DURATION_SQL} AS duration_seconds
+            FROM sessions
+            WHERE created_at >= ? AND created_at <= ?
+              AND created_at != '' AND updated_at != ''
+              {sub_filter}
+            ORDER BY project_name, created_at
+            LIMIT ?
+        ''', (date_from, dt, limit)).fetchall()
+        total = db.execute(f'''
+            SELECT COUNT(*) FROM sessions
+            WHERE created_at >= ? AND created_at <= ?
+              AND created_at != '' AND updated_at != ''
+              {sub_filter}
+        ''', (date_from, dt)).fetchone()[0]
+    return {
+        'sessions': [dict(r) for r in rows],
+        'total': total,
+        'truncated': total > limit,
+        'timezone_offset': off,
+    }
+
+
+@app.get("/api/timeline/heatmap")
+def api_timeline_heatmap(days: int = Query(90, ge=7, le=365)):
+    """Day-of-week × hour-of-day activity heatmap.
+
+    Returns a 7×24 matrix of message counts and cost, aggregated from
+    assistant messages over the last *days* days.
+    """
+    with read_db() as db:
+        off = _tz_offset(db)
+        off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
+        rows = db.execute('''
+            SELECT CAST(strftime('%w', timestamp, ?) AS INTEGER) AS dow,
+                   CAST(strftime('%H', timestamp, ?) AS INTEGER) AS hour,
+                   COUNT(*) AS count,
+                   SUM(cost_micro) * 1.0 / 1000000 AS cost_usd
+            FROM messages
+            WHERE role = 'assistant'
+              AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+            GROUP BY dow, hour
+        ''', (off_sql, off_sql, f'-{days} days')).fetchall()
+    cells = {}
+    for r in rows:
+        cells[f"{r['dow']}_{r['hour']}"] = {
+            'count': r['count'], 'cost': round(r['cost_usd'] or 0, 4),
+        }
+    return {'cells': cells, 'days': days, 'timezone_offset': off}
+
+
 # Group by the composite (path, name) so two projects with the same last-segment
 # name but different paths are listed separately (C2 fix).
 _PROJECT_GROUP_SQL = "COALESCE(NULLIF(project_path, ''), project_name), project_name"

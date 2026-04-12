@@ -341,7 +341,14 @@ function renderSessions(data){
   data.sessions.forEach(s=>{
     const tr=document.createElement('tr');
     tr.className='cursor-pointer border-b border-white/[0.03] hover:bg-white/[0.04] spring';
+    tr.setAttribute('tabindex', '0');
+    tr.setAttribute('role', 'row');
     tr.onclick=()=>openConversation(s.id,s);
+    tr.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openConversation(s.id, s); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); const next = tr.nextElementSibling; if (next) next.focus(); }
+      if (e.key === 'ArrowUp') { e.preventDefault(); const prev = tr.previousElementSibling; if (prev) prev.focus(); }
+    });
     const subCount = s.subagent_count || 0;
     const subCost = s.subagent_cost || 0;
     const subBadge = subCount > 0
