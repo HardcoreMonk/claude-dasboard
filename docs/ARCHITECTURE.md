@@ -1,0 +1,358 @@
+# 아키텍처 가이드
+
+Claude Dashboard 의 시스템 구조, 데이터 흐름, 컴포넌트 설계를 기술한다.
+API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
+
+---
+
+## 시스템 개요
+
+```
+~/.claude/projects/**/*.jsonl   (Claude Code 가 실시간 기록)
+           |
+     [watchdog + 30s poll]      watcher.py
+           |
+     [JSONL 파싱 + 비용 계산]    parser.py
+           |
+     [SQLite WAL 쓰기]          database.py
+           |
+     [FastAPI 49 routes]        main.py
+       /       \
+   REST API   WebSocket
+       \       /
+     [SPA 프론트엔드]            static/*.js
+```
+
+단일 프로세스 (uvicorn) 가 파일 감시, DB 관리, API 서빙, WebSocket 브로드캐스트를 모두 처리한다.
+외부 의존 서비스 없음 — SQLite 파일 하나로 완결.
+
+---
+
+## 백엔드
+
+### uvicorn (ASGI 서버)
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
+```
+
+- **asyncio loop + h11** 조합만 허용 (CLAUDE.md 불변식)
+- 리버스 프록시 없이 단독 서빙 (정적 파일 + API + WebSocket)
+
+### main.py — FastAPI 애플리케이션
+
+**49 HTTP routes + 1 WebSocket** 을 호스팅.
+
+| 그룹 | 라우트 | 역할 |
+|---|---|---|
+| 헬스 | `/api/health` | 서버 상태 + DB 메시지/세션 카운트 |
+| 메트릭 | `/metrics` | Prometheus text format (인증 우회) |
+| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 세션 CRUD, 메시지 조회, subagent 체인 |
+| 프로젝트 | `/api/projects`, `/top`, `/{name}/stats`, `/{name}/messages` | 프로젝트 집계, TOP 5, 상세 |
+| 사용량 | `/api/usage/hourly`, `/daily`, `/periods` | 시계열 토큰/비용 집계 |
+| 타임라인 | `/api/timeline`, `/timeline/heatmap` | Gantt 데이터, 요일x시간 히트맵 |
+| 모델 | `/api/models` | 모델별 비용/토큰 집계 |
+| Subagent | `/api/subagents`, `/stats`, `/heatmap` | subagent 분석 |
+| 예측 | `/api/forecast` | MTD 비용 예측, 예산 소진 시간 |
+| 플랜 | `/api/plan/detect`, `/plan/config`, `/plan/usage` | 요금제 감지, 예산 설정 |
+| claude.ai | `/api/claude-ai/conversations`, `/search`, `/stats` | claude.ai export 데이터 |
+| 관리 | `/api/admin/backup`, `/retention`, `/db-size` | 백업, 보존 정책, DB 용량 |
+| 내보내기 | `/api/export/csv` | 세션 CSV 다운로드 |
+| WebSocket | `/ws` | 실시간 메시지 브로드캐스트 |
+
+**미들웨어 스택** (등록 역순으로 실행):
+
+```
+요청 → metrics middleware → auth middleware → route handler
+```
+
+- `metrics`: 모든 요청을 `http_requests_total{method,path,status}` 로 카운트 (라우트 템플릿 기반, cardinality 제어)
+- `auth`: `DASHBOARD_PASSWORD` 설정 시 Basic Auth 검증. `/`, `/static/*`, `/api/health`, `/metrics` 는 우회
+
+### database.py — SQLite 데이터 계층
+
+```
+SCHEMA_VERSION = 12
+모드: WAL, busy_timeout=5000, auto_vacuum=INCREMENTAL
+```
+
+**쓰기/읽기 분리:**
+
+| 함수 | 역할 | 동시성 |
+|---|---|---|
+| `write_db()` | context manager, `threading.Lock` + `BEGIN IMMEDIATE` | 직렬 (단일 writer) |
+| `read_db()` | thread-local 커넥션 캐시 | 병렬 (WAL 다중 reader) |
+
+**테이블 구조:**
+
+| 테이블 | 역할 |
+|---|---|
+| `sessions` | 세션 메타 (프로젝트, 모델, 비용, 태그, subagent 플래그) |
+| `messages` | 개별 메시지 (토큰, 비용, 역할, stop_reason) |
+| `messages_fts` | FTS5 전문 검색 (content_preview, 트리거 동기화) |
+| `file_watch_state` | 파일별 마지막 파싱 위치 (offset + mtime) |
+| `plan_config` | 요금제, 예산, 타임존 설정 |
+| `claude_ai_conversations` | claude.ai export 대화 (sessions 와 완전 격리) |
+| `claude_ai_messages` | claude.ai export 메시지 |
+
+**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v12). 각 단계는 idempotent.
+
+### parser.py — JSONL 파싱 엔진
+
+```
+JSONL 레코드 → type 분기 (user/assistant/system)
+           → 세션 upsert + 메시지 insert
+           → 비용 계산 (micro-dollars)
+```
+
+**핵심 로직:**
+
+| 함수 | 역할 |
+|---|---|
+| `parse_jsonl_file()` | 파일을 줄 단위로 파싱, 깨진 줄 스킵+카운트 |
+| `process_record()` | 타입별 디스패치 (user/assistant/system) |
+| `calculate_cost_micro()` | usage 딕트 + 모델 → 정수 micro-dollars |
+| `effective_session_id()` | subagent 파일이면 filename basename 사용 |
+| `project_info_from_cwd()` | cwd → (project_path, project_name) |
+
+**비용 계산:**
+
+```python
+cost = input_tokens * rate.input
+     + output_tokens * rate.output
+     + cache_creation_tokens * rate.cache_creation
+     + cache_read_tokens * rate.cache_read
+→ USD → × 1,000,000 → INTEGER (micro-dollars)
+```
+
+6개 모델 가격표 (`MODEL_PRICING`) + family fallback (opus/sonnet/haiku substring 매칭).
+
+### watcher.py — 파일 감시
+
+**이중 감시 체계:**
+
+1. **watchdog Observer** — OS-level 파일 이벤트 (Linux: inotify)
+2. **Safety poll** — 30초 간격 전체 스캔 (inotify 누락 대비)
+
+**수명 주기:**
+
+```
+start_watching()
+  → 초기 전체 스캔 (CLAUDE_PROJECTS 하위 모든 JSONL)
+  → watchdog Observer 시작
+  → safety poll 루프 (30s)
+  → 변경 파일 → parse → DB 쓰기 → WS broadcast
+```
+
+**건강 검사:** Observer 스레드가 죽으면 자동 재시작.
+
+**메트릭 주입:** `WatcherMetrics` 인터페이스 (Prometheus counters: scan_files, new_messages, retries). 테스트에서는 noop 구현 주입.
+
+---
+
+## 프론트엔드
+
+### 모듈 구조
+
+```
+index.html          Tailwind 쉘 + 9개 뷰 섹션 + nav + 모달
+  ├─ app.js         코어: state, WS, routing, utils, h(), 4단계 상태 감지
+  ├─ sessions.js    세션 목록, 필터, 프리셋, 벌크 작업, 페이지네이션
+  ├─ overview.js    히어로 카드, 기간별 비용, TOP 5, 예측, 미리보기 drawer
+  ├─ plan.js        플랜 사용량, 설정 모달
+  ├─ subagents.js   7개 섹션 시각화 (유형별·종료사유·히트맵·매트릭스)
+  ├─ charts.js      Chart.js 6개 차트 (usage, models, dailyCost, cache, stopReason, modelCache)
+  ├─ timeline.js    Gantt 차트, 히트맵, 효율분석, 일간리포트, 트렌드비교
+  └─ app.css        스타일 + 라이트모드 매핑 + 반응형 + reduced-motion
+```
+
+빌드 시스템 없음 — 모든 JS 는 plain script (`defer`) 로 순서대로 로드.
+`app.js` 가 먼저 파싱되어 전역 state/유틸을 정의하고, 나머지 모듈이 소비.
+
+### 상태 관리
+
+```javascript
+const state = {
+  ws, stats, charts: {},           // WebSocket, 캐시, Chart.js 인스턴스
+  currentPage, totalPages,         // 페이지네이션
+  searchQuery, currentSession,     // 검색, 현재 열린 세션
+  usageRange, theme,               // UI 프리퍼런스
+  advFilters, bulkSelected,        // 고급 필터, 벌크 선택
+  idleProjects: {},                // 프로젝트 4단계 상태
+  convSource: 'claude-code',       // claude-code | claude-ai 토글
+};
+
+const sortState = {                // 뷰별 정렬 (localStorage 영속)
+  sessions:      { key, order, pinned_only },
+  projects:      { key, order },
+  models:        { key, order },
+  conversations: { key, order },
+};
+```
+
+`localStorage` (`claude-dashboard-prefs-v1`) 에 테마, 정렬, 필터, 타임라인 범위 등 영속.
+
+### SPA 라우팅
+
+```
+URL hash: #/overview, #/cost, #/sessions, #/conversations,
+          #/models, #/projects, #/subagents, #/timeline, #/export
+```
+
+- `showView(name)` — 뷰 전환 (DOM show/hide + nav pill active + hash 업데이트)
+- `onViewChange(name)` — 뷰별 데이터 로더 호출 + Chart.js 인스턴스 정리
+- `applyHash()` — `window.load` 시점에 호출 (모든 모듈 파싱 후)
+- 딥링크: `#/project/<name>?path=<path>` → 프로젝트 모달 직접 열기
+
+### WebSocket 실시간 업데이트
+
+```
+[서버]                              [클라이언트]
+watcher 변경 감지                    connectWS()
+  → broadcast(batch_update)   →      onmessage
+                                       → notifyIdleFromBatch()  (4단계 상태)
+                                       → debouncedRefresh()     (800ms 코얼레스)
+                                           → loadStats, loadPeriods, loadTopProjects...
+```
+
+**재연결:** exponential backoff (2s → 4s → 8s → ... → 30s cap), 무한 재시도.
+**15초 무응답 시:** persistent error 배너 표시.
+**concurrent write 방지:** per-connection `asyncio.Lock`.
+
+### 디자인 시스템 (Supanova)
+
+| 요소 | 사양 |
+|---|---|
+| 배경 | `#0a0a0a` (never pure black) |
+| 액센트 | Emerald `#34d399` (단일), 라이트 `#065f46` |
+| 카드 | 더블베젤 (`bg-white/5` + `ring-white/[0.07]` + inset shadow) |
+| 네비 | 플로팅 글래스 필 (`backdrop-blur-xl` + `rounded-full`) |
+| 폰트 | Pretendard + `break-keep-all` + `tabular-nums` + +25% 스케일 |
+| 아이콘 | Iconify Solar (`solar:*-linear`) |
+| 전환 | `cubic-bezier(.16,1,.3,1)` (spring), `fadeInUp` + `blur(3px)` |
+| 라이트모드 | `body.theme-light` 토글, WCAG AA 4.5:1 전 텍스트 검증 |
+
+**캐시버스팅:** 파일명 기반 `/static/app.vN.js`. 서버가 정규식으로 `.vN` strip.
+
+---
+
+## 데이터 파이프라인
+
+### 세션 식별
+
+```
+~/.claude/projects/{encoded-cwd}/{sessionId}.jsonl     → 일반 세션
+~/.claude/projects/{encoded-cwd}/subagents/agent-{hash}.jsonl → subagent
+```
+
+- **일반 세션:** 레코드의 `sessionId` 필드 사용
+- **Subagent:** 파일명 basename (`agent-{hash}`) 이 세션 키
+- **부모 링크:** 디렉터리 구조에서 `parent_session_id` 추출, `.meta.json` sidecar 에서 `agentType`/`description` 로드
+- **프로젝트:** 최초 `cwd` 값 고정 (후속 레코드의 cwd 변경 무시)
+
+### 비용 흐름
+
+```
+JSONL 레코드 usage 블록
+  → parser.calculate_cost_micro(usage, model)
+    → MODEL_PRICING[model] 또는 family fallback
+    → SUM(tokens × rate) × 1,000,000 → INTEGER
+  → messages.cost_micro 저장
+  → sessions.cost_micro += delta (누적)
+  → API: cost_micro * 1.0 / 1000000 AS cost_usd
+  → 프론트: fmt$() 로 표시
+```
+
+float 누적 오차 완전 차단 — DB 에서 프론트까지 정수 연산.
+
+### 프로젝트 상태 4단계
+
+```
+[WebSocket batch_update]
+  → notifyIdleFromBatch(records)
+    → end_turn (부모)       → "입력 대기" (amber, chime)
+    → tool_use (부모, 15s)  → "권한 승인 대기" (amber, chime)
+    → tool_use (부모, <15s) → "도구 실행 중" (cyan)
+    → tool_use (subagent)   → "에이전트 작업 중" (blue)
+  → loadTopProjects() 에서 뱃지 렌더링
+```
+
+---
+
+## 인프라
+
+### 부트스트랩
+
+```bash
+./start.sh    # venv 생성 → pip install → uvicorn 실행
+```
+
+### systemd 서비스
+
+```ini
+[Service]
+Type=simple
+Restart=always
+RestartSec=5s
+MemoryMax=512M
+CPUQuota=150%
+ProtectSystem=strict
+```
+
+### DR (재해 복구)
+
+| 스크립트 | 역할 |
+|---|---|
+| `backup.sh` | `sqlite3.backup()` + 최근 10개 보관 |
+| `restore.sh` | `integrity_check` 후 복원 |
+| `rebuild.sh` | DB 삭제 → 전체 JSONL 재파싱 |
+
+### 주간 보존
+
+```
+claude-dashboard-retention.timer  → 일요일 03:30 (15분 랜덤)
+claude-dashboard-retention.service → 오래된 데이터 정리
+```
+
+### CI/CD
+
+```yaml
+# .github/workflows/ci.yml
+- ruff (lint)
+- pytest 131 tests (~6s)
+- node --check (JS syntax)
+```
+
+---
+
+## 보안 모델
+
+| 계층 | 방어 |
+|---|---|
+| **인증** | `DASHBOARD_PASSWORD` → HTTP Basic Auth (hmac.compare_digest) |
+| **SQL** | 전 쿼리 파라미터화. ORDER BY 화이트리스트. LIKE 는 ESCAPE 필수 |
+| **XSS** | `h()` 헬퍼 (DOM API), `esc()` (entity encoding). innerHTML 금지 |
+| **삭제 확인** | `openDeleteConfirm()` — 타겟 이름 정확 입력 후 confirm |
+| **CSRF** | `allow_origins=["*"]` + Basic Auth. 브라우저 credentialed cross-origin 차단 |
+| **WebSocket** | `_ws_auth_ok()` — Basic Auth 헤더 또는 `?token=` 쿼리 파라미터 |
+| **정적 파일** | `/` 는 `Cache-Control: no-store`. 정적 파일은 `.vN` 캐시버스팅 |
+
+---
+
+## 외부 통합
+
+### claude.ai export
+
+```bash
+python import_claude_ai.py --zip ~/export.zip
+```
+
+- `conversations.json` 파싱 → `claude_ai_conversations` / `claude_ai_messages` 테이블
+- **격리:** 기존 `sessions`/`messages` 와 절대 JOIN/UNION 하지 않음 (비용 오염 방지)
+- 프론트: 소스 토글 (`claude-code` ↔ `claude-ai`)
+
+### 플랜 감지
+
+- `~/.claude/.credentials.json` 의 `rateLimitTier` 읽기 (로컬 전용, API 호출 없음)
+- 티어별 기본 한도 매핑 (Pro, Max 5x, Max 20x)
+- 예산 추적은 전적으로 로컬 JSONL 기반 추정
