@@ -5,6 +5,13 @@ body { font-feature-settings: 'ss01','tnum'; }
 ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.08); border-radius:4px; }
 ::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,.15); }
 
+/* ── WCAG AA contrast floor ── */
+/* Raise text-white/25~35 to minimum /45 for 4.5:1 ratio on #0a0a0a */
+.text-white\/25  { color: rgba(255,255,255,.45) !important; }
+.text-white\/30  { color: rgba(255,255,255,.45) !important; }
+.text-white\/35  { color: rgba(255,255,255,.48) !important; }
+.text-white\/\[0\.07\] { /* ring/border — keep subtle, not text */ }
+
 /* ── Animations ── */
 @keyframes fadeInUp {
   from { opacity:0; transform:translateY(1.5rem); filter:blur(3px); }

@@ -325,14 +325,14 @@ function renderSessionsThead(){
                aria-label="전체 선택" class="cursor-pointer">
       </th>
       ${sortThHtml('sessions','project','프로젝트','text-left','px-5')}
-      ${sortThHtml('sessions','model','모델','text-left')}
-      ${sortThHtml('sessions','input','입력','text-right')}
-      ${sortThHtml('sessions','output','출력','text-right')}
-      ${sortThHtml('sessions','cache','캐시','text-right')}
+      ${sortThHtml('sessions','model','모델','text-left hide-sm')}
+      ${sortThHtml('sessions','input','입력','text-right hide-sm')}
+      ${sortThHtml('sessions','output','출력','text-right hide-sm')}
+      ${sortThHtml('sessions','cache','캐시','text-right hide-sm')}
       ${sortThHtml('sessions','cost','비용','text-right')}
-      ${sortThHtml('sessions','messages','메시지','text-right')}
+      ${sortThHtml('sessions','messages','메시지','text-right hide-sm')}
       ${sortThHtml('sessions','updated_at','활동','text-right')}
-      <th class="text-center px-3 py-2.5 font-bold text-white/35 w-16">관리</th>
+      <th class="text-center px-3 py-2.5 font-bold text-white/35 w-16 hide-sm">관리</th>
     </tr>`;
 }
 function renderSessions(data){
@@ -379,12 +379,12 @@ function renderSessions(data){
           ${subBadge}
         </div>
       </td>
-      <td class="px-3 py-3"><span class="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/45 whitespace-nowrap">${esc(shortModel(s.model||''))}</span></td>
-      <td class="px-3 py-3 text-right text-white/55 tabular-nums">${fmtTok(s.total_input_tokens||0)}</td>
-      <td class="px-3 py-3 text-right text-emerald-400/75 tabular-nums">${fmtTok(s.total_output_tokens||0)}</td>
-      <td class="px-3 py-3 text-right text-cyan-400/75 tabular-nums" title="읽기 ${fmtN(s.total_cache_read_tokens||0)} / 생성 ${fmtN(s.total_cache_creation_tokens||0)}">${fmtTok(s.total_cache_read_tokens||0)}</td>
+      <td class="px-3 py-3 hide-sm"><span class="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/45 whitespace-nowrap">${esc(shortModel(s.model||''))}</span></td>
+      <td class="px-3 py-3 text-right text-white/55 tabular-nums hide-sm">${fmtTok(s.total_input_tokens||0)}</td>
+      <td class="px-3 py-3 text-right text-emerald-400/75 tabular-nums hide-sm">${fmtTok(s.total_output_tokens||0)}</td>
+      <td class="px-3 py-3 text-right text-cyan-400/75 tabular-nums hide-sm" title="읽기 ${fmtN(s.total_cache_read_tokens||0)} / 생성 ${fmtN(s.total_cache_creation_tokens||0)}">${fmtTok(s.total_cache_read_tokens||0)}</td>
       <td class="px-3 py-3 text-right"><span class="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/85 font-bold tabular-nums">${fmt$(s.total_cost_usd)}</span>${(()=>{const ms=s.turn_duration_ms||0;if(ms<=0||!(s.total_cost_usd>0))return '';const perHr=s.total_cost_usd/(ms/3600000);return '<div class="text-[9px] text-white/25 tabular-nums mt-0.5" title="비용 효율 ($/시간)">'+fmt$(perHr)+'/hr</div>';})()}</td>
-      <td class="px-3 py-3 text-right">
+      <td class="px-3 py-3 text-right hide-sm">
         <div class="tabular-nums text-white/70">${fmtN(mc)}</div>
         ${msgSubtext}
       </td>
@@ -392,7 +392,7 @@ function renderSessions(data){
         <div class="text-white/35">${relTime(s.updated_at)}</div>
         ${durLabel?`<div class="text-[9px] text-white/25 tabular-nums">${durLabel}</div>`:''}
       </td>
-      <td class="px-3 py-3 text-center whitespace-nowrap"></td>`;
+      <td class="px-3 py-3 text-center whitespace-nowrap hide-sm"></td>`;
     // Action buttons via DOM API — safe against name/id injection
     const actionTd = tr.lastElementChild;
     const pinBtn = document.createElement('button');

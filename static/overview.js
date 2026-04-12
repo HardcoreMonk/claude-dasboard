@@ -18,6 +18,7 @@ async function loadStats() {
     state.stats = d;
     renderStats(d);
     markUpdated('stats');
+    reportSuccess('loadStats');
   } catch (e) { reportError('loadStats', e); }
 }
 function renderStats(data) {

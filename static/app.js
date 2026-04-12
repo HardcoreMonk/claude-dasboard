@@ -169,8 +169,34 @@ function applyHash() {
 
 window.addEventListener('hashchange', applyHash);
 
-// ─── Safe Fetch ─────────────────────────────────────────────────────────
-async function safeFetch(url){const r=await fetch(url);if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json();}
+// ─── Safe Fetch (retry + timeout) ───────────────────────────────────────
+const FETCH_MAX_RETRIES = 3;
+const FETCH_TIMEOUT_MS = 15000;
+async function safeFetch(url) {
+  let lastErr;
+  for (let attempt = 0; attempt < FETCH_MAX_RETRIES; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+      const r = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (r.ok) return r.json();
+      // 5xx → retry with backoff; 4xx → fail immediately
+      if (r.status < 500) throw new Error(`HTTP ${r.status}`);
+      lastErr = new Error(`HTTP ${r.status}`);
+    } catch (e) {
+      lastErr = e;
+      if (e.name === 'AbortError') lastErr = new Error('요청 시간 초과');
+      // Don't retry on 4xx (thrown above) or non-network errors
+      if (lastErr.message.startsWith('HTTP 4')) throw lastErr;
+    }
+    // Exponential backoff: 500ms, 1s, 2s
+    if (attempt < FETCH_MAX_RETRIES - 1) {
+      await new Promise(ok => setTimeout(ok, 500 * Math.pow(2, attempt)));
+    }
+  }
+  throw lastErr;
+}
 
 // ─── Toast system ─────────────────────────────────────────────────────
 // showToast(msg, {type, undoFn, duration})
@@ -492,15 +518,50 @@ document.addEventListener('keydown', (e) => {
 }
 
 // ─── Error reporting helper (A5) ─────────────────────────────────────
-// Wraps console.error with a toast, rate-limited per-context so a flurry
-// of failing loads doesn't bury the screen in identical toasts.
-const _errorReportCooldown = {};
+// Tracks consecutive failures per-context. First failure shows a toast;
+// 3+ consecutive failures for the same context show a persistent banner
+// so the user knows something is systematically wrong.
+const _errorConsecutive = {};
 function reportError(ctx, e) {
   console.error(ctx + ':', e);
-  const now = Date.now();
-  if (_errorReportCooldown[ctx] && now - _errorReportCooldown[ctx] < 5000) return;
-  _errorReportCooldown[ctx] = now;
-  showToast(`${ctx} 실패: ${e?.message || e}`, { type: 'error', duration: 4000 });
+  const count = (_errorConsecutive[ctx] || 0) + 1;
+  _errorConsecutive[ctx] = count;
+  if (count >= 3) {
+    // Persistent banner — stays until next success
+    _showErrorBanner(ctx, e);
+  } else {
+    showToast(`${ctx} 실패: ${e?.message || e}`, { type: 'error', duration: 4000 });
+  }
+}
+function reportSuccess(ctx) {
+  if (_errorConsecutive[ctx]) {
+    _errorConsecutive[ctx] = 0;
+    _hideErrorBanner(ctx);
+  }
+}
+function _showErrorBanner(ctx, e) {
+  let banner = document.getElementById('persistentErrorBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'persistentErrorBanner';
+    banner.className = 'fixed top-16 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-xl bg-red-500/15 ring-1 ring-red-500/30 backdrop-blur-xl text-[12px] text-red-300 font-semibold flex items-center gap-3 shadow-lg';
+    document.body.appendChild(banner);
+  }
+  banner.textContent = '';
+  const icon = document.createElement('span');
+  icon.textContent = '⚠';
+  const msg = document.createElement('span');
+  msg.textContent = `${ctx} 연속 실패 — ${e?.message || '서버 연결을 확인하세요'}`;
+  const btn = document.createElement('button');
+  btn.className = 'ml-2 px-2 py-0.5 rounded-full bg-red-500/20 text-red-200 text-[10px] font-bold hover:bg-red-500/30 spring';
+  btn.textContent = '닫기';
+  btn.addEventListener('click', () => banner.remove());
+  banner.append(icon, msg, btn);
+  banner.style.display = 'flex';
+}
+function _hideErrorBanner(ctx) {
+  const banner = document.getElementById('persistentErrorBanner');
+  if (banner) banner.remove();
 }
 
 // ─── Empty / error state helpers (U6) ────────────────────────────────
@@ -538,7 +599,10 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   document.body.classList.toggle('theme-light', theme === 'light');
   const btn = document.getElementById('themeToggle');
-  if (btn) btn.textContent = theme === 'light' ? '🌙' : '☀';
+  if (btn) {
+    btn.textContent = theme === 'light' ? '🌙' : '☀';
+    btn.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+  }
 }
 function toggleTheme() {
   const next = state.theme === 'light' ? 'dark' : 'light';
@@ -833,6 +897,7 @@ function _renderIdleNotifyToggle() {
   const btn = document.getElementById('idleNotifyToggle');
   if (!btn) return;
   const on = _prefs.idleNotify !== false;
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   btn.textContent = on ? '켜짐' : '꺼짐';
   btn.className = 'rounded-full px-4 py-1.5 text-[11px] font-bold spring ' +
     (on
