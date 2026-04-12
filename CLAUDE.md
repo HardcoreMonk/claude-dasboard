@@ -6,9 +6,9 @@
 ## 파일 라인맵
 
 ```
-main.py             2124줄  FastAPI 47 routes + /metrics + WS (per-conn lock) + summarize_preview + _iso_to_epoch
-database.py          750줄  WAL + thread-local + v1→v11 마이그레이션 + FTS5 × 2 + auto_vacuum=INCREMENTAL
-parser.py            538줄  JSONL 파싱, cwd 식별 (최초 고정), subagent split, PARSE_STATS, stop_reason+preview+is_subagent forwarding
+main.py             2146줄  FastAPI 47 routes + /metrics + WS (per-conn lock) + summarize_preview + _iso_to_epoch
+database.py          755줄  WAL + thread-local + v1→v12 마이그레이션 + FTS5 × 2 + auto_vacuum=INCREMENTAL
+parser.py            570줄  JSONL 파싱 (assistant+user+system), cwd 식별 (최초 고정), subagent split, turn_duration 누적
 watcher.py           371줄  watchdog (health check + auto-restart) + safety poll + WatcherMetrics 의존성 주입
 import_claude_ai.py  282줄  일회성 CLI — claude.ai export 인포터 (update detection)
 backup.sh · restore.sh · rebuild.sh           DR 스크립트 (백업/복원/재빌드)
@@ -16,13 +16,13 @@ claude-dashboard-retention.{service,timer}    주간 retention 타이머
 tests/              3098줄  131 pytest (parser 37 · database 10 · watcher 9 · api 33 · contract 31 · backup 3 · e2e 8)
 
 # Frontend — 7 파일 모듈화 (sessions.js 추가 후)
-static/index.html    809줄  Tailwind 쉘 + drawer preview 패널 + idle notify 설정
+static/index.html    831줄  Tailwind 쉘 + drawer preview 패널 + idle notify 설정 + stop_reason/modelCache 차트
 static/app.js       2693줄  core: state/ws/routing/utils/modals + h() + idle notify (batch-deferred chime, subagent-aware) + Web Audio chime
 static/sessions.js   543줄  sessions domain: load, filters, presets, bulk, mgmt
 static/overview.js   335줄  hero/chips/forecast/top5 + slide drawer + active-first sort
 static/plan.js       177줄  plan usage + settings modal (사용량 경고 팝업 제거됨)
 static/subagents.js  125줄  heatmap + success matrix
-static/charts.js     125줄  theme-aware Chart.js
+static/charts.js     145줄  theme-aware Chart.js (6 charts: usage, models, dailyCost, cache, stopReason, modelCache)
 static/app.css       298줄  스타일 + 라이트모드 + 반응형
 
 docs/API.md                  REST API + OpenAPI 스펙 링크 (/docs, /openapi.json)
@@ -92,7 +92,7 @@ pyproject.toml               ruff + pytest 설정
 
 ## 마이그레이션 (`PRAGMA user_version` 기반)
 
-`SCHEMA_VERSION=11`. `init_db()` 가 시작 시 차분 적용 (v0→v11). 새 마이그레이션 추가 시:
+`SCHEMA_VERSION=12`. `init_db()` 가 시작 시 차분 적용 (v0→v12). 새 마이그레이션 추가 시:
 
 1. `SCHEMA_VERSION` 을 bump.
 2. `v(N-1)_to_v(N)()` 함수를 `database.py` 에 추가.
@@ -101,7 +101,7 @@ pyproject.toml               ruff + pytest 설정
 
 단계 요약:
 
-- v2 복합 인덱스 · v3 FTS5 + 트리거 + rebuild · v4 cwd/model 치유 · **v5 subagent 재분류 (878 파일, 91k 메시지 reassign)** · v6 acompact 자동 태깅 · **v7 stop_reason + parent_tool_use_id 컬럼 + 58k 메시지 백필 + 875 부모 링크** · v8 `sessions.tags` · **v9 claude_ai_conversations + claude_ai_messages + claude_ai_messages_fts (독립 테이블)** · **v10 parent_session_id 핫 패스 인덱스 (N² → N log N)** · **v11 claude_ai_messages.updated_at (update detection)**
+- v2 복합 인덱스 · v3 FTS5 + 트리거 + rebuild · v4 cwd/model 치유 · **v5 subagent 재분류 (878 파일, 91k 메시지 reassign)** · v6 acompact 자동 태깅 · **v7 stop_reason + parent_tool_use_id 컬럼 + 58k 메시지 백필 + 875 부모 링크** · v8 `sessions.tags` · **v9 claude_ai_conversations + claude_ai_messages + claude_ai_messages_fts (독립 테이블)** · **v10 parent_session_id 핫 패스 인덱스 (N² → N log N)** · **v11 claude_ai_messages.updated_at (update detection)** · **v12 sessions.turn_duration_ms (system 레코드 파싱)**
 
 전체 표는 `docs/SCHEMA.md` 참고.
 
@@ -136,7 +136,7 @@ pyproject.toml               ruff + pytest 설정
 
 ## 프런트 수정 시
 
-- 캐시버스팅: **파일명 기반** — `/static/app.vN.js` / `app.vN.css`. `index.html` 의 `.vN` 을 일괄 bump (현재 v=52). 서버의 `/static/{path:path}` 라우트가 정규식으로 `.vN` 을 strip 해 실제 파일을 서빙한다.
+- 캐시버스팅: **파일명 기반** — `/static/app.vN.js` / `app.vN.css`. `index.html` 의 `.vN` 을 일괄 bump (현재 v=53). 서버의 `/static/{path:path}` 라우트가 정규식으로 `.vN` 을 strip 해 실제 파일을 서빙한다.
 - SPA 엔트리 HTML (`/`) 은 `Cache-Control: no-store` — 브라우저가 stale HTML 을 들고 stale 에셋을 참조하는 것을 막는다.
 - 정렬/필터 파라미터는 URL hash 에 반영되어야 한다 (`#/sessions?sort=cost&order=desc`).
 - WebSocket 이벤트는 `debouncedRefresh` 로 batch. 개별 refresh 로 돌리지 말 것.

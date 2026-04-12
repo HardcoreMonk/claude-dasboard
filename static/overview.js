@@ -33,7 +33,7 @@ function renderStats(data) {
   const rIn = (a.input_tokens || 0) + (a.cache_read_tokens || 0);
   const cEff = rIn > 0 ? ((a.cache_read_tokens || 0) / rIn * 100) : 0;
   set('statCacheEff', cEff.toFixed(1) + '%');
-  set('statCacheSaved', `절약 ≈ ${fmt$((a.cache_read_tokens || 0) * 13.125 / 1e6)}`);
+  set('statCacheSaved', `${fmtTok(a.cache_read_tokens || 0)} 읽기 · ${fmtTok(a.cache_creation_tokens || 0)} 생성`);
   set('hdrToday', `오늘: ${fmt$(t.cost_usd)}`);
   set('hdrTotal', `전체: ${fmt$(a.cost_usd)}`);
 }

@@ -502,10 +502,32 @@ def _get_stats() -> dict:
             ORDER BY cost DESC
         ''').fetchall()
 
+        # Per-model cache efficiency: cache_read / (input + cache_read)
+        model_cache = db.execute('''
+            SELECT model,
+                   SUM(input_tokens) AS input_tokens,
+                   SUM(cache_read_tokens) AS cache_read_tokens,
+                   SUM(cache_creation_tokens) AS cache_creation_tokens
+            FROM messages
+            WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
+            GROUP BY model ORDER BY input_tokens DESC
+        ''').fetchall()
+
+        # Stop reason distribution (all sessions, not just subagents)
+        stop_reasons = db.execute('''
+            SELECT COALESCE(NULLIF(final_stop_reason, ''), '(unknown)') AS stop_reason,
+                   COUNT(*) AS count,
+                   SUM(cost_micro)*1.0/1000000 AS cost
+            FROM sessions
+            GROUP BY stop_reason ORDER BY count DESC
+        ''').fetchall()
+
     return {
         'all_time': dict(row) if row else {},
         'today': dict(today) if today else {},
         'models': [dict(m) for m in models],
+        'model_cache': [dict(mc) for mc in model_cache],
+        'stop_reasons': [dict(sr) for sr in stop_reasons],
     }
 
 

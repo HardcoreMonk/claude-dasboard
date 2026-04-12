@@ -20,7 +20,7 @@ _write_lock = threading.Lock()
 _read_local = threading.local()   # per-thread cached read connection
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 11               # bump on every schema change
+SCHEMA_VERSION = 12               # bump on every schema change
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -734,6 +734,11 @@ def init_db() -> None:
                 _ensure_column(conn, 'claude_ai_messages', 'updated_at', "TEXT")
                 _set_user_version(conn, 11)
                 current = 11
+            if current < 12:
+                logger.info("Migrating schema v%d → 12 (sessions.turn_duration_ms)", current)
+                _ensure_column(conn, 'sessions', 'turn_duration_ms', "INTEGER DEFAULT 0")
+                _set_user_version(conn, 12)
+                current = 12
             conn.commit()
         finally:
             conn.close()

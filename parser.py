@@ -312,6 +312,8 @@ def process_record(record: dict, file_path: str, db: sqlite3.Connection) -> Opti
             return _process_assistant(record, file_path, db)
         if rtype == 'user':
             return _process_user(record, file_path, db)
+        if rtype == 'system':
+            return _process_system(record, file_path, db)
     except sqlite3.Error:
         raise  # let the outer write_db() rollback
     except Exception as e:
@@ -534,5 +536,35 @@ def _process_user(record: dict, file_path: str, db: sqlite3.Connection) -> Optio
             UPDATE sessions SET updated_at = ?, user_message_count = user_message_count + 1
             WHERE id = ?
         ''', (record.get('timestamp', ''), sid))
+
+    return None
+
+
+def _process_system(record: dict, file_path: str, db: sqlite3.Connection) -> Optional[dict]:
+    """Extract turn duration from system records.
+
+    Claude Code writes a system record at the end of each turn with
+    ``durationMs`` — the wall-clock duration of the assistant turn in
+    milliseconds.  We accumulate this into ``sessions.turn_duration_ms``
+    so the frontend can compute $/hour efficiency.
+    """
+    raw_sid = record.get('sessionId', '')
+    if not raw_sid:
+        PARSE_STATS['skipped_no_sid'] += 1
+        return None
+    sid = effective_session_id(raw_sid, file_path)
+
+    duration_ms = record.get('durationMs', 0)
+    if not isinstance(duration_ms, (int, float)) or duration_ms <= 0:
+        return None
+
+    _ensure_session(sid, file_path, record, db)
+
+    db.execute('''
+        UPDATE sessions
+        SET turn_duration_ms = turn_duration_ms + ?,
+            updated_at = COALESCE(NULLIF(?, ''), updated_at)
+        WHERE id = ?
+    ''', (int(duration_ms), record.get('timestamp', ''), sid))
 
     return None

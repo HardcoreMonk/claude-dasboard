@@ -74,11 +74,13 @@ async function loadCharts(){
     loadModelChart().catch(e => { console.error('models chart:', e); chartError('chartModels', e, loadModelChart); }),
     loadDailyCostChart().catch(e => { console.error('daily cost chart:', e); chartError('chartDailyCost', e, loadDailyCostChart); }),
     loadCacheChart().catch(e => { console.error('cache chart:', e); chartError('chartCache', e, loadCacheChart); }),
+    loadStopReasonChart().catch(e => { console.error('stop reason chart:', e); chartError('chartStopReason', e, loadStopReasonChart); }),
+    loadModelCacheChart().catch(e => { console.error('model cache chart:', e); chartError('chartModelCache', e, loadModelCacheChart); }),
   ]);
 }
 // Theme toggle hook: destroy + rebuild active chart instances so colors flip.
 function refreshChartsForTheme(){
-  const hasCostCharts=['usage','models','dailyCost','cache'].some(k=>state.charts[k]);
+  const hasCostCharts=['usage','models','dailyCost','cache','stopReason','modelCache'].some(k=>state.charts[k]);
   if(hasCostCharts)loadCharts();
   if(state.charts.projDaily&&typeof projectData!=='undefined'&&projectData?.daily?.length){
     renderProjectDailyChart(projectData.daily);
@@ -115,6 +117,24 @@ async function loadCacheChart(){
   const d=[a.input_tokens||0,a.cache_creation_tokens||0,a.cache_read_tokens||0,a.output_tokens||0];
   if(state.charts.cache)state.charts.cache.destroy();
   state.charts.cache=new Chart(document.getElementById('chartCache'),{type:'doughnut',data:{labels:['입력','캐시 생성','캐시 읽기','출력'],datasets:[{data:d,backgroundColor:[CC.blue+'66',CC.purple+'66',CC.cyan+'66',CC.emerald+'66'],borderColor:[CC.blue,CC.purple,CC.cyan,CC.emerald],borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'60%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:5})},tooltip:tooltipOpts({callbacks:{label:c=>` ${c.label}: ${fmtTok(c.raw)}`}})}}});
+}
+async function loadStopReasonChart(){
+  const data=await safeFetch('/api/stats');const rows=data.stop_reasons||[];
+  if(!rows.length)return;
+  const SR_LABELS={'end_turn':'정상 종료','tool_use':'도구 호출','max_tokens':'토큰 초과','(unknown)':'미분류'};
+  const labels=rows.map(r=>SR_LABELS[r.stop_reason]||r.stop_reason);
+  const counts=rows.map(r=>r.count||0);
+  const pal=[CC.emerald,CC.blue,CC.amber,CC.rose,CC.cyan,CC.purple];
+  if(state.charts.stopReason)state.charts.stopReason.destroy();
+  state.charts.stopReason=new Chart(document.getElementById('chartStopReason'),{type:'doughnut',data:{labels,datasets:[{data:counts,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'60%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:5})},tooltip:tooltipOpts({callbacks:{label:c=>{const total=c.dataset.data.reduce((a,b)=>a+b,0);const pct=total>0?(c.raw/total*100).toFixed(1):'0';return ` ${c.label}: ${fmtN(c.raw)} (${pct}%)`;}}})}}});
+}
+async function loadModelCacheChart(){
+  const data=await safeFetch('/api/stats');const rows=data.model_cache||[];
+  if(!rows.length)return;
+  const labels=rows.map(r=>shortModel(r.model));
+  const hitRates=rows.map(r=>{const total=(r.input_tokens||0)+(r.cache_read_tokens||0);return total>0?((r.cache_read_tokens||0)/total*100):0;});
+  if(state.charts.modelCache)state.charts.modelCache.destroy();
+  state.charts.modelCache=new Chart(document.getElementById('chartModelCache'),{type:'bar',data:{labels,datasets:[{label:'캐시 히트율 %',data:hitRates,backgroundColor:'rgba(34,211,238,.3)',borderColor:CC.cyan,borderWidth:1,borderRadius:3}]},options:{...CHART_D,indexAxis:'y',plugins:{tooltip:tooltipOpts({callbacks:{label:c=>` ${c.raw.toFixed(1)}%`}})},scales:{x:{grid:grd(),ticks:{...tck(),callback:v=>v+'%'},max:100},y:{grid:grd(),ticks:tck()}}}});
 }
 function setUsageRange(btn,range){
   document.querySelectorAll('.chart-range').forEach(b=>{b.classList.remove('active');b.classList.add('text-white/20');b.classList.remove('text-white/40');});

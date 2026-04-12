@@ -31,7 +31,7 @@ tailwind.config = {
 <!-- Iconify Solar -->
 <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
 
-<link rel="stylesheet" href="/static/app.v52.css">
+<link rel="stylesheet" href="/static/app.v53.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -242,7 +242,7 @@ tailwind.config = {
           <span class="text-white/30 text-[9px] skeleton" id="statAllSessions">—</span>
         </div>
         <div class="h-3 w-px bg-white/10"></div>
-        <div class="flex items-baseline gap-1.5" title="전체 캐시 읽기 / (입력 + 캐시 읽기)">
+        <div class="flex items-baseline gap-1.5" title="캐시 히트율: 캐시 읽기 / (입력 + 캐시 읽기)">
           <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">캐시</span>
           <span class="text-cyan-400/85 font-bold tabular-nums skeleton" id="statCacheEff">—</span>
           <span class="text-white/30 text-[9px] skeleton" id="statCacheSaved">—</span>
@@ -335,6 +335,28 @@ tailwind.config = {
           <button class="text-white/25 hover:text-white/60 spring text-xs" onclick="downloadChart('cache','cache-chart.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
         </div>
         <div class="chart-h mt-3"><canvas id="chartCache"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Row 3 -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4 anim-in anim-d2">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-white/40">종료 사유 분포</span>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" onclick="downloadChart('stopReason','stop-reason.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+        </div>
+        <div class="chart-h mt-3"><canvas id="chartStopReason"></canvas></div>
+      </div>
+    </div>
+    <div class="lg:col-span-2 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-white/40">모델별 캐시 히트율</span>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" onclick="downloadChart('modelCache','model-cache.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+        </div>
+        <div class="chart-h mt-3"><canvas id="chartModelCache"></canvas></div>
       </div>
     </div>
   </div>
@@ -799,11 +821,11 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v52.js" defer></script>
-<script src="/static/sessions.v52.js" defer></script>
-<script src="/static/plan.v52.js" defer></script>
-<script src="/static/overview.v52.js" defer></script>
-<script src="/static/subagents.v52.js" defer></script>
-<script src="/static/charts.v52.js" defer></script>
+<script src="/static/app.v53.js" defer></script>
+<script src="/static/sessions.v53.js" defer></script>
+<script src="/static/plan.v53.js" defer></script>
+<script src="/static/overview.v53.js" defer></script>
+<script src="/static/subagents.v53.js" defer></script>
+<script src="/static/charts.v53.js" defer></script>
 </body>
 </html>
