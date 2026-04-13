@@ -38,12 +38,8 @@ ehthumbs.db
 
 # Playwright MCP diagnostic artifacts (screenshots / console dumps / DOM yml)
 .playwright-mcp/
-layout-*.png
-overview-*.png
-page-*.png
-top10-*.png
-cost-view.png
-overview-top10-only.png
-drawer-*.png
-peek-*.png
-idle-*.png
+test-results/
+*.png
+
+# Database (runtime generated)
+dashboard.db
