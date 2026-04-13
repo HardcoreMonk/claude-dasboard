@@ -1,213 +1,208 @@
 # Claude Usage Dashboard
 
-Claude Code 의 토큰 사용량·비용·대화·subagent 를 실시간 추적하는 자체 호스팅 웹 대시보드. claude.ai 웹 대화 export 도 같은 뷰어에서 검색·탐색할 수 있다.
+Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간 추적**하는 자체 호스팅 웹 대시보드.
+다중 서버의 Claude Code 데이터를 중앙 수집하고, claude.ai 웹 대화 export 도 통합 뷰어에서 검색할 수 있다.
 
-`~/.claude/projects/` 하위의 세션 JSONL 을 자동 수집해 SQLite (WAL + FTS5) 에 저장하고, 브라우저에서 분석·검색·관리한다.
+```
+~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 58 routes  →  SPA 브라우저
+                                                                  ↑
+                                [원격 서버] collector.py  →  POST /api/ingest
+```
 
-- 백엔드: Python 3.12 + FastAPI + uvicorn + watchdog
-- 저장소: SQLite WAL, micro-dollar 정수 비용, 88 k+ 메시지 규모 테스트
-- 프런트: 단일 파일 SPA — Tailwind + Pretendard + Chart.js + Cmd+K
-- 테스트: 81 pytest (~2.5 초)
+| 스택 | 상세 |
+|------|------|
+| 백엔드 | Python 3.12, FastAPI, uvicorn, watchdog |
+| 저장소 | SQLite WAL + FTS5, micro-dollar 정수 비용, v13 스키마 |
+| 프런트 | esbuild 번들 (187KB) + Tailwind v3 빌드 (50KB) + Pretendard + Chart.js |
+| 테스트 | 174 pytest (10초), CI: ruff + bandit + pip-audit + esbuild |
 
 ## 빠른 시작
 
 ```bash
-cd claude-dashboard
-./start.sh                            # 기본 http://localhost:8765
-PORT=9000 ./start.sh                  # 포트 변경
-DASHBOARD_PASSWORD=secret ./start.sh  # HTTP Basic Auth + WS 인증
+git clone <repo> && cd claude-dashboard
+cp .env.example .env          # DASHBOARD_PASSWORD 설정
+./start.sh                    # .env 로드 → npm build → uvicorn
 ```
 
-`start.sh` 가 venv 를 부트스트랩하고 `uvicorn --loop asyncio --http h11` 로 띄운다.
+`http://localhost:8765` 에서 로그인 후 대시보드 접근.
+
+### 환경변수 (.env)
+
+```bash
+DASHBOARD_PASSWORD=           # 설정 시 로그인 필수. 미설정 시 인증 비활성화
+DASHBOARD_SECRET=             # 세션 서명 키. 미설정 시 재시작마다 세션 무효화
+DASHBOARD_SECURE=true         # HTTPS 배포 시 쿠키 Secure 플래그
+DASHBOARD_CORS_ORIGINS=       # 허용 오리진 (쉼표 구분)
+PORT=8765                     # 서버 포트
+```
 
 ### systemd 서비스
 
 ```bash
 sudo cp claude-dashboard.service /etc/systemd/system/
 sudo systemctl enable --now claude-dashboard
-journalctl -u claude-dashboard -f
 ```
 
-유닛은 `MemoryMax=512M`, `CPUQuota=150%`, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only` 하드닝이 적용되어 있다.
-
-### 테스트
+### 테스트 & 빌드
 
 ```bash
-./.venv/bin/python -m pip install pytest httpx
-./.venv/bin/python -m pytest tests/ -v
-# 131 passed — parser 37 · database 10 · watcher 9 · api 33 · contract 31 · backup 3 · e2e 8
+./.venv/bin/python -m pytest tests/ -v        # 174 tests
+npm run build                                 # bundle.js + tailwind.css
+npm run dev                                   # watch 모드 (개발)
 ```
 
 ## 주요 기능
 
-| 영역 | 내용 |
-|---|---|
-| **데이터 정확성** | `cost_micro` 정수 저장, cwd 기반 프로젝트 식별, synthetic 모델 하이재킹 차단, 878 개 subagent 파일 독립 세션 승격 |
-| **실시간 수집** | watchdog inotify 우선 + 30 초 폴링 safety net, 3-phase 처리 (read → parse → serialized write) |
-| **분석·시각화** | 14 일 평균 기반 월말 forecast, 일/주간 burn-out, subagent 히트맵 (agent_type × project), 종료 매트릭스, 디스패치 체인 트리, 모델 전환 타임라인 |
-| **세션 관리** | FTS5 전문 검색, 고급 필터 (날짜/비용 range) + preset 저장, 핀, 태그, 세션 2 개 side-by-side diff, bulk 작업 |
-| **UX** | Cmd+K 명령 팔레트, 다크/라이트 테마, 18 개 액션 토스트 피드백, 마크다운 렌더, 모바일 반응형, focus trap, 키보드 단축키 |
-| **관측성** | `/api/health` + `/metrics` (Prometheus) 인증 우회, WebSocket 지수 백오프 무한 재연결 |
-| **claude.ai import** | 웹 export zip (`conversations.json`) 을 분리 테이블로 인포트, 독립 FTS5 검색, 대화 뷰에서 source 토글 (토큰/비용 없음 — 격리 저장) |
+### 실시간 모니터링
+- WebSocket 실시간 갱신 (800ms 디바운스)
+- 4단계 프로젝트 상태 감지 (입력 대기 / 권한 대기 / 도구 실행 / 에이전트 작업)
+- Web Audio 알림 chime (설정 가능)
 
-## 화면
+### 비용 분석 (11개 시각화)
+- 전체/오늘 비용 실시간 표시, 일/주/월 기간 비교
+- 시간별/일별/모델별 차트, 캐시 효율, 종료 사유 분포
+- $/hr 효율성, 월말 예측 (주중/주말 가중), 예산 소진 시각
 
-| 뷰 | 설명 |
-|---|---|
-| **개요** | 일/주/월 카드, 예산 추적 바, forecast 카드 3 개, TOP 10 프로젝트, subagent 히트맵·종료 매트릭스 |
-| **세션** | sortable 테이블 + 고급 필터 드로어, bulk action bar, 이름 매칭 삭제 안전장치 |
-| **대화** | 좌 세션 목록 (FTS 하이라이트), 우 뷰어 — lineage 블록, spawned subagents, stop_reason 배지, Agent 블록 inline 카드 |
-| **모델** | 모델별 토큰·비용·캐시 카드 |
-| **프로젝트** | 탭형 모달 (통계 / 세션 / 전체 대화), 일별 비용 차트 |
-| **관리** | CSV 내보내기, DB 백업, 데이터 보존 (이름 매칭 확인) |
+### 세션 관리
+- 8컬럼 정렬, 고급 필터 (날짜/비용/모델/태그/노드), FTS5 전문 검색
+- 핀 고정, 태그, 벌크 작업 (병렬 Promise.all), 필터 프리셋
+- CSV/JSON 내보내기 (스트리밍), 안전 삭제 (이름 매칭 확인)
+
+### 대화 뷰어
+- tool_use/tool_result 접기, 인라인 검색 + 하이라이트
+- 통계 바, 시간 갭, 키보드 내비게이션 (j/k), 마크다운 내보내기
+- WS 실시간 tail, subagent 디스패치 체인 시각화 (depth 5)
+
+### 타임라인 (Gantt) — 15개 기능
+- 프로젝트별 Gantt, 누적 비용 오버레이, 동시 작업 감지
+- 줌/팬, 요일x시간 히트맵 + 드릴다운, 시간별 스택드 바 차트
+- 시간별 아코디언, 효율 분석, 일간 리포트, 주간 트렌드
+
+### 다중 서버 수집
+- 원격 서버의 `~/.claude/projects/` 를 중앙 대시보드로 push
+- 관리 UI 에서 노드 등록 → ingest key 발급 → collector 다운로드
+
+```bash
+# 원격 서버에서
+curl -o collector.py http://dashboard:8765/api/collector.py
+INGEST_KEY=<key> python3 collector.py --url http://dashboard:8765 --node-id server-1
+```
+
+- 세션/타임라인에서 노드별 필터링, Windows 경로 자동 파싱
+
+### 그 외
+- **Subagent 분석**: 유형별/종료사유/비용TOP10/소요TOP10/히트맵/매트릭스 (7개 섹션)
+- **예산 관리**: 플랜 자동 감지, 일/주간 예산, 프로그레스 바, 카운트다운
+- **claude.ai import**: 웹 export zip 인포트, 격리 테이블, 소스 토글
+- **다크/라이트 테마**: WCAG AA 4.5:1, 반응형 (640/480/360px)
+- **커맨드 팔레트**: Cmd+K, 키보드 단축키 (g+o/b/s/c)
+
+## 인증 & 보안
+
+| 항목 | 방식 |
+|------|------|
+| 로그인 | 쿠키 세션 (`dash_session`, HMAC 서명, 7일 만료) |
+| rate limit | 로그인 5회/분/IP |
+| API 클라이언트 | Basic Auth 헤더 호환 |
+| SQL | 100% 파라미터화, ORDER BY 화이트리스트 |
+| XSS | `h()` 헬퍼 + `esc()`, innerHTML 금지 |
+| 삭제 | 이름 정확 입력 확인 모달 |
+| CDN | SRI integrity 해시 |
+| CORS | 환경변수 기반 허용 오리진 |
+
+### HTTPS 배포
+
+```bash
+# 옵션 1: localhost + SSH 터널
+HOST=127.0.0.1 ./start.sh
+# 원격: ssh -L 8765:localhost:8765 user@host
+
+# 옵션 2: Caddy 리버스 프록시 (자동 TLS)
+# /etc/caddy/Caddyfile
+dashboard.example.com {
+    reverse_proxy 127.0.0.1:8765
+}
+```
+
+`DASHBOARD_SECURE=true` 설정 시 쿠키에 Secure 플래그 적용.
 
 ## 프로젝트 구조
 
 ```
-main.py               1927줄  FastAPI 47 routes + /metrics + WS
-database.py            745줄  WAL + thread-local + v1→v11 마이그레이션 + FTS5 × 2
-parser.py              501줄  cwd 식별, subagent split, PARSE_STATS 카운터
-watcher.py             341줄  watchdog + safety poll + 메트릭 주입
-import_claude_ai.py    287줄  claude.ai export → claude_ai_* 테이블 (update detection)
-backup.sh · restore.sh · rebuild.sh           DR 스크립트
-claude-dashboard-retention.{service,timer}    주간 retention 타이머
-static/index.html      744줄  Tailwind + Pretendard HTML 쉘
-static/app.js         3218줄  SPA main
-static/charts.js       125줄  Chart.js 모듈 (theme-aware, chart error overlay)
-static/app.css         298줄  스타일 + 라이트모드 + skeleton shimmer
-tests/                2115줄  123 pytest (parser 37 · db 10 · watcher 9 · api 33 · contract 31 · backup 3)
-.github/workflows/ci.yml      Actions: ruff + pytest + node --check
-pyproject.toml                ruff + pytest 설정
+main.py              FastAPI 58 routes + WS + 쿠키 세션 인증
+database.py          SQLite WAL, v0→v13 마이그레이션, write/read 분리
+parser.py            JSONL 파싱, 비용 계산, cross-platform cwd
+watcher.py           watchdog + safety poll
+collector.py         원격 수집 에이전트 (stdlib only)
+build.js             esbuild + tailwindcss CLI 빌드
+static/
+  index.html         Tailwind 쉘 + 9개 뷰 + data-action 이벤트 위임
+  login.html         로그인 페이지
+  app.js             core: state, bus, accessors, WS, 대화뷰어
+  sessions.js        세션 목록, 필터, 벌크, 노드 필터
+  timeline.js        Gantt, 히트맵, 시간별 분석, 트렌드
+  charts.js          Chart.js 6개 차트
+  overview.js        히어로 카드, TOP 5, 예측
+  plan.js            예산 설정
+  subagents.js       7개 섹션 시각화
+  app.css            스타일 + 라이트모드 (WCAG AA)
+  bundle.js          빌드 산출물 (esbuild)
+  tailwind.css       빌드 산출물 (tailwindcss)
+tests/               174 pytest (11개 파일)
+docs/
+  API.md             REST API 58 routes
+  ARCHITECTURE.md    아키텍처 가이드
+  SCHEMA.md          DB 스키마 + 마이그레이션
+  QUALITY-GATES.md   8단계 품질 게이트
+  adr/               6건 아키텍처 결정 기록
+  features.html      기능 레퍼런스 (14개 카테고리)
 ```
 
-총 ~9,500 줄.
+## 관측성
 
-## 예산 추적 vs 실제 플랜 한도
+- Prometheus: `/metrics` (7개 메트릭 — 요청, 지연, WS, 스캔, 메시지, 재시도, DB)
+- Grafana: `docs/grafana-dashboard.json` import
+- Alert: `docs/alert-rules.yml` (8개 경보)
+- 헬스: `GET /api/health` (인증 우회)
 
-Anthropic 은 rate limit 조회 API 를 공개하지 않는다. 이 대시보드의 예산 추적은 **로컬 JSONL 기반 추정치**이며 claude.ai 웹의 플랜 잔여량과는 별개이다.
-
-- `~/.claude/.credentials.json` → `rateLimitTier` 자동 감지
-- 사용자가 일/주간 한도 직접 설정 (Pro / Max 5x / Max 20x 프리셋)
-- 14 일 평균 기반 burn-out 시각 ("N 시간 후 한도 도달")
-
-## 보안 요약
-
-- `DASHBOARD_PASSWORD` → HTTP Basic Auth + WebSocket 인증 (`hmac.compare_digest`)
-- 전 엔드포인트 SQL 파라미터화 + LIKE ESCAPE + 정렬 화이트리스트
-- 모든 destructive action 은 프런트 모달에서 **target 이름 정확 입력** 후에만 활성화
-- XSS: `esc()` 가 `&<>"'` escape, 위험 버튼은 DOM API
-- systemd: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only`, `MemoryMax=512M`
-
-> ⚠️ **CORS × CSRF**: 현재 `allow_origins=["*"]` + Basic Auth 조합은 브라우저가 credentialed cross-origin 요청을 거부하기에 사실상 안전하다. `allow_origins` 를 좁히기 전에 반드시 CSRF 토큰 또는 `Origin`/`Referer` 검사를 추가하거나, localhost 전용으로 운영할 것.
-
-## HTTPS / localhost only 배포
-
-WebSocket 인증은 쿼리스트링 `?token=` 또는 Basic Auth 헤더로 비밀번호를 전송합니다. **HTTP 로 공개 바인딩 시 도청 위험** — 다음 중 하나를 권장:
+## 백업 & DR
 
 ```bash
-# 옵션 1: localhost 전용 바인딩 + SSH 터널로 접속
-# claude-dashboard.service 의 --host 0.0.0.0 → 127.0.0.1 변경
-# 원격 접속: ssh -L 8765:localhost:8765 user@host
-
-# 옵션 2: Caddy 리버스 프록시로 TLS 종단 (Let's Encrypt 자동)
-# /etc/caddy/Caddyfile
-dashboard.example.com {
-    reverse_proxy 127.0.0.1:8765
-    @ws {
-        header Connection *Upgrade*
-        header Upgrade websocket
-    }
-    reverse_proxy @ws 127.0.0.1:8765
-}
-
-# 옵션 3: unix socket — 네트워크 노출 제로
-# uvicorn --uds /var/run/claude-dashboard.sock ...
+./backup.sh                    # sqlite3 .backup (트랜잭션 안전, 10개 로테이션)
+./restore.sh --latest          # 최신 백업 복원 (integrity_check 포함)
+./rebuild.sh                   # DB 전체 재빌드 (스냅샷 → rm → 자동 재스캔)
 ```
 
-`DASHBOARD_PASSWORD` 는 모든 요청과 `/ws` 업그레이드에 `hmac.compare_digest` 로 상수시간 검증됩니다.
+### 자동 보존 정책
+
+```bash
+sudo cp claude-dashboard-retention.{service,timer} /etc/systemd/system/
+sudo systemctl enable --now claude-dashboard-retention.timer
+# 매주 일요일 03:30, 365일 이전 데이터 삭제
+```
+
+## 문서
+
+| 문서 | 내용 |
+|------|------|
+| [`docs/API.md`](docs/API.md) | REST API 58 routes + WebSocket |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 아키텍처 가이드 |
+| [`docs/SCHEMA.md`](docs/SCHEMA.md) | DB 스키마, 마이그레이션, SQL 예제 |
+| [`docs/QUALITY-GATES.md`](docs/QUALITY-GATES.md) | 8단계 품질 게이트 |
+| [`docs/adr/`](docs/adr/) | 6건 아키텍처 결정 기록 |
+| [`docs/features.html`](docs/features.html) | 기능 레퍼런스 (80+ 항목) |
+| [`CLAUDE.md`](CLAUDE.md) | 코드 수정 불변식 (에이전트용) |
+| `/docs` (서버) | Swagger UI (라이브) |
+| `/features` (서버) | 기능 레퍼런스 HTML (인증 없이 접근) |
 
 ## 환경 요건
 
 - Python 3.12+
-- uvicorn **반드시** `--loop asyncio --http h11`
+- Node.js 20+ (빌드용 — `npm run build`)
+- uvicorn `--loop asyncio --http h11` (필수)
 - 디스크: `~/.claude/projects/` 읽기, `~/.claude/dashboard.db` 쓰기
 - 선택: `prometheus_client`, `watchdog` (없으면 자동 fallback)
 
-## 백업·복구·재빌드 (DR runbook)
-
-```bash
-# 백업 (sqlite3 .backup 로 트랜잭션 안전)
-./backup.sh                                            # CLI
-curl -X POST http://localhost:8765/api/admin/backup    # API (서비스가 write_lock 획득)
-
-# 복원 (integrity_check → 서비스 중지 → 교체 → 재시작)
-./restore.sh                                           # 인터랙티브 최근 10개 선택
-./restore.sh --latest                                  # 최신 백업
-./restore.sh ~/.claude/dashboard-backups/dashboard_20260412_003000.db
-
-# DB 전체 재빌드 (손상/마이그레이션 버그 복구)
-./rebuild.sh                                           # 스냅샷 → rm db → 재시작 → 자동 v0→v11 재스캔
-```
-
-백업 위치: `~/.claude/dashboard-backups/`
-- `dashboard_*.db` — 일반 백업 (최근 10 개 자동 유지)
-- `pre-restore_*.db` — 복원 실행 전 자동 스냅샷 (로테이션에서 제외)
-- `pre-rebuild_*.db` — 재빌드 실행 전 자동 스냅샷 (로테이션에서 제외)
-
-### 외부 백업 동기화 (권장)
-
-단일 디스크 장애 대비. 예시는 `restic`:
-
-```bash
-# 1회 초기화
-restic -r /mnt/external/backup init
-# 주기 실행 (systemd timer 또는 cron)
-restic -r /mnt/external/backup backup ~/.claude/dashboard-backups ~/.claude/dashboard.db
-restic -r /mnt/external/backup forget --keep-daily 7 --keep-weekly 4 --prune
-```
-
-`rclone sync ~/.claude/dashboard-backups remote:claude-dashboard` 도 동등.
-
-### 자동 데이터 보존 (retention)
-
-```bash
-sudo cp claude-dashboard-retention.service /etc/systemd/system/
-sudo cp claude-dashboard-retention.timer   /etc/systemd/system/
-sudo systemctl enable --now claude-dashboard-retention.timer
-```
-
-매주 일요일 03:30 에 `RETENTION_DAYS=365` 보다 오래된 세션을 삭제하고 `PRAGMA incremental_vacuum` 으로 디스크를 반환합니다. 기본값 변경:
-
-```bash
-sudo systemctl edit claude-dashboard-retention.service
-# [Service]
-# Environment=RETENTION_DAYS=180
-```
-
-## claude.ai 웹 대화 import
-
-claude.ai 웹에서 쌓인 대화는 Anthropic 공개 API 가 없어 실시간 수집이 불가능하지만, 공식 *Export data* 기능으로 받은 `conversations.json` 을 인포트할 수 있다.
-
-```bash
-# 1. claude.ai → Settings → Privacy → Export data (이메일로 zip 수령)
-# 2. 인포트 (idempotent — 같은 export 재실행 시 중복 없음)
-./.venv/bin/python import_claude_ai.py --zip /path/to/data-*.zip
-
-# 파싱 검증만 하고 DB 변경은 안 할 경우
-./.venv/bin/python import_claude_ai.py --zip /path/to/data-*.zip --dry-run
-```
-
-주의: claude.ai export 에는 **토큰·모델·비용 정보가 없다**. 이 데이터는 `claude_ai_*` 테이블에 분리 저장되며 forecast / budget / burn-out 집계에는 영향을 주지 않는다. 브라우저 대화 뷰 좌측 상단의 **Claude Code ↔ claude.ai** 토글로 전환한다.
-
-## 문서
-
-- [`docs/API.md`](./docs/API.md) — REST API 47 routes + WebSocket + 관측성 메트릭
-- [`docs/SCHEMA.md`](./docs/SCHEMA.md) — DB 스키마, 마이그레이션 히스토리, SQL 예제, 모델 가격표
-- [`docs/alert-rules.yml`](./docs/alert-rules.yml) — Prometheus alert rules (8 경보)
-- [`docs/grafana-dashboard.json`](./docs/grafana-dashboard.json) — Grafana 4-패널 헬스 뷰 (import 하면 바로 사용)
-- [`CLAUDE.md`](./CLAUDE.md) — 코드 수정 시 지켜야 할 불변식 (에이전트용)
-- **라이브 API 스펙**: 서비스 실행 중 `http://localhost:8765/docs` (Swagger UI) / `/redoc` / `/openapi.json`
-
 ## 라이선스
 
-자체 사용 도구. PR 전 `pytest tests/` 로 검증.
+자체 사용 도구. PR 전 `pytest tests/ && npm run build && ruff check .` 로 검증.
