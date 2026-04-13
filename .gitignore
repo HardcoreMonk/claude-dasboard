@@ -25,6 +25,13 @@ env/
 .env
 *.local
 
+# Build artifacts
+static/bundle.js
+static/bundle.js.map
+static/tailwind.css
+static/.bundle-src.tmp.js
+node_modules/
+
 # OS junk
 Thumbs.db
 ehthumbs.db

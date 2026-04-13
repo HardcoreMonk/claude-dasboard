@@ -8,6 +8,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -18,9 +19,10 @@ CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'
 
 _write_lock = threading.Lock()
 _read_local = threading.local()   # per-thread cached read connection
+_READ_CONN_TTL = 300              # seconds before recycling a cached read connection
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 12               # bump on every schema change
+SCHEMA_VERSION = 13               # bump on every schema change
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -43,11 +45,21 @@ def _new_connection() -> sqlite3.Connection:
 
 @contextmanager
 def read_db():
-    """Reuses a single sqlite3.Connection per OS thread (PRAGMAs are set once)."""
+    """Reuses a single sqlite3.Connection per OS thread (PRAGMAs are set once).
+
+    Connections older than ``_READ_CONN_TTL`` seconds are closed and recreated
+    to prevent stale WAL snapshots from accumulating indefinitely.
+    """
     conn = getattr(_read_local, 'conn', None)
-    if conn is None:
+    if conn is None or (time.time() - getattr(_read_local, 'conn_time', 0)) > _READ_CONN_TTL:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
         conn = _new_connection()
         _read_local.conn = conn
+        _read_local.conn_time = time.time()
     try:
         yield conn
     except sqlite3.Error:
@@ -105,7 +117,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
     message_uuid TEXT UNIQUE,
     parent_uuid TEXT,
     role TEXT,
@@ -133,6 +145,11 @@ CREATE INDEX IF NOT EXISTS idx_sessions_model       ON sessions(model);
 CREATE INDEX IF NOT EXISTS idx_messages_session_sc  ON messages(session_id, is_sidechain);
 CREATE INDEX IF NOT EXISTS idx_sessions_pinned      ON sessions(pinned);
 CREATE INDEX IF NOT EXISTS idx_messages_preview     ON messages(content_preview);
+
+CREATE VIEW IF NOT EXISTS sessions_with_duration AS
+SELECT *,
+       (julianday(COALESCE(NULLIF(updated_at,''),created_at)) - julianday(created_at)) * 86400.0 AS duration_seconds
+FROM sessions;
 
 CREATE TABLE IF NOT EXISTS file_watch_state (
     file_path TEXT PRIMARY KEY,
@@ -193,7 +210,7 @@ END;
 # conversations.json emitted by claude.ai's "Export data" feature, which does
 # NOT include tokens, model names, or cost — only conversations + messages +
 # content blocks (text / thinking / tool_use / tool_result).
-_MIGRATE_V9 = '''
+_MIGRATE_V9_TABLES = '''
 CREATE TABLE IF NOT EXISTS claude_ai_conversations (
     uuid TEXT PRIMARY KEY,
     name TEXT,
@@ -227,7 +244,9 @@ CREATE TABLE IF NOT EXISTS claude_ai_messages (
 CREATE INDEX IF NOT EXISTS idx_cai_msg_conv    ON claude_ai_messages(conversation_uuid);
 CREATE INDEX IF NOT EXISTS idx_cai_msg_created ON claude_ai_messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_cai_conv_updated ON claude_ai_conversations(updated_at);
+'''
 
+_MIGRATE_V9_FTS = '''
 CREATE VIRTUAL TABLE IF NOT EXISTS claude_ai_messages_fts USING fts5(
     content_preview,
     content='claude_ai_messages',
@@ -643,41 +662,50 @@ def check_integrity() -> bool:
         return False
 
 
+def _commit_migration(conn: sqlite3.Connection, version: int) -> int:
+    """Commit current transaction and set user_version atomically."""
+    _set_user_version(conn, version)
+    conn.commit()
+    return version
+
+
 def init_db() -> None:
-    """Create / migrate schema. Safe to call on every startup."""
+    """Create / migrate schema. Safe to call on every startup.
+
+    Each migration step commits independently so a crash mid-migration
+    leaves the database at the last fully-applied version, not in a
+    partially-applied state.
+    """
     with _write_lock:
         conn = _new_connection()
         try:
             conn.executescript(_SCHEMA_V1)
             # Defensive: guarantee columns added after v1 are present even on old DBs
             _ensure_column(conn, 'sessions', 'pinned', 'INTEGER DEFAULT 0')
+            conn.commit()
             current = _get_user_version(conn)
             if current < 2:
                 logger.info("Migrating schema v%d → 2", current)
                 conn.executescript(_MIGRATE_V2)
-                _set_user_version(conn, 2)
-                current = 2
+                current = _commit_migration(conn, 2)
             if current < 3:
                 logger.info("Migrating schema v%d → 3 (FTS5)", current)
                 try:
                     conn.executescript(_MIGRATE_V3)
                     _backfill_fts(conn)
-                    _set_user_version(conn, 3)
-                    current = 3
+                    current = _commit_migration(conn, 3)
                 except sqlite3.OperationalError as e:
                     logger.warning(
                         "FTS5 migration skipped (SQLite build lacks fts5?): %s", e)
                     # S6: still advance user_version — the attempt counts.
                     # Search API has a LIKE fallback. A future migration can
                     # retry FTS5 if the sqlite build later supports it.
-                    _set_user_version(conn, 3)
-                    current = 3
+                    current = _commit_migration(conn, 3)
             if current < 4:
                 logger.info("Migrating schema v%d → 4 (heal project/model)", current)
                 _heal_project_identity(conn)
                 _heal_session_models(conn)
-                _set_user_version(conn, 4)
-                current = 4
+                current = _commit_migration(conn, 4)
             if current < 5:
                 logger.info("Migrating schema v%d → 5 (subagent reassign)", current)
                 _migrate_v5_subagent_reassign(conn)
@@ -686,34 +714,30 @@ def init_db() -> None:
                 # Subagent rows' model column is empty until we pick it from
                 # their messages — piggy-back on the existing healer.
                 _heal_session_models(conn)
-                _set_user_version(conn, 5)
-                current = 5
+                current = _commit_migration(conn, 5)
             if current < 6:
                 logger.info("Migrating schema v%d → 6 (tag compact subagents)", current)
                 _migrate_v6_tag_compact_subagents(conn)
-                _set_user_version(conn, 6)
-                current = 6
+                current = _commit_migration(conn, 6)
             if current < 7:
                 logger.info("Migrating schema v%d → 7 (stop_reason + parent_tool_use_id)", current)
                 _migrate_v7_add_columns(conn)
                 _migrate_v7_backfill_stop_reason(conn)
                 _migrate_v7_recompute_final_stop_reason(conn)
                 _migrate_v7_link_parent_tool_use(conn)
-                _set_user_version(conn, 7)
-                current = 7
+                current = _commit_migration(conn, 7)
             if current < 8:
                 logger.info("Migrating schema v%d → 8 (session tags)", current)
                 _ensure_column(conn, 'sessions', 'tags', "TEXT")
-                _set_user_version(conn, 8)
-                current = 8
+                current = _commit_migration(conn, 8)
             if current < 9:
                 logger.info("Migrating schema v%d → 9 (claude.ai tables)", current)
+                conn.executescript(_MIGRATE_V9_TABLES)
                 try:
-                    conn.executescript(_MIGRATE_V9)
+                    conn.executescript(_MIGRATE_V9_FTS)
                 except sqlite3.OperationalError as e:
-                    logger.warning("v9 FTS5 migration skipped: %s", e)
-                _set_user_version(conn, 9)
-                current = 9
+                    logger.warning("v9 FTS5 skipped: %s", e)
+                current = _commit_migration(conn, 9)
             if current < 10:
                 logger.info("Migrating schema v%d → 10 (parent_session_id hot path index)", current)
                 # Hot path /api/sessions does correlated subqueries filtered by
@@ -723,8 +747,7 @@ def init_db() -> None:
                     "CREATE INDEX IF NOT EXISTS idx_sessions_parent_is_sub "
                     "ON sessions(parent_session_id, is_subagent)"
                 )
-                _set_user_version(conn, 10)
-                current = 10
+                current = _commit_migration(conn, 10)
             if current < 11:
                 logger.info("Migrating schema v%d → 11 (claude_ai_messages.updated_at)", current)
                 # claude.ai export re-imports couldn't detect edits previously
@@ -732,14 +755,37 @@ def init_db() -> None:
                 # updated_at lets the importer compare versions and replace
                 # stale rows when a later export carries a newer timestamp.
                 _ensure_column(conn, 'claude_ai_messages', 'updated_at', "TEXT")
-                _set_user_version(conn, 11)
-                current = 11
+                current = _commit_migration(conn, 11)
             if current < 12:
                 logger.info("Migrating schema v%d → 12 (sessions.turn_duration_ms)", current)
                 _ensure_column(conn, 'sessions', 'turn_duration_ms', "INTEGER DEFAULT 0")
-                _set_user_version(conn, 12)
-                current = 12
-            conn.commit()
+                current = _commit_migration(conn, 12)
+            if current < 13:
+                logger.info("Migrating schema v%d → 13 (source_node + remote_nodes)", current)
+                _ensure_column(conn, 'sessions', 'source_node', "TEXT DEFAULT 'local'")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_sessions_source_node "
+                    "ON sessions(source_node)"
+                )
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS remote_nodes (
+                        node_id TEXT PRIMARY KEY,
+                        label TEXT,
+                        ingest_key_hash TEXT NOT NULL,
+                        last_seen TEXT,
+                        session_count INTEGER DEFAULT 0,
+                        message_count INTEGER DEFAULT 0,
+                        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                    )
+                ''')
+                current = _commit_migration(conn, 13)
+            # One-time VACUUM to activate auto_vacuum=INCREMENTAL on legacy databases
+            av = conn.execute('PRAGMA auto_vacuum').fetchone()[0]
+            if av != 2:  # 2 = INCREMENTAL
+                logger.info("Running one-time VACUUM to activate auto_vacuum=INCREMENTAL")
+                conn.execute('PRAGMA auto_vacuum = INCREMENTAL')
+                conn.execute('VACUUM')
+                logger.info("VACUUM complete")
         finally:
             conn.close()
 
@@ -753,3 +799,16 @@ def close_thread_connections() -> None:
         except Exception:
             pass
         _read_local.conn = None
+
+
+def wal_checkpoint() -> None:
+    """Run a WAL checkpoint to keep the WAL file size bounded."""
+    try:
+        with _write_lock:
+            conn = _new_connection()
+            try:
+                conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            finally:
+                conn.close()
+    except Exception as e:
+        logger.warning("WAL checkpoint failed: %s", e)

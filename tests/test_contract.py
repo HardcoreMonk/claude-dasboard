@@ -379,3 +379,68 @@ def test_contract_admin_retention_preview(contract_client):
     assert r.status_code == 200
     _require(r.json(), '/api/admin/retention',
              ['preview', 'sessions_to_delete', 'cutoff'])
+
+
+# ─── Auth-enabled smoke test ──────────────────────────────────────────────
+
+_AUTH_PASSWORD = 'test-secret-42'
+
+
+def test_contract_endpoints_accessible_with_auth(tmp_path, monkeypatch):
+    """Verify key contract endpoints work with auth enabled via cookie session.
+
+    This complements the no-auth contract_client tests above by proving:
+    1. POST /api/auth/login sets a session cookie.
+    2. Cookie-authenticated requests to /api/stats, /api/sessions → 200.
+    3. /api/health bypasses auth (returns 200 without cookie).
+    """
+    db_file = tmp_path / 'authcontract.db'
+    fake_projects = tmp_path / 'projects'
+    fake_projects.mkdir()
+
+    monkeypatch.setenv('DASHBOARD_PASSWORD', _AUTH_PASSWORD)
+    monkeypatch.setenv('DASHBOARD_SECRET', 'fixed-test-secret-for-determinism')
+
+    try:
+        from prometheus_client import REGISTRY
+        for c in list(REGISTRY._collector_to_names.keys()):
+            try:
+                REGISTRY.unregister(c)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    for name in list(sys.modules):
+        if name in ('database', 'parser', 'watcher', 'main'):
+            sys.modules.pop(name, None)
+
+    import database
+    monkeypatch.setattr(database, 'DB_PATH', db_file)
+    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
+    import parser as app_parser
+    monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
+    import main
+    monkeypatch.setattr(main, '_AUTH_PW', _AUTH_PASSWORD)
+    database.init_db()
+
+    from fastapi.testclient import TestClient
+    with TestClient(main.app) as client:
+        # Step 1 — login and obtain session cookie
+        r = client.post('/api/auth/login', json={'password': _AUTH_PASSWORD})
+        assert r.status_code == 200
+        assert 'dash_session' in r.cookies
+
+        # Step 2 — authenticated requests to protected endpoints
+        for path in ['/api/stats', '/api/sessions']:
+            r = client.get(path)
+            assert r.status_code == 200, f"{path} returned {r.status_code} with auth cookie"
+
+        # Step 3 — /api/health must work even with auth cookie
+        r = client.get('/api/health')
+        assert r.status_code == 200
+
+    # Step 4 — /api/health bypasses auth entirely (no cookie)
+    with TestClient(main.app) as fresh:
+        r = fresh.get('/api/health')
+        assert r.status_code == 200

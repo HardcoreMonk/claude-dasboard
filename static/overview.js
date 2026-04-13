@@ -138,9 +138,9 @@ function _isoDaysAgo(n) {
 }
 function drillToSessionsToday() {
   const today = _todayISO();
-  state.advFilters = { date_from: today, date_to: today, cost_min: '', cost_max: '' };
-  savePrefs({ advFilters: state.advFilters });
-  state.currentPage = 1;
+  setAdvFilters({ date_from: today, date_to: today, cost_min: '', cost_max: '' });
+  savePrefs({ advFilters: getAdvFilters() });
+  setPage(1);
   showView('sessions');
   const g = id => document.getElementById(id);
   if (g('advDateFrom')) g('advDateFrom').value = today;
@@ -148,9 +148,9 @@ function drillToSessionsToday() {
 }
 function drillToSessionsWeek() {
   const to = _todayISO(), from = _isoDaysAgo(6);
-  state.advFilters = { date_from: from, date_to: to, cost_min: '', cost_max: '' };
-  savePrefs({ advFilters: state.advFilters });
-  state.currentPage = 1;
+  setAdvFilters({ date_from: from, date_to: to, cost_min: '', cost_max: '' });
+  savePrefs({ advFilters: getAdvFilters() });
+  setPage(1);
   showView('sessions');
   const g = id => document.getElementById(id);
   if (g('advDateFrom')) g('advDateFrom').value = from;
@@ -203,6 +203,9 @@ async function loadTopProjects() {
       const row = document.createElement('div');
       row.className = 'grid grid-cols-[28px_1fr_auto_auto_auto] items-start gap-2 py-4 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-2 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
       row.title = '클릭하여 프로젝트 상세 보기';
+      row.setAttribute('tabindex', '0');
+      row.setAttribute('role', 'button');
+      row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
       // NOTE: innerHTML here is safe — all dynamic values pass through esc() or
 // are numeric (pct, i, cols[i], fmt$, fmtTok). No raw user input.
 row.innerHTML = `<span class="text-sm font-extrabold text-center pt-0.5 ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-sm font-semibold text-white/60 truncate">${idleBadge}${esc(p.project_name||'—')}${liveBadge}</div><div class="h-1.5 bg-white/5 rounded-full mt-2 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div>${previewLine}</div><button data-peek-btn type="button" title="마지막 대화 미리보기" aria-label="마지막 대화 미리보기" class="flex items-center gap-1 self-start mt-0.5 px-2 py-1 rounded-full bg-accent/10 hover:bg-accent/25 text-accent/80 hover:text-accent ring-1 ring-accent/30 hover:ring-accent/60 text-[10px] font-bold spring"><iconify-icon icon="solar:eye-linear" width="13" style="pointer-events:none"></iconify-icon><span style="pointer-events:none">미리보기</span></button><span class="text-sm font-bold text-amber-400/70 whitespace-nowrap pt-0.5">${fmt$(p.total_cost)}</span><span class="text-[11px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5">${fmtTok(p.total_tokens||0)}</span>`;
@@ -226,7 +229,7 @@ row.innerHTML = `<span class="text-sm font-extrabold text-center pt-0.5 ${rc}">#
     // Real-time refresh: if the preview panel is currently showing one of
     // these projects, rebuild it with the fresh last_message.
     if (typeof topPreviewMaybeRefresh === 'function') topPreviewMaybeRefresh(projects);
-  } catch (e) { console.error('loadTopProjects:', e); }
+  } catch (e) { reportError('loadTopProjects', e); }
 }
 
 
@@ -295,6 +298,9 @@ function topPreviewOpen(project) {
     backdrop.style.opacity = '1';
     backdrop.style.pointerEvents = 'auto';
   }
+
+  // Focus the first interactive element in the panel
+  setTimeout(() => { panel.querySelector('button')?.focus(); }, 100);
 
   // Highlight active row
   document.querySelectorAll('#topProjectsList > div').forEach(r => {

@@ -16,7 +16,7 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
            |
      [SQLite WAL 쓰기]          database.py
            |
-     [FastAPI 49 routes]        main.py
+     [FastAPI 58 routes]        main.py
        /       \
    REST API   WebSocket
        \       /
@@ -41,21 +41,24 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 
 ### main.py — FastAPI 애플리케이션
 
-**49 HTTP routes + 1 WebSocket** 을 호스팅.
+**58 HTTP routes + 1 WebSocket** 을 호스팅.
 
 | 그룹 | 라우트 | 역할 |
 |---|---|---|
+| 인증 | `/login`, `/api/auth/login`, `/logout`, `/me` | 쿠키 세션 인증 (HMAC 서명, rate limit 5/min/IP) |
+| 페이지 | `/features` | Feature Reference HTML 페이지 (인증 우회) |
 | 헬스 | `/api/health` | 서버 상태 + DB 메시지/세션 카운트 |
 | 메트릭 | `/metrics` | Prometheus text format (인증 우회) |
-| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 세션 CRUD, 메시지 조회, subagent 체인 |
+| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 세션 CRUD, 메시지 조회, 검색 점프, subagent 체인 |
 | 프로젝트 | `/api/projects`, `/top`, `/{name}/stats`, `/{name}/messages` | 프로젝트 집계, TOP 5, 상세 |
 | 사용량 | `/api/usage/hourly`, `/daily`, `/periods` | 시계열 토큰/비용 집계 |
-| 타임라인 | `/api/timeline`, `/timeline/heatmap` | Gantt 데이터, 요일x시간 히트맵 |
+| 타임라인 | `/api/timeline`, `/timeline/heatmap`, `/timeline/hourly` | Gantt 데이터, 요일x시간 히트맵, 시간별 프로젝트×세션 집계 |
 | 모델 | `/api/models` | 모델별 비용/토큰 집계 |
 | Subagent | `/api/subagents`, `/stats`, `/heatmap` | subagent 분석 |
 | 예측 | `/api/forecast` | MTD 비용 예측, 예산 소진 시간 |
 | 플랜 | `/api/plan/detect`, `/plan/config`, `/plan/usage` | 요금제 감지, 예산 설정 |
 | claude.ai | `/api/claude-ai/conversations`, `/search`, `/stats` | claude.ai export 데이터 |
+| 원격 수집 | `/api/ingest`, `/api/nodes` | 다중 서버 JSONL 수집 (collector.py → POST /api/ingest) |
 | 관리 | `/api/admin/backup`, `/retention`, `/db-size` | 백업, 보존 정책, DB 용량 |
 | 내보내기 | `/api/export/csv` | 세션 CSV 다운로드 |
 | WebSocket | `/ws` | 실시간 메시지 브로드캐스트 |
@@ -67,12 +70,12 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 ```
 
 - `metrics`: 모든 요청을 `http_requests_total{method,path,status}` 로 카운트 (라우트 템플릿 기반, cardinality 제어)
-- `auth`: `DASHBOARD_PASSWORD` 설정 시 Basic Auth 검증. `/`, `/static/*`, `/api/health`, `/metrics` 는 우회
+- `auth`: `DASHBOARD_PASSWORD` 설정 시 쿠키 세션 검증 (`dash_session`). `/`, `/static/*`, `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login` 은 우회
 
 ### database.py — SQLite 데이터 계층
 
 ```
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 모드: WAL, busy_timeout=5000, auto_vacuum=INCREMENTAL
 ```
 
@@ -94,8 +97,9 @@ SCHEMA_VERSION = 12
 | `plan_config` | 요금제, 예산, 타임존 설정 |
 | `claude_ai_conversations` | claude.ai export 대화 (sessions 와 완전 격리) |
 | `claude_ai_messages` | claude.ai export 메시지 |
+| `remote_nodes` | 원격 수집 노드 등록 (node_id, label, ingest_key) |
 
-**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v12). 각 단계는 idempotent.
+**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v13). 각 단계는 idempotent.
 
 ### parser.py — JSONL 파싱 엔진
 
@@ -155,19 +159,38 @@ start_watching()
 ### 모듈 구조
 
 ```
-index.html          Tailwind 쉘 + 9개 뷰 섹션 + nav + 모달
-  ├─ app.js         코어: state, WS, routing, utils, h(), 4단계 상태 감지
+index.html          Tailwind 쉘 + 9개 뷰 섹션 + nav + 모달 + data-action 이벤트 위임
+login.html          독립 로그인 페이지
+  ├─ main.js        ES module entry point (import 순서 정의)
+  ├─ app.js         코어: state, bus, accessors, WS, routing, utils, h(), 4단계 상태 감지
+  ├─ charts.js      Chart.js 6개 차트 (usage, models, dailyCost, cache, stopReason, modelCache)
   ├─ sessions.js    세션 목록, 필터, 프리셋, 벌크 작업, 페이지네이션
   ├─ overview.js    히어로 카드, 기간별 비용, TOP 5, 예측, 미리보기 drawer
   ├─ plan.js        플랜 사용량, 설정 모달
   ├─ subagents.js   7개 섹션 시각화 (유형별·종료사유·히트맵·매트릭스)
-  ├─ charts.js      Chart.js 6개 차트 (usage, models, dailyCost, cache, stopReason, modelCache)
-  ├─ timeline.js    Gantt 차트, 히트맵, 효율분석, 일간리포트, 트렌드비교
-  └─ app.css        스타일 + 라이트모드 매핑 + 반응형 + reduced-motion
+  ├─ timeline.js    Gantt 차트, 히트맵(드릴다운), 효율분석, 일간리포트(시간별 아코디언), 스택드 바 차트, 트렌드비교
+  ├─ app.css        스타일 + 라이트모드 매핑 + 반응형 + reduced-motion
+  └─ [빌드 산출물]
+     ├─ bundle.js     esbuild concat+minify (sourcemap 포함)
+     └─ tailwind.css  tailwindcss CLI 프로덕션 빌드
 ```
 
-빌드 시스템 없음 — 모든 JS 는 plain script (`defer`) 로 순서대로 로드.
-`app.js` 가 먼저 파싱되어 전역 state/유틸을 정의하고, 나머지 모듈이 소비.
+**빌드:** `node build.js` (= `npm run build`) — 소스 JS 를 의존 순서대로 concat 후 esbuild minify → `bundle.js`. 동시에 tailwindcss CLI → `tailwind.css`. `index.html` 은 `bundle.vN.js` + `tailwind.vN.css` 단 2개만 로드.
+
+### 이벤트 버스 & 상태 접근자
+
+```javascript
+// 경량 pub/sub — 모듈 간 느슨한 결합
+const bus = { on(e, fn) { ... }, emit(e, ...args) { ... } };
+
+// Chart.js 인스턴스 캡슐화
+getChart(id), setChart(id, inst), destroyChart(id)
+
+// 상태 접근자
+setPage(n), setAdvFilters(obj), ...
+```
+
+- `data-action` 이벤트 위임: 인라인 `onclick` 대신 `data-action="actionName"` 속성 + delegated click handler 로 이벤트 처리.
 
 ### 상태 관리
 
@@ -232,7 +255,7 @@ watcher 변경 감지                    connectWS()
 | 전환 | `cubic-bezier(.16,1,.3,1)` (spring), `fadeInUp` + `blur(3px)` |
 | 라이트모드 | `body.theme-light` 토글, WCAG AA 4.5:1 전 텍스트 검증 |
 
-**캐시버스팅:** 파일명 기반 `/static/app.vN.js`. 서버가 정규식으로 `.vN` strip.
+**캐시버스팅:** 파일명 기반 `/static/bundle.vN.js`, `tailwind.vN.css`. 서버가 정규식으로 `.vN` strip.
 
 ---
 
@@ -319,7 +342,7 @@ claude-dashboard-retention.service → 오래된 데이터 정리
 ```yaml
 # .github/workflows/ci.yml
 - ruff (lint)
-- pytest 131 tests (~6s)
+- pytest 174 tests (~6s)
 - node --check (JS syntax)
 ```
 
@@ -329,12 +352,12 @@ claude-dashboard-retention.service → 오래된 데이터 정리
 
 | 계층 | 방어 |
 |---|---|
-| **인증** | `DASHBOARD_PASSWORD` → HTTP Basic Auth (hmac.compare_digest) |
+| **인증** | `DASHBOARD_PASSWORD` → 쿠키 세션 (`dash_session`, HMAC 서명, 만료 내장). 로그인 rate limit 5회/분/IP |
 | **SQL** | 전 쿼리 파라미터화. ORDER BY 화이트리스트. LIKE 는 ESCAPE 필수 |
 | **XSS** | `h()` 헬퍼 (DOM API), `esc()` (entity encoding). innerHTML 금지 |
 | **삭제 확인** | `openDeleteConfirm()` — 타겟 이름 정확 입력 후 confirm |
-| **CSRF** | `allow_origins=["*"]` + Basic Auth. 브라우저 credentialed cross-origin 차단 |
-| **WebSocket** | `_ws_auth_ok()` — Basic Auth 헤더 또는 `?token=` 쿼리 파라미터 |
+| **CSRF** | 쿠키 세션 + `SameSite=Lax` 로 기본 보호 |
+| **WebSocket** | `_ws_auth_ok()` — `dash_session` 쿠키 검증 |
 | **정적 파일** | `/` 는 `Cache-Control: no-store`. 정적 파일은 `.vN` 캐시버스팅 |
 
 ---
@@ -351,8 +374,43 @@ python import_claude_ai.py --zip ~/export.zip
 - **격리:** 기존 `sessions`/`messages` 와 절대 JOIN/UNION 하지 않음 (비용 오염 방지)
 - 프론트: 소스 토글 (`claude-code` ↔ `claude-ai`)
 
+### 원격 노드 수집
+
+```
+[원격 서버]                        [대시보드 서버]
+collector.py                      POST /api/ingest
+  watchdog + poll                   → X-Ingest-Key 인증
+  → JSONL 변경 감지                  → parser.process_record(source_node=node_id)
+  → POST /api/ingest                → DB 저장 + WS broadcast
+```
+
+- `collector.py`: stdlib-only 독립 스크립트. 원격 서버의 `~/.claude/projects/` 를 감시하며 변경된 JSONL 레코드를 대시보드 서버로 전송.
+- `GET /api/collector.py`: 대시보드 서버에서 collector 스크립트 다운로드 (원격 서버 설치 편의).
+- `POST /api/nodes`: 노드 등록 시 일회성 `ingest_key` 발급. `POST /api/nodes/{id}/rotate-key` 로 재발급.
+- `sessions.source_node` 컬럼으로 로컬/원격 세션 구분. `?node=` 필터로 노드별 조회.
+
 ### 플랜 감지
 
 - `~/.claude/.credentials.json` 의 `rateLimitTier` 읽기 (로컬 전용, API 호출 없음)
 - 티어별 기본 한도 매핑 (Pro, Max 5x, Max 20x)
 - 예산 추적은 전적으로 로컬 JSONL 기반 추정
+
+---
+
+## 테스트 커버리지
+
+174 pytest across 11 test files:
+
+| 파일 | 테스트 수 | 영역 |
+|---|---|---|
+| `test_parser.py` | 37 | JSONL 파싱, 비용 계산, subagent 식별 |
+| `test_api.py` | 34 | REST 엔드포인트, 정렬, 필터, 페이지네이션 |
+| `test_contract.py` | 32 | API 응답 스키마 계약 |
+| `test_auth.py` | 18 | 쿠키 세션 인증, rate limit, 로그인/로그아웃 |
+| `test_ingest.py` | 12 | 원격 노드 수집, ingest key 검증 |
+| `test_database.py` | 10 | 마이그레이션, 쓰기/읽기 분리 |
+| `test_watcher.py` | 9 | 파일 감시, 건강 검사, 재시작 |
+| `test_e2e_smoke.py` | 8 | 엔드투엔드 통합 (서버 기동 → API 호출) |
+| `test_collector.py` | 6 | collector 에이전트 로직 |
+| `test_websocket.py` | 5 | WS 인증, 메시지 수신, ping/pong |
+| `test_backup_restore.py` | 3 | DR 스크립트 |

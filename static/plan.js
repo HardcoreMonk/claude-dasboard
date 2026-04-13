@@ -9,6 +9,10 @@
 // ─── Plan Usage ─────────────────────────────────────────────────────────
 let planTimer = null, planData = null;
 
+function clearPlanTimer() {
+  if (planTimer) { clearInterval(planTimer); planTimer = null; }
+}
+
 async function loadPlanUsage() {
   try {
     const resp = await fetch('/api/plan/usage');

@@ -1,6 +1,6 @@
 # REST API
 
-47 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 HTTP Basic (`/api/health`, `/metrics` 제외).
+58 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features` 은 인증 우회.
 
 ## 자동 생성 스펙 (FastAPI)
 
@@ -20,6 +20,16 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 ```
 
 
+## 인증
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/login` | 로그인 페이지 HTML (인증 우회) |
+| POST | `/api/auth/login` | 로그인. Body: `{password}`. 성공 시 `dash_session` 쿠키 발급 (HMAC 서명, 만료 내장). Rate limit: 5회/분/IP |
+| POST | `/api/auth/logout` | 로그아웃 (`dash_session` 쿠키 삭제) |
+| GET | `/api/auth/me` | 현재 인증 상태 확인. 응답: `{authenticated, auth_required}` |
+| GET | `/features` | Feature Reference HTML 페이지 (인증 우회) |
+
 ## 통계·시계열·예측
 
 | 메서드 | 경로 | 설명 |
@@ -36,10 +46,11 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/sessions` | sort/order, search, project, model, pinned_only, date_from/to, cost_min/max, tag, include_subagents |
+| GET | `/api/sessions` | sort/order, search, project, model, pinned_only, date_from/to, cost_min/max, tag, include_subagents, node |
 | GET | `/api/sessions/search?q=k` | FTS5 전문 검색 (선두 와일드카드 차단, 매칭 토큰 하이라이트) |
 | GET | `/api/sessions/{id}` | 상세 — subagent_count/cost, duration, stop_reason, parent_tool_use_id, task_prompt, tags |
 | GET | `/api/sessions/{id}/messages` | 대화 (limit/offset, subagent는 sidechain 필터 우회) |
+| GET | `/api/sessions/{id}/message-position?message_id=N` | 특정 메시지의 0-based offset 반환 (검색 결과 → 해당 페이지 점프용). 응답: `{position, total, message_id}` |
 | GET | `/api/sessions/{id}/subagents` | spawn한 subagent 목록 + duration |
 | GET | `/api/sessions/{id}/chain?depth=N` | 디스패치 체인 재귀 walk |
 | DELETE | `/api/sessions/{id}` | preview → confirm |
@@ -54,17 +65,25 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 | GET | `/api/subagents/stats` | by_type, by_stop_reason, top_by_cost/duration, parents_with_most_subs, by_type_and_stop_reason |
 | GET | `/api/subagents/heatmap` | agent_type × project 2D 집계 |
 
+## 타임라인
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/timeline?date_from=D&date_to=D` | Gantt 용 세션 목록 (start/end, cost, model, project). `include_subagents`, `limit`, `node` |
+| GET | `/api/timeline/heatmap?days=N` | 요일×시간 7×24 행렬 (메시지 수, 비용). 기본 90일 |
+| GET | `/api/timeline/hourly?date=YYYY-MM-DD` | 특정 일자 시간별 (0~23) 프로젝트×세션 집계. `include_subagents`. 슬롯별 projects/sessions/message_count/cost_usd/tokens 반환 |
+
 ## 프로젝트·태그
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/models` | 모델별 분석 (sort/order) |
-| GET | `/api/projects` | path 기반 그룹 + session/subagent 카운트 분리 |
+| GET | `/api/models` | 모델별 분석 (sort/order, page/per_page) |
+| GET | `/api/projects` | path 기반 그룹 + session/subagent 카운트 분리 (sort/order, page/per_page) |
 | GET | `/api/projects/top?limit=N` | 비용 상위 N개 |
 | GET | `/api/projects/{name}/stats` | `?path=` 모호성 해소, sessions 배열 포함 |
 | GET | `/api/projects/{name}/messages` | 프로젝트 전체 대화 취합 (limit/offset/order, `?path=`) |
 | DELETE | `/api/projects/{name}` | preview → confirm (`?path=` 필요 시) |
-| GET | `/api/tags` | 전체 태그 + 사용 카운트 |
+| GET | `/api/tags` | 전체 태그 + 사용 카운트 (page/per_page) |
 
 ## 예산·관리
 
@@ -77,7 +96,18 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 | POST | `/api/admin/backup` | DB 백업 (write_lock, 10개 유지) |
 | DELETE | `/api/admin/retention` | preview → confirm |
 | GET | `/api/admin/db-size` | DB 파일 크기 |
-| WS | `/ws` | 실시간 (init / batch_update / scan_progress / scan_complete, ping 30s) |
+| WS | `/ws` | 실시간 (init / batch_update / scan_progress / scan_complete, ping 30s). 쿠키 세션 인증 (`dash_session`) |
+
+## 원격 노드 수집
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/ingest` | 원격 collector 에이전트가 JSONL 레코드 전송. `X-Ingest-Key` 헤더 인증. Body: `{node_id, file_path, records[]}` (인증 우회) |
+| GET | `/api/collector.py` | collector.py 스크립트 다운로드 (원격 서버 설치용, 인증 우회) |
+| GET | `/api/nodes` | 등록된 노드 목록 (local 포함) + 세션/메시지 카운트 |
+| POST | `/api/nodes` | 노드 등록. Body: `{node_id, label?}`. 응답에 일회성 `ingest_key` 포함 |
+| DELETE | `/api/nodes/{node_id}` | 노드 등록 해제 (수집된 데이터는 유지) |
+| POST | `/api/nodes/{node_id}/rotate-key` | ingest key 재발급 |
 
 ## claude.ai export
 
@@ -108,8 +138,13 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 ## 사용 예시
 
 ```bash
-curl -s http://localhost:8765/api/stats | jq .
-curl -s 'http://localhost:8765/api/sessions?per_page=10&pinned_only=true' \
+# 인증이 설정된 경우 먼저 로그인 (쿠키 저장)
+curl -c cookies.txt -X POST http://localhost:8765/api/auth/login \
+  -H 'Content-Type: application/json' -d '{"password":"your-password"}'
+
+# 이후 요청에 쿠키 첨부 (-b cookies.txt)
+curl -b cookies.txt -s http://localhost:8765/api/stats | jq .
+curl -b cookies.txt -s 'http://localhost:8765/api/sessions?per_page=10&pinned_only=true' \
   | jq '.sessions[]|{project_name,model,total_cost_usd,tags}'
 curl -s 'http://localhost:8765/api/forecast?days=14' | jq .
 curl -s 'http://localhost:8765/api/subagents/stats' | jq '.by_type_and_stop_reason'

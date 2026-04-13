@@ -178,7 +178,8 @@ def mem_db():
         is_subagent INTEGER DEFAULT 0, parent_session_id TEXT,
         agent_type TEXT, agent_description TEXT, pinned INTEGER DEFAULT 0,
         final_stop_reason TEXT, parent_tool_use_id TEXT, task_prompt TEXT,
-        tags TEXT
+        tags TEXT, turn_duration_ms INTEGER DEFAULT 0,
+        source_node TEXT DEFAULT 'local'
     )''')
     conn.execute('''CREATE TABLE messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -22,8 +22,8 @@ function saveCurrentPreset() {
   if (!name) return;
   const presets = getPresets();
   presets[name] = {
-    sort: { ...sortState.sessions },
-    advFilters: { ...(state.advFilters || {}) },
+    sort: { ...getSortState('sessions') },
+    advFilters: { ...getAdvFilters() },
   };
   savePrefs({ presets });
   Object.assign(_prefs, { presets });
@@ -35,13 +35,13 @@ function applyPreset(name) {
   const presets = getPresets();
   const p = presets[name];
   if (!p) return;
-  Object.assign(sortState.sessions, p.sort || {});
-  state.advFilters = { ...(p.advFilters || {}) };
+  setSortState('sessions', p.sort || {});
+  setAdvFilters({ ...(p.advFilters || {}) });
   savePrefs({
-    [`sort_sessions`]: sortState.sessions,
-    advFilters: state.advFilters,
+    [`sort_sessions`]: getSortState('sessions'),
+    advFilters: getAdvFilters(),
   });
-  state.currentPage = 1;
+  setPage(1);
   loadSessions();
   showToast(`"${name}" 적용`, { type: 'info', duration: 1500 });
 }
@@ -98,14 +98,13 @@ function renderBulkBar() {
 async function bulkPin(pin) {
   if (state.bulkSelected.size === 0) return;
   const ids = [...state.bulkSelected];
-  let ok = 0, fail = 0;
-  for (const sid of ids) {
-    try {
-      await fetch(`/api/sessions/${encodeURIComponent(sid)}/pin`,
-        { method: pin ? 'POST' : 'DELETE' });
-      ok++;
-    } catch { fail++; }
-  }
+  const results = await Promise.all(ids.map(sid =>
+    fetch(`/api/sessions/${encodeURIComponent(sid)}/pin`,
+      { method: pin ? 'POST' : 'DELETE' })
+      .then(() => true).catch(() => false)
+  ));
+  const ok = results.filter(Boolean).length;
+  const fail = results.length - ok;
   showToast(`${pin ? '핀' : '핀 해제'}: ${ok}건 성공${fail ? `, ${fail}건 실패` : ''}`,
     { type: fail ? 'warning' : 'success' });
   bulkClear();
@@ -215,13 +214,12 @@ function bulkDelete() {
     target: `DELETE ${ids.length}`,
     message: `선택한 ${fmtN(ids.length)}개 세션이 영구 삭제됩니다. 복구할 수 없습니다.`,
     onConfirm: async () => {
-      let ok = 0, fail = 0;
-      for (const sid of ids) {
-        try {
-          await fetch(`/api/sessions/${encodeURIComponent(sid)}?confirm=true`, { method: 'DELETE' });
-          ok++;
-        } catch { fail++; }
-      }
+      const results = await Promise.all(ids.map(sid =>
+        fetch(`/api/sessions/${encodeURIComponent(sid)}?confirm=true`, { method: 'DELETE' })
+          .then(() => true).catch(() => false)
+      ));
+      const ok = results.filter(Boolean).length;
+      const fail = results.length - ok;
       showToast(`삭제 완료: ${ok}건${fail ? `, ${fail}건 실패` : ''}`,
         { type: fail ? 'warning' : 'success' });
       bulkClear();
@@ -233,21 +231,24 @@ function bulkDelete() {
 
 // ─── Sessions ───────────────────────────────────────────────────────────
 let searchTimer=null;
-function searchSessions(q){clearTimeout(searchTimer);state.searchQuery=q;searchTimer=setTimeout(()=>{state.currentPage=1;loadSessions();},300);}
-async function loadSessions(page=state.currentPage){
+function searchSessions(q){clearTimeout(searchTimer);setSearchQuery(q);searchTimer=setTimeout(()=>{setPage(1);state.bulkSelected.clear();loadSessions();},300);}
+async function loadSessions(page=getPage()){
+  const tb=document.getElementById('sessionsBody');
+  tb.innerHTML='<tr><td colspan="10" class="text-center py-8 text-white/15 text-xs dots">로딩 중</td></tr>';
   try{
-    state.currentPage=page;
-    const ss=sortState.sessions;
+    setPage(page);
+    const ss=getSortState('sessions');
     const p=new URLSearchParams({page,per_page:25,sort:ss.key,order:ss.order});
-    if(state.searchQuery)p.set('search',state.searchQuery);
+    if(getSearchQuery())p.set('search',getSearchQuery());
     if(ss.pinned_only)p.set('pinned_only','true');
-    const af = state.advFilters || {};
+    const af = getAdvFilters();
     if(af.date_from)p.set('date_from',af.date_from);
     if(af.date_to)p.set('date_to',af.date_to);
     if(af.cost_min)p.set('cost_min',af.cost_min);
     if(af.cost_max)p.set('cost_max',af.cost_max);
+    if(af.node)p.set('node',af.node);
     const d=await safeFetch('/api/sessions?'+p);
-    state.totalPages=d.pages||1;
+    state.totalPages=d.pages||1; // TODO: accessor
     renderSessionsThead();
     renderSessions(d);
     const pinToggle=document.getElementById('sessionsPinToggle');
@@ -259,7 +260,8 @@ async function loadSessions(page=state.currentPage){
     renderAdvFiltersSummary();
   }catch(e){
     console.error('loadSessions:',e);
-    renderError('sessionsBody', e, () => loadSessions(page));
+    const tb=document.getElementById('sessionsBody');
+    if(tb) tb.innerHTML='<tr><td colspan="10" class="text-center py-8 text-red-400/60 text-xs">세션 로드 실패 — 재시도하려면 새로고침</td></tr>';
   }
 }
 
@@ -270,7 +272,7 @@ function toggleAdvFilters() {
   panel.classList.toggle('hidden');
   if (!panel.classList.contains('hidden')) {
     // Restore persisted values on open
-    const af = state.advFilters || {};
+    const af = getAdvFilters();
     const g = id => document.getElementById(id);
     if (g('advDateFrom')) g('advDateFrom').value = af.date_from || '';
     if (g('advDateTo'))   g('advDateTo').value   = af.date_to || '';
@@ -280,28 +282,31 @@ function toggleAdvFilters() {
 }
 function applyAdvFilters() {
   const g = id => document.getElementById(id);
-  state.advFilters = {
+  setAdvFilters({
     date_from: g('advDateFrom')?.value || '',
     date_to:   g('advDateTo')?.value || '',
     cost_min:  g('advCostMin')?.value || '',
     cost_max:  g('advCostMax')?.value || '',
-  };
-  savePrefs({ advFilters: state.advFilters });
-  state.currentPage = 1;
+    node:      g('advNodeFilter')?.value || '',
+  });
+  savePrefs({ advFilters: getAdvFilters() });
+  setPage(1);
+  state.bulkSelected.clear();
   loadSessions();
 }
 function clearAdvFilters() {
-  state.advFilters = {};
+  setAdvFilters({});
   savePrefs({ advFilters: {} });
-  ['advDateFrom','advDateTo','advCostMin','advCostMax'].forEach(id => {
+  ['advDateFrom','advDateTo','advCostMin','advCostMax','advNodeFilter'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  state.currentPage = 1;
+  setPage(1);
+  state.bulkSelected.clear();
   loadSessions();
 }
 function renderAdvFiltersSummary() {
-  const af = state.advFilters || {};
+  const af = getAdvFilters();
   const has = Object.values(af).some(Boolean);
   const btn = document.getElementById('advFiltersToggle');
   if (btn) {
@@ -314,6 +319,7 @@ function renderAdvFiltersSummary() {
     const parts = [];
     if (af.date_from || af.date_to) parts.push(`기간: ${af.date_from || '∞'} ~ ${af.date_to || '∞'}`);
     if (af.cost_min || af.cost_max)  parts.push(`비용: $${af.cost_min || 0} ~ $${af.cost_max || '∞'}`);
+    if (af.node)  parts.push(`노드: ${af.node}`);
     sum.textContent = parts.join(' · ');
   }
 }
@@ -340,7 +346,9 @@ function renderSessions(data){
   if(!data.sessions?.length){tb.innerHTML=`<tr><td colspan="9" class="text-center py-12 text-white/25 text-xs">데이터 없음</td></tr>`;return;}
   data.sessions.forEach(s=>{
     const tr=document.createElement('tr');
+    const _isRemoteNode = s.source_node && s.source_node !== 'local';
     tr.className='cursor-pointer border-b border-white/[0.03] hover:bg-white/[0.04] spring';
+    if (_isRemoteNode) tr.style.background = 'rgba(34,211,238,.04)';
     tr.setAttribute('tabindex', '0');
     tr.setAttribute('role', 'row');
     tr.onclick=()=>openConversation(s.id,s);
@@ -369,10 +377,14 @@ function renderSessions(data){
     const tagBadges = tagList.length
       ? tagList.map(t => `<span class="tag-badge">#${esc(t)}</span>`).join(' ')
       : '';
+    const isRemote = s.source_node && s.source_node !== 'local';
+    const nodeBadge = isRemote
+      ? `<span class="node-badge" style="display:inline-block;font-size:9px;padding:2px 7px;border-radius:9999px;background:rgba(34,211,238,.18);color:#67e8f9;border:1px solid rgba(34,211,238,.4);font-weight:700" title="\uC6D0\uACA9 \uB178\uB4DC: ${esc(s.source_node)}">${esc(s.source_node)}</span>`
+      : '';
     tr.setAttribute('data-sid', s.id);
     const checked = state.bulkSelected && state.bulkSelected.has(s.id) ? 'checked' : '';
     tr.innerHTML=`
-      <td class="px-3 py-3 text-center" onclick="event.stopPropagation()">
+      <td class="px-3 py-3 text-center" onclick="event.stopPropagation()"${_isRemoteNode ? ' style="border-left:3px solid #22d3ee"' : ''}>
         <input type="checkbox" data-bulk-sid="${esc(s.id)}" ${checked}
                onclick="event.stopPropagation();bulkToggleOne('${esc(s.id)}',this.checked)"
                aria-label="선택" class="cursor-pointer">
@@ -381,6 +393,7 @@ function renderSessions(data){
         <div class="font-semibold text-white/85 truncate max-w-xs flex items-center gap-1.5">${s.pinned?'<span class="text-accent text-[11px]">★</span>':''}${esc(s.project_name||'—')}${stopBadge?'<span class="ml-1">'+stopBadge+'</span>':''}</div>
         <div class="text-[10px] text-white/30 mt-0.5 truncate max-w-xs">${esc(trimPath(s.cwd||''))}</div>
         <div class="mt-1 flex flex-wrap gap-1 items-center">
+          ${nodeBadge}
           ${s.is_subagent?'<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400/70">subagent</span>':''}
           ${tagBadges}
           ${subBadge}
@@ -485,10 +498,11 @@ async function pinSession(sid, pin) {
 let _tagEditPending = null;
 
 function editSessionTags(sid, current) {
+  const modal = document.getElementById('tagEditModal');
+  if (modal && !modal.classList.contains('hidden')) return;
   _tagEditPending = { sid };
   const target = document.getElementById('tagEditTarget');
   const input  = document.getElementById('tagEditInput');
-  const modal  = document.getElementById('tagEditModal');
   if (target) target.textContent = `세션 ${sid.slice(0, 12)}`;
   if (input) {
     input.value = current || '';
@@ -515,17 +529,15 @@ async function submitTagEdit() {
   try {
     if (bulkIds && bulkIds.length) {
       // Bulk mode — apply the same tag string to every selected session
-      let ok = 0, fail = 0;
-      for (const id of bulkIds) {
-        try {
-          const r = await fetch(`/api/sessions/${encodeURIComponent(id)}/tags`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tags: clean }),
-          });
-          if (r.ok) ok++; else fail++;
-        } catch { fail++; }
-      }
+      const results = await Promise.all(bulkIds.map(id =>
+        fetch(`/api/sessions/${encodeURIComponent(id)}/tags`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tags: clean }),
+        }).then(r => r.ok).catch(() => false)
+      ));
+      const ok = results.filter(Boolean).length;
+      const fail = results.length - ok;
       showToast(
         `일괄 태그: ${ok}건 적용${fail ? `, ${fail}건 실패` : ''}${clean ? ' → ' + clean : ' (비움)'}`,
         { type: fail ? 'warning' : 'success', duration: 2800 }

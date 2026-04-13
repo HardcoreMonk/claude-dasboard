@@ -44,7 +44,68 @@ const state = {
   bulkSelected: new Set(),  // session IDs selected for bulk ops
   lastUpdated: {},
   convSource: _prefs.convSource || 'claude-code',  // 'claude-code' | 'claude-ai'
+  nodes: [],  // [{node_id, label, session_count, message_count, last_seen}]
 };
+
+// ─── Event bus (CustomEvent on document) ──────────────────────────────
+// Decouples cross-file communication. Modules emit/listen without knowing
+// each other. Events: 'dash:refresh', 'dash:viewChange', 'dash:themeChange'.
+const bus = {
+  emit(name, detail) { document.dispatchEvent(new CustomEvent('dash:' + name, { detail })); },
+  on(name, fn) { document.addEventListener('dash:' + name, (e) => fn(e.detail)); },
+};
+
+// ─── Event delegation ────────────────────────────────────────────────
+// Central click handler for data-action attributes. New code should prefer
+// <button data-action="fnName"> over onclick="fnName()".
+// The delegator calls window[action]() if it exists.
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const action = el.dataset.action;
+  const fn = window[action];
+  if (typeof fn !== 'function') return;
+  e.preventDefault();
+  // Collect data-arg-* attributes as positional arguments
+  const args = [];
+  // data-arg as single argument, or data-arg0, data-arg1, ... for multiple
+  if (el.dataset.arg !== undefined) {
+    args.push(el.dataset.arg);
+  }
+  for (let i = 0; ; i++) {
+    const key = 'arg' + i;
+    if (el.dataset[key] === undefined) break;
+    args.push(el.dataset[key]);
+  }
+  // Coerce "true"/"false" strings to actual booleans
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === 'true') args[i] = true;
+    else if (args[i] === 'false') args[i] = false;
+  }
+  // If the function expects the clicked element (e.g. setUsageRange), pass el as first arg
+  if (el.dataset.passEl !== undefined) args.unshift(el);
+  fn(...args);
+});
+
+// ─── State accessor functions ────────────────────────────────────────
+// Cross-file code MUST use these instead of touching state.* directly.
+function getChart(name) { return state.charts[name] || null; }
+function setChart(name, instance) {
+  if (state.charts[name]) { try { state.charts[name].destroy(); } catch {} }
+  state.charts[name] = instance;
+}
+function destroyChart(name) {
+  if (state.charts[name]) { try { state.charts[name].destroy(); } catch {} state.charts[name] = null; }
+}
+// Session/filter state accessors
+function setPage(p) { state.currentPage = p; }
+function getPage() { return state.currentPage; }
+function setSearchQuery(q) { state.searchQuery = q; }
+function getSearchQuery() { return state.searchQuery; }
+function setAdvFilters(f) { state.advFilters = f; }
+function getAdvFilters() { return state.advFilters || {}; }
+function getSortState(view) { return sortState[view]; }
+function setSortState(view, obj) { Object.assign(sortState[view], obj); }
 
 // ─── Sort state (persisted) ────────────────────────────────────────────
 const sortState = {
@@ -130,18 +191,19 @@ document.querySelectorAll('.nav-pill[data-view]').forEach(btn => {
 });
 
 function onViewChange(view) {
+  // Clean up timers from previous view
+  if (typeof clearPlanTimer === 'function') clearPlanTimer();
   // Destroy overview/cost chart instances when leaving a chart-bearing view
   // to avoid Chart.js re-init conflicts on return. Project modal chart
   // (projDaily) has its own lifecycle and is left alone.
   if (view !== 'cost') {
-    ['usage','models','dailyCost','cache'].forEach(k => {
-      if (state.charts[k]) { state.charts[k].destroy(); state.charts[k] = null; }
-    });
+    ['usage','models','dailyCost','cache','stopReason','modelCache'].forEach(k => destroyChart(k));
   } else {
     loadCharts();
   }
-  if (view !== 'timeline' && state.charts.timeline) {
-    state.charts.timeline.destroy(); state.charts.timeline = null;
+  if (view !== 'timeline') {
+    destroyChart('timeline');
+    if (typeof cleanupTimelineCharts === 'function') cleanupTimelineCharts();
   }
   if (view === 'sessions') loadSessions();
   if (view === 'conversations') loadConvList();
@@ -149,7 +211,7 @@ function onViewChange(view) {
   if (view === 'projects') loadProjects();
   if (view === 'subagents') { loadSubagentHeatmap(); loadSubagentDetails(); loadSubagentSuccessMatrix(); }
   if (view === 'timeline' && typeof loadTimeline === 'function') loadTimeline();
-  if (view === 'export') loadDbSize();
+  if (view === 'export') { loadDbSize(); renderNodeList(); }
 }
 
 function parseHash() {
@@ -318,6 +380,8 @@ document.addEventListener('keydown', (e) => {
     document.getElementById('projectModal'),
     document.getElementById('planModal'),
     document.getElementById('kbdHelp'),
+    document.getElementById('tagEditModal'),
+    document.getElementById('deleteConfirmModal'),
   ].filter(m => m && !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none');
   if (!candidates.length) return;
   const modal = candidates[candidates.length - 1];
@@ -391,8 +455,10 @@ const cmdkState = {
   filtered: [],
   cursor: 0,
   projects: null,     // lazy-cached from /api/projects
+  projectsAt: 0,      // timestamp of last projects fetch
   subagents: null,
 };
+const _CMDK_CACHE_TTL = 30000; // 30 seconds
 
 function _cmdkStaticItems() {
   return [
@@ -412,7 +478,7 @@ function _cmdkStaticItems() {
 }
 
 async function _cmdkLoadProjects() {
-  if (cmdkState.projects) return cmdkState.projects;
+  if (cmdkState.projects && (Date.now() - cmdkState.projectsAt) < _CMDK_CACHE_TTL) return cmdkState.projects;
   try {
     const d = await safeFetch('/api/projects?sort=last_active&order=desc');
     cmdkState.projects = (d.projects || []).map(p => ({
@@ -422,8 +488,10 @@ async function _cmdkLoadProjects() {
       action: () => showProjectDetail(p.project_name, p.project_path),
       _type: 'project',
     }));
+    cmdkState.projectsAt = Date.now();
   } catch {
     cmdkState.projects = [];
+    cmdkState.projectsAt = Date.now();
   }
   return cmdkState.projects;
 }
@@ -531,6 +599,44 @@ document.addEventListener('keydown', (e) => {
   if (input) {
     input.addEventListener('input', () => { cmdkState.cursor = 0; renderCommandPalette(input.value); });
   }
+}
+
+// ─── Auth: logout + session check ────────────────────────────────────
+async function logoutDashboard() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+async function checkAuth() {
+  try {
+    const d = await fetch('/api/auth/me').then(r => r.json());
+    if (d.auth_required && !d.authenticated) {
+      window.location.href = '/login';
+      return;
+    }
+    const btn = document.getElementById('logoutBtn');
+    if (btn && d.auth_required) btn.classList.remove('hidden');
+  } catch (e) { /* no-op if auth endpoint unavailable */ }
+}
+
+// ─── Node list loader ────────────────────────────────────────────────
+async function loadNodes() {
+  try {
+    const d = await safeFetch('/api/nodes');
+    state.nodes = d.nodes || [];
+    const sel = document.getElementById('advNodeFilter');
+    if (sel) {
+      const cur = sel.value;
+      sel.textContent = '';
+      const all = document.createElement('option'); all.value = ''; all.textContent = '\uC804\uCCB4 \uB178\uB4DC'; sel.appendChild(all);
+      for (const n of state.nodes) {
+        const o = document.createElement('option');
+        o.value = n.node_id; o.textContent = n.label || n.node_id;
+        if (n.session_count) o.textContent += ' (' + n.session_count + ')';
+        sel.appendChild(o);
+      }
+      sel.value = cur;
+    }
+  } catch (e) { /* nodes API unavailable — single-node mode */ }
 }
 
 // ─── Error reporting helper (A5) ─────────────────────────────────────
@@ -689,14 +795,16 @@ function debouncedRefresh() {
   if (_refreshTimer) return;
   _refreshTimer = setTimeout(() => {
     _refreshTimer = null;
-    loadStats(); loadPeriods(); loadPlanUsage(); loadTopProjects();
-    // Only refresh Chart.js instances when actually visible — otherwise we
-    // waste cycles creating/destroying offscreen chart objects.
-    if (location.hash.startsWith('#/cost')) loadCharts();
-    // Append new messages to open conversation viewer
-    if (typeof convRefreshTail === 'function') convRefreshTail();
+    bus.emit('refresh');
   }, 800);
 }
+
+// Core module listens to its own event — other modules can also listen
+bus.on('refresh', () => {
+  loadStats(); loadPeriods(); loadPlanUsage(); loadTopProjects();
+  if (location.hash.startsWith('#/cost')) loadCharts();
+  if (typeof convRefreshTail === 'function') convRefreshTail();
+});
 
 // ─── Idle chime (Web Audio API) ───────────────────────────────────────
 // Short two-note chime (C5 → G5 perfect fifth, ~300ms) played on end_turn
@@ -1443,6 +1551,7 @@ document.addEventListener('click', (e) => {
 // ─── Conversation viewer state ───────────────────────────────────────────
 state.convMessages = null;   // messages array of the open session
 state.convSession = null;    // session object of the open session
+let _convLoading = false;    // guard against concurrent load more / WS tail
 let _convFocusIdx = -1;      // keyboard-navigated message index
 let _convSearchMatches = []; // inline search match elements
 let _convSearchIdx = -1;
@@ -1681,6 +1790,8 @@ async function openConversation(sid,session,listItem){
     btn.className='px-4 py-1.5 rounded-full bg-accent/10 text-accent border border-accent/30 text-[11px] font-bold spring hover:scale-[1.02]';
     btn.textContent=`다음 ${fmtN(Math.min(remaining,200))}건 로드`;
     btn.addEventListener('click',async()=>{
+      if(_convLoading) return;
+      _convLoading=true;
       btn.disabled=true;btn.textContent='로딩 중…';
       try{
         const next=await safeFetch(`/api/sessions/${sid}/messages?limit=200&offset=${msgs.length}`);
@@ -1706,6 +1817,7 @@ async function openConversation(sid,session,listItem){
           c.appendChild(loadMoreWrap);
         }
       }catch(e){btn.textContent='로드 실패 — 재시도';btn.disabled=false;}
+      finally{_convLoading=false;}
     });
     loadMoreWrap.appendChild(info);
     loadMoreWrap.appendChild(btn);
@@ -2062,11 +2174,14 @@ function renderProjectsThead(){
     </tr>`;
 }
 async function loadProjects(){
+  const tb=document.getElementById('projectsBody');
+  tb.innerHTML='<tr><td colspan="8" class="text-center py-8 text-white/15 text-xs dots">로딩 중</td></tr>';
   try{
     const ss=sortState.projects;
     const data=await safeFetch(`/api/projects?sort=${ss.key}&order=${ss.order}`);
     renderProjectsThead();
-    const tb=document.getElementById('projectsBody');tb.innerHTML='';
+    tb.innerHTML='';
+    if(!data.projects?.length){tb.innerHTML='<tr><td colspan="8" class="text-center py-12 text-white/25 text-xs">데이터 없음</td></tr>';return;}
     (data.projects||[]).forEach(p=>{
       const tr=document.createElement('tr');
       tr.className='border-b border-white/[0.03] hover:bg-white/[0.05] cursor-pointer spring';
@@ -2190,6 +2305,162 @@ async function exportJSON() {
   } catch (e) {
     showToast('JSON 복사 실패: ' + (e.message || e), { type: 'error' });
   }
+}
+
+// ─── Remote node management ──────────────────────────────────────────
+
+async function renderNodeList() {
+  const el = document.getElementById('nodeList');
+  if (!el) return;
+  try {
+    const d = await safeFetch('/api/nodes');
+    state.nodes = d.nodes || [];
+    el.textContent = '';
+    if (!state.nodes.length) {
+      const empty = document.createElement('div');
+      empty.className = 'text-center text-white/15 text-xs py-4';
+      empty.textContent = '\uB4F1\uB85D\uB41C \uB178\uB4DC \uC5C6\uC74C';
+      el.appendChild(empty); return;
+    }
+    const table = document.createElement('table');
+    table.className = 'w-full';
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    htr.className = 'text-[9px] text-white/25 uppercase tracking-widest border-b border-white/[0.05]';
+    ['\uB178\uB4DC', '\uB77C\uBCA8', '\uC138\uC158', '\uBA54\uC2DC\uC9C0', '\uB9C8\uC9C0\uB9C9 \uC811\uC18D', ''].forEach(t => {
+      const th = document.createElement('th');
+      th.className = 'px-2 py-1.5 text-left font-bold';
+      th.textContent = t; htr.appendChild(th);
+    });
+    thead.appendChild(htr); table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for (const n of state.nodes) {
+      const tr = document.createElement('tr');
+      tr.className = 'border-b border-white/[0.03] hover:bg-white/[0.02]';
+      const mkTd = (text, cls) => {
+        const td = document.createElement('td');
+        td.className = 'px-2 py-2 ' + (cls || 'text-white/50');
+        td.textContent = text; return td;
+      };
+      const isLocal = n.node_id === 'local';
+      tr.appendChild(mkTd(n.node_id, 'font-bold ' + (isLocal ? 'text-accent/70' : 'text-white/70')));
+      tr.appendChild(mkTd(n.label || '\u2014', 'text-white/40'));
+      tr.appendChild(mkTd(fmtN(n.session_count || 0), 'tabular-nums text-white/40'));
+      tr.appendChild(mkTd(fmtN(n.message_count || 0), 'tabular-nums text-white/40'));
+      tr.appendChild(mkTd(n.last_seen ? fmtTime(n.last_seen) : (isLocal ? '\u2014' : '\uBBF8\uC811\uC18D'), 'text-white/30'));
+      const actionTd = document.createElement('td');
+      actionTd.className = 'px-2 py-2';
+      if (!isLocal) {
+        const rotateBtn = document.createElement('button');
+        rotateBtn.className = 'text-[9px] text-white/25 hover:text-accent spring mr-2';
+        rotateBtn.textContent = '\uD0A4 \uC7AC\uBC1C\uAE09';
+        rotateBtn.addEventListener('click', () => rotateNodeKey(n.node_id));
+        const delBtn = document.createElement('button');
+        delBtn.className = 'text-[9px] text-white/25 hover:text-red-400 spring';
+        delBtn.textContent = '\uC0AD\uC81C';
+        delBtn.addEventListener('click', () => deleteNode(n.node_id));
+        actionTd.append(rotateBtn, delBtn);
+      }
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody); el.appendChild(table);
+    // Also refresh the filter dropdown
+    loadNodes();
+  } catch (e) {
+    el.textContent = '';
+    const err = document.createElement('div');
+    err.className = 'text-center text-red-400/60 text-xs py-3';
+    err.textContent = '\uB178\uB4DC \uBAA9\uB85D \uB85C\uB4DC \uC2E4\uD328';
+    el.appendChild(err);
+  }
+}
+
+function openNodeRegister() {
+  const form = document.getElementById('nodeRegisterForm');
+  if (form) { form.classList.remove('hidden'); document.getElementById('nodeIdInput')?.focus(); }
+}
+
+async function submitNodeRegister() {
+  const nodeId = document.getElementById('nodeIdInput')?.value?.trim();
+  const label = document.getElementById('nodeLabelInput')?.value?.trim();
+  const resultEl = document.getElementById('nodeRegisterResult');
+  if (!nodeId) { if (resultEl) resultEl.textContent = '\uB178\uB4DC ID\uB97C \uC785\uB825\uD558\uC138\uC694'; return; }
+  try {
+    const resp = await fetch('/api/nodes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_id: nodeId, label: label || null }),
+    });
+    const d = await resp.json();
+    if (!resp.ok) {
+      if (resultEl) resultEl.textContent = d.error || '\uB4F1\uB85D \uC2E4\uD328';
+      return;
+    }
+    if (resultEl) {
+      resultEl.textContent = '';
+      const msg = document.createElement('div');
+      msg.className = 'text-accent/80 font-bold';
+      msg.textContent = '\u2713 \uB4F1\uB85D \uC644\uB8CC! \uC544\uB798 Ingest Key\uB97C \uBCF5\uC0AC\uD558\uC138\uC694 (\uC7AC\uD45C\uC2DC \uBD88\uAC00):';
+      const keyBox = document.createElement('div');
+      keyBox.className = 'mt-1 p-2 bg-black/30 rounded-lg font-mono text-[10px] text-amber-400/90 break-all select-all cursor-pointer';
+      keyBox.textContent = d.ingest_key;
+      keyBox.title = '\uD074\uB9AD\uD558\uC5EC \uBCF5\uC0AC';
+      keyBox.addEventListener('click', () => {
+        navigator.clipboard.writeText(d.ingest_key);
+        showToast('Ingest Key \uBCF5\uC0AC\uB428', { type: 'success', duration: 1500 });
+      });
+      const steps = document.createElement('div');
+      steps.className = 'mt-2 space-y-1.5';
+      const step1 = document.createElement('div');
+      step1.className = 'p-2 bg-black/20 rounded-lg text-[9px] text-white/40 font-mono break-all';
+      step1.textContent = '# 1. \uC6D0\uACA9 \uC11C\uBC84\uC5D0\uC11C collector \uB2E4\uC6B4\uB85C\uB4DC';
+      const dl = document.createElement('div');
+      dl.className = 'p-2 bg-black/20 rounded-lg text-[9px] text-white/40 font-mono break-all';
+      dl.textContent = 'curl -o collector.py ' + location.origin + '/api/collector.py';
+      const step2 = document.createElement('div');
+      step2.className = 'p-2 bg-black/20 rounded-lg text-[9px] text-white/40 font-mono break-all';
+      step2.textContent = '# 2. \uC2E4\uD589';
+      const cmd = document.createElement('div');
+      cmd.className = 'p-2 bg-black/20 rounded-lg text-[9px] text-accent/60 font-mono break-all';
+      cmd.textContent = 'python3 collector.py --url ' + location.origin + ' --node-id ' + nodeId + ' --ingest-key ' + d.ingest_key;
+      steps.append(step1, dl, step2, cmd);
+      resultEl.append(msg, keyBox, steps);
+    }
+    document.getElementById('nodeIdInput').value = '';
+    document.getElementById('nodeLabelInput').value = '';
+    renderNodeList();
+  } catch (e) {
+    if (resultEl) resultEl.textContent = '\uB124\uD2B8\uC6CC\uD06C \uC624\uB958';
+  }
+}
+
+async function rotateNodeKey(nodeId) {
+  if (!confirm(nodeId + ' \uB178\uB4DC\uC758 Ingest Key\uB97C \uC7AC\uBC1C\uAE09\uD569\uB2C8\uB2E4. \uAE30\uC874 \uD0A4\uB294 \uBB34\uD6A8\uD654\uB429\uB2C8\uB2E4.')) return;
+  try {
+    const resp = await fetch('/api/nodes/' + encodeURIComponent(nodeId) + '/rotate-key', { method: 'POST' });
+    const d = await resp.json();
+    if (resp.ok) {
+      prompt('\uC0C8 Ingest Key (\uBCF5\uC0AC\uD558\uC138\uC694):', d.ingest_key);
+      showToast('\uD0A4 \uC7AC\uBC1C\uAE09 \uC644\uB8CC', { type: 'success' });
+    } else {
+      showToast(d.error || '\uC2E4\uD328', { type: 'error' });
+    }
+  } catch (e) { showToast('\uB124\uD2B8\uC6CC\uD06C \uC624\uB958', { type: 'error' }); }
+}
+
+async function deleteNode(nodeId) {
+  if (!confirm(nodeId + ' \uB178\uB4DC\uB97C \uC0AD\uC81C\uD569\uB2C8\uB2E4. \uC218\uC9D1\uB41C \uB370\uC774\uD130\uB294 \uC720\uC9C0\uB429\uB2C8\uB2E4.')) return;
+  try {
+    const resp = await fetch('/api/nodes/' + encodeURIComponent(nodeId), { method: 'DELETE' });
+    if (resp.ok) {
+      showToast(nodeId + ' \uC0AD\uC81C\uB428', { type: 'success' });
+      renderNodeList();
+    } else {
+      const d = await resp.json();
+      showToast(d.error || '\uC2E4\uD328', { type: 'error' });
+    }
+  } catch (e) { showToast('\uB124\uD2B8\uC6CC\uD06C \uC624\uB958', { type: 'error' }); }
 }
 
 // ─── Period usage (day/week/month) ────────────────────────────────────
@@ -2400,8 +2671,10 @@ async function showProjectDetail(name, path) {
   modal.dataset.project = name;
   modal.dataset.projectPath = path || '';
   modal.style.display = 'flex';
+  setTimeout(() => modal.querySelector('[role="tab"]')?.focus(), 100);
   projectData = null;
   projectConvData = null;
+  projectSessSort = { key:'updated_at', order:'desc' };
   // Deep-link into this project via URL hash
   const hashPath = path ? `?path=${encodeURIComponent(path)}` : '';
   history.replaceState(null, '', `#/project/${encodeURIComponent(name)}${hashPath}`);
@@ -2443,6 +2716,15 @@ function setProjectTab(tab, reload = true) {
 // Bind tab clicks once (script runs at end of body, DOM is ready)
 document.querySelectorAll('#projectModal .proj-tab').forEach(btn => {
   btn.addEventListener('click', () => setProjectTab(btn.dataset.tab));
+});
+// Arrow key navigation for project modal tab strip (LOW-2)
+document.querySelectorAll('#projectModal [role="tab"]').forEach((tab, i, tabs) => {
+  tab.addEventListener('keydown', (e) => {
+    let target;
+    if (e.key === 'ArrowRight') target = tabs[(i + 1) % tabs.length];
+    else if (e.key === 'ArrowLeft') target = tabs[(i - 1 + tabs.length) % tabs.length];
+    if (target) { e.preventDefault(); target.focus(); target.click(); }
+  });
 });
 
 function renderProjectOverview() {
@@ -2906,6 +3188,14 @@ document.addEventListener('keydown', (e) => {
       document.activeElement.blur();
       return;
     }
+    // Close preview drawer on Esc
+    if (typeof topPreviewClose === 'function') {
+      const panel = document.getElementById('topPreviewPanel');
+      if (panel && panel.getAttribute('aria-hidden') !== 'true') {
+        topPreviewClose();
+        return;
+      }
+    }
     _closeModals();
     return;
   }
@@ -3106,7 +3396,9 @@ function convDownloadMarkdown() {
 state.convNeedsRefresh = false;
 
 function convRefreshTail() {
+  if (_convLoading) return;
   if (!state.convNeedsRefresh || !state.currentSession || !state.convMessages) return;
+  _convLoading = true;
   state.convNeedsRefresh = false;
   const sid = state.currentSession;
   const currentCount = state.convMessages.length;
@@ -3140,7 +3432,8 @@ function convRefreshTail() {
       }
       if (nearBottom) c.scrollTop = c.scrollHeight;
     })
-    .catch(() => {}); // silent — next WS batch will retry
+    .catch(() => {}) // silent — next WS batch will retry
+    .finally(() => { _convLoading = false; });
 }
 
 // ─── Init ───────────────────────────────────────────────────────────────
@@ -3150,9 +3443,19 @@ function convRefreshTail() {
 // Defer applyHash to 'load' so that all deferred modules (sessions.js,
 // timeline.js, etc.) are parsed before the first view is activated.
 window.addEventListener('load', () => {
+  checkAuth();
   applyHash();
   if (typeof renderPresetSelect === 'function') renderPresetSelect();
+  loadNodes();
 });
 connectWS();
 setInterval(()=>{if(state.ws&&state.ws.readyState===WebSocket.OPEN)state.ws.send('ping');},25000);
-// Notification auto-request removed — permission is requested manually via settings.
+
+// Clean up timers and resources on page unload
+window.addEventListener('beforeunload', () => {
+  if (_refreshTimer) clearTimeout(_refreshTimer);
+  if (_connBannerTimer) clearTimeout(_connBannerTimer);
+  if (typeof clearPlanTimer === 'function') clearPlanTimer();
+  if (_audioCtx) { try { _audioCtx.close(); } catch {} }
+  if (state.ws) { try { state.ws.close(); } catch {} }
+});

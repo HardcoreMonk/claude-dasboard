@@ -6,34 +6,18 @@
 <title>Claude Dashboard</title>
 <meta name="description" content="Claude Code 토큰 사용량 실시간 추적 대시보드">
 
-<!-- Tailwind CSS -->
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-tailwind.config = {
-  theme: {
-    extend: {
-      fontFamily: { sans: ['Pretendard','system-ui','sans-serif'] },
-      colors: {
-        base: '#0a0a0a',
-        surface: 'rgba(255,255,255,0.03)',
-        accent: { DEFAULT:'#34d399', dim:'rgba(52,211,153,0.15)', glow:'rgba(52,211,153,0.25)' },
-      },
-      borderRadius: { bezel: '1.25rem', 'bezel-inner': 'calc(1.25rem - 0.375rem)' },
-    },
-  },
-}
-</script>
+<!-- Tailwind CSS (built from app.css via build.js) -->
+<link rel="stylesheet" href="/static/tailwind.v75.css">
 
 <!-- Pretendard (Korean) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
 <!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" integrity="sha384-zPzbVRXfR492Sd5D+HydTYCxxgHAfgVO8KERbLlpeH5unsmbAEXrscGUUqLZG9BM" crossorigin="anonymous"></script>
 <!-- Iconify Solar -->
-<script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
+<script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js" integrity="sha384-63H0EhkXL6M4HAjkA3bbnT+mkm0SbHKtxxj4Iv1hXtM6FDH+c6XqvuXgDKBJdJNG" crossorigin="anonymous"></script>
 
-<link rel="stylesheet" href="/static/app.v66.css">
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
@@ -80,10 +64,14 @@ tailwind.config = {
     <span id="wsLabel" class="hidden sm:inline">연결 중</span>
   </div>
   <!-- Theme toggle (U4) -->
-  <button id="themeToggle" onclick="toggleTheme()" title="테마 전환" aria-label="테마 전환"
+  <button id="themeToggle" data-action="toggleTheme" title="테마 전환" aria-label="테마 전환"
           class="ml-1 w-7 h-7 rounded-full text-white/60 hover:text-white hover:bg-white/10 spring text-sm leading-none">☀</button>
+  <button id="logoutBtn" data-action="logoutDashboard" title="로그아웃" aria-label="로그아웃"
+          class="hidden ml-1 w-7 h-7 rounded-full text-white/40 hover:text-red-400 hover:bg-white/10 spring text-sm leading-none">
+    <iconify-icon icon="solar:logout-2-linear" width="14"></iconify-icon>
+  </button>
   <!-- Command palette trigger (U7) -->
-  <button onclick="openCommandPalette()" title="명령 팔레트 (Cmd+K)" aria-label="명령 팔레트"
+  <button data-action="openCommandPalette" title="명령 팔레트 (Cmd+K)" aria-label="명령 팔레트"
           class="w-7 h-7 rounded-full text-white/60 hover:text-white hover:bg-white/10 spring text-xs leading-none font-bold">⌘K</button>
 </nav>
 
@@ -105,7 +93,7 @@ tailwind.config = {
             text-[11px] font-semibold shadow-[0_8px_32px_rgba(0,0,0,.4)] flex items-center gap-2">
   <iconify-icon icon="solar:wi-fi-router-round-linear" width="14"></iconify-icon>
   <span id="connBannerMsg">실시간 연결이 끊어졌습니다. 재연결 중…</span>
-  <button onclick="forceReconnectWs()"
+  <button data-action="forceReconnectWs"
           class="ml-1 px-2 py-0.5 rounded-full bg-red-500/25 hover:bg-red-500/35 spring text-red-200 text-[10px] font-bold">즉시 재연결</button>
 </div>
 
@@ -146,11 +134,11 @@ tailwind.config = {
         <div id="topPreviewMeta" class="text-[10px] text-white/40 mt-1 truncate">—</div>
       </div>
       <div class="flex items-center gap-1 flex-shrink-0">
-        <button id="topPreviewOpenModal" onclick="topPreviewOpenProjectModal()"
+        <button id="topPreviewOpenModal" data-action="topPreviewOpenProjectModal"
                 class="text-[10px] px-2.5 py-1 rounded-full border border-accent/40 text-accent bg-accent/10 hover:bg-accent/20 font-bold spring">
           프로젝트 상세 →
         </button>
-        <button onclick="topPreviewClose()"
+        <button data-action="topPreviewClose"
                 class="text-white/40 hover:text-white/80 spring text-xl leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/5"
                 aria-label="닫기">&times;</button>
       </div>
@@ -173,7 +161,7 @@ tailwind.config = {
 <div id="topPreviewBackdrop"
      class="fixed inset-0 z-30 bg-black/30 transition-opacity duration-300"
      style="opacity:0;pointer-events:none"
-     onclick="topPreviewClose()"></div>
+     data-action="topPreviewClose"></div>
 
 <!-- ─── COST ─── -->
 <section class="view hidden" id="view-cost">
@@ -181,7 +169,7 @@ tailwind.config = {
   <!-- Hero 3카드: 오늘 비용 · 일일 예산 · 월말 예측 -->
   <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 anim-in">
     <!-- Hero 1: 오늘 비용 -->
-    <div onclick="drillToSessionsToday()" title="오늘 세션 보기"
+    <div data-action="drillToSessionsToday" title="오늘 세션 보기"
          class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
         <div class="flex items-center justify-between">
@@ -194,7 +182,7 @@ tailwind.config = {
       </div>
     </div>
     <!-- Hero 2: 일일 예산 -->
-    <div onclick="openPlanSettings()" title="예산 설정"
+    <div data-action="openPlanSettings" title="예산 설정"
          class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
         <div class="flex items-center justify-between">
@@ -229,7 +217,7 @@ tailwind.config = {
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
       <div class="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-2">요약</div>
       <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
-        <div onclick="drillToSessionsWeek()" class="cursor-pointer hover:text-white/95 spring flex items-baseline gap-1.5" title="이번 주 세션 보기">
+        <div data-action="drillToSessionsWeek" class="cursor-pointer hover:text-white/95 spring flex items-baseline gap-1.5" title="이번 주 세션 보기">
           <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">주</span>
           <span class="text-white/80 font-bold tabular-nums skeleton" id="pdWeekCost">—</span>
           <span class="text-[9px] font-semibold" id="pdWeekDelta"></span>
@@ -301,10 +289,10 @@ tailwind.config = {
         <div class="flex items-center justify-between mb-3">
           <span class="text-xs font-bold text-white/40">토큰 사용량 추이</span>
           <div class="flex gap-1 items-center">
-            <button class="chart-range active text-[10px] px-2.5 py-0.5 rounded-full border border-white/[0.07] text-white/40 font-semibold spring" data-range="24h" onclick="setUsageRange(this,'24h')">24시간</button>
-            <button class="chart-range text-[10px] px-2.5 py-0.5 rounded-full border border-white/[0.07] text-white/20 font-semibold spring" data-range="7d" onclick="setUsageRange(this,'7d')">7일</button>
-            <button class="chart-range text-[10px] px-2.5 py-0.5 rounded-full border border-white/[0.07] text-white/20 font-semibold spring" data-range="30d" onclick="setUsageRange(this,'30d')">30일</button>
-            <button class="text-white/25 hover:text-white/60 spring text-xs ml-1" onclick="downloadChart('usage','usage-chart.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+            <button class="chart-range active text-[10px] px-2.5 py-0.5 rounded-full border border-white/[0.07] text-white/40 font-semibold spring" data-range="24h" data-action="setUsageRange" data-pass-el data-arg="24h">24시간</button>
+            <button class="chart-range text-[10px] px-2.5 py-0.5 rounded-full border border-white/[0.07] text-white/20 font-semibold spring" data-range="7d" data-action="setUsageRange" data-pass-el data-arg="7d">7일</button>
+            <button class="chart-range text-[10px] px-2.5 py-0.5 rounded-full border border-white/[0.07] text-white/20 font-semibold spring" data-range="30d" data-action="setUsageRange" data-pass-el data-arg="30d">30일</button>
+            <button class="text-white/25 hover:text-white/60 spring text-xs ml-1" data-action="downloadChart" data-arg0="usage" data-arg1="usage-chart.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
           </div>
         </div>
         <div class="chart-h"><canvas id="chartUsage"></canvas></div>
@@ -315,7 +303,7 @@ tailwind.config = {
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
         <div class="flex items-center justify-between">
           <span class="text-xs font-bold text-white/40">모델별 비용</span>
-          <button class="text-white/25 hover:text-white/60 spring text-xs" onclick="downloadChart('models','models-chart.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="models" data-arg1="models-chart.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
         </div>
         <div class="chart-h mt-3"><canvas id="chartModels"></canvas></div>
       </div>
@@ -328,7 +316,7 @@ tailwind.config = {
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
         <div class="flex items-center justify-between">
           <span class="text-xs font-bold text-white/40">일별 비용 (30일)</span>
-          <button class="text-white/25 hover:text-white/60 spring text-xs" onclick="downloadChart('dailyCost','daily-cost.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="dailyCost" data-arg1="daily-cost.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
         </div>
         <div class="chart-h mt-3"><canvas id="chartDailyCost"></canvas></div>
       </div>
@@ -337,7 +325,7 @@ tailwind.config = {
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
         <div class="flex items-center justify-between">
           <span class="text-xs font-bold text-white/40">캐시 토큰 비율</span>
-          <button class="text-white/25 hover:text-white/60 spring text-xs" onclick="downloadChart('cache','cache-chart.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="cache" data-arg1="cache-chart.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
         </div>
         <div class="chart-h mt-3"><canvas id="chartCache"></canvas></div>
       </div>
@@ -350,7 +338,7 @@ tailwind.config = {
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
         <div class="flex items-center justify-between">
           <span class="text-xs font-bold text-white/40">종료 사유 분포</span>
-          <button class="text-white/25 hover:text-white/60 spring text-xs" onclick="downloadChart('stopReason','stop-reason.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="stopReason" data-arg1="stop-reason.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
         </div>
         <div class="chart-h mt-3"><canvas id="chartStopReason"></canvas></div>
       </div>
@@ -359,7 +347,7 @@ tailwind.config = {
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
         <div class="flex items-center justify-between">
           <span class="text-xs font-bold text-white/40">모델별 캐시 히트율</span>
-          <button class="text-white/25 hover:text-white/60 spring text-xs" onclick="downloadChart('modelCache','model-cache.png')" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="modelCache" data-arg1="model-cache.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
         </div>
         <div class="chart-h mt-3"><canvas id="chartModelCache"></canvas></div>
       </div>
@@ -451,7 +439,10 @@ tailwind.config = {
           <input type="date" id="tlDateFrom" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="시작 날짜">
           <span class="text-white/20 text-[10px]">~</span>
           <input type="date" id="tlDateTo" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="종료 날짜">
-          <label class="text-[10px] text-white/30 flex items-center gap-1 ml-2 cursor-pointer select-none">
+          <select id="tlNodeFilter" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60 ml-1" aria-label="노드 필터">
+            <option value="">전체 노드</option>
+          </select>
+          <label class="text-[10px] text-white/30 flex items-center gap-1 ml-1 cursor-pointer select-none">
             <input type="checkbox" id="tlShowSubagents" class="cursor-pointer"> Subagents
           </label>
           <button id="tlResetZoom" class="hidden px-2 py-1 rounded-full text-[10px] font-semibold spring border border-amber-500/30 bg-amber-500/10 text-amber-300 ml-1">줌 리셋</button>
@@ -471,9 +462,11 @@ tailwind.config = {
     <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d1">
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
         <span class="text-xs font-bold text-white/40 uppercase tracking-widest">요일 × 시간 히트맵</span>
+        <div class="text-[9px] text-white/20 mt-0.5">셀 클릭 시 해당 시간대 상세 보기</div>
         <div id="tlHeatmapWrap" class="mt-3 overflow-x-auto">
           <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
         </div>
+        <div id="tlHeatmapDrill" class="hidden mt-3 border-t border-white/[0.05] pt-3"></div>
       </div>
     </div>
     <!-- Efficiency card -->
@@ -483,6 +476,28 @@ tailwind.config = {
         <div id="tlEfficiency" class="mt-3">
           <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
         </div>
+      </div>
+    </div>
+  </div>
+  <!-- Row 2.5: Hourly stacked bar chart -->
+  <div class="mt-3">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d3">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold text-white/40 uppercase tracking-widest">시간별 작업량</span>
+          <div class="flex items-center gap-2">
+            <select id="tlHourlyMetric" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="메트릭 선택">
+              <option value="cost">비용</option>
+              <option value="messages">메시지 수</option>
+              <option value="tokens">토큰</option>
+            </select>
+            <input type="date" id="tlHourlyDate" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="날짜 선택">
+          </div>
+        </div>
+        <div class="relative" style="height:220px;">
+          <canvas id="chartHourlyStacked"></canvas>
+        </div>
+        <div class="text-[9px] text-white/20 mt-2 text-center" id="tlHourlyLegend"></div>
       </div>
     </div>
   </div>
@@ -520,10 +535,10 @@ tailwind.config = {
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <span class="text-xs font-bold text-white/40 whitespace-nowrap">전체 세션</span>
           <div class="flex items-center gap-2 flex-wrap">
-            <button id="sessionsPinToggle" onclick="toggleSessionsPinnedOnly()"
+            <button id="sessionsPinToggle" data-action="toggleSessionsPinnedOnly"
                     class="text-xs font-semibold px-3 py-1 rounded-full border border-white/[0.07] text-white/30 hover:text-accent spring"
                     title="핀 고정된 세션만 보기">★ 핀만</button>
-            <button onclick="toggleAdvFilters()" id="advFiltersToggle"
+            <button data-action="toggleAdvFilters" id="advFiltersToggle"
                     class="text-xs font-semibold px-3 py-1 rounded-full border border-white/[0.07] text-white/30 hover:text-white/80 spring flex items-center gap-1"
                     title="고급 필터">
               <iconify-icon icon="solar:filter-linear" width="12"></iconify-icon> 필터
@@ -551,6 +566,12 @@ tailwind.config = {
               <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">최대 비용 ($)</label>
               <input type="number" id="advCostMax" min="0" step="0.01" placeholder="∞" oninput="applyAdvFilters()" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
             </div>
+            <div>
+              <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">노드</label>
+              <select id="advNodeFilter" onchange="applyAdvFilters()" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+                <option value="">전체 노드</option>
+              </select>
+            </div>
           </div>
           <div class="mt-3 flex items-center justify-between gap-2 flex-wrap">
             <span id="advFiltersSummary" class="text-[10px] text-white/35 flex-1"></span>
@@ -560,10 +581,10 @@ tailwind.config = {
                       class="bg-white/5 border border-white/[0.07] rounded-full px-2 py-1 text-[10px] text-white/65 outline-none focus:border-accent/30 spring">
                 <option value="">프리셋 선택…</option>
               </select>
-              <button onclick="saveCurrentPreset()" class="text-[10px] px-2 py-1 rounded-full bg-accent/10 text-accent border border-accent/25 hover:scale-[1.02] spring">+ 저장</button>
+              <button data-action="saveCurrentPreset" class="text-[10px] px-2 py-1 rounded-full bg-accent/10 text-accent border border-accent/25 hover:scale-[1.02] spring">+ 저장</button>
               <button onclick="(()=>{const s=document.getElementById('presetSelect');if(s.value)deletePreset(s.value)})()" class="text-[10px] px-2 py-1 rounded-full text-white/40 hover:text-red-400 border border-white/[0.07] spring">✕</button>
             </div>
-            <button onclick="clearAdvFilters()" class="text-[10px] text-white/40 hover:text-red-400 spring">필터 초기화</button>
+            <button data-action="clearAdvFilters" class="text-[10px] text-white/40 hover:text-red-400 spring">필터 초기화</button>
           </div>
         </div>
       </div>
@@ -571,12 +592,12 @@ tailwind.config = {
       <div id="bulkActionBar" class="hidden px-5 py-2 bg-accent/[0.06] border-b border-accent/20 flex items-center gap-2 text-[11px]">
         <span class="text-accent font-bold" data-bulk-count>0개 선택됨</span>
         <span class="flex-1"></span>
-        <button onclick="bulkPin(true)" class="px-3 py-1 rounded-full bg-white/5 text-white/65 hover:text-accent border border-white/[0.07] spring text-[10px] font-semibold">★ 핀</button>
-        <button onclick="bulkPin(false)" class="px-3 py-1 rounded-full bg-white/5 text-white/65 hover:text-white border border-white/[0.07] spring text-[10px] font-semibold">☆ 해제</button>
-        <button onclick="bulkTag()" class="px-3 py-1 rounded-full bg-white/5 text-cyan-300 hover:scale-[1.02] border border-cyan-500/30 spring text-[10px] font-semibold">🏷 태그</button>
-        <button onclick="bulkCompare()" class="px-3 py-1 rounded-full bg-white/5 text-amber-300 hover:scale-[1.02] border border-amber-500/30 spring text-[10px] font-semibold">⚖ 비교 (2개)</button>
-        <button onclick="bulkDelete()" class="px-3 py-1 rounded-full bg-red-500/10 text-red-300 hover:scale-[1.02] border border-red-500/30 spring text-[10px] font-semibold">✕ 삭제</button>
-        <button onclick="bulkClear()" class="px-3 py-1 rounded-full text-white/40 hover:text-white/80 border border-white/[0.07] spring text-[10px]">취소</button>
+        <button data-action="bulkPin" data-arg="true" class="px-3 py-1 rounded-full bg-white/5 text-white/65 hover:text-accent border border-white/[0.07] spring text-[10px] font-semibold">★ 핀</button>
+        <button data-action="bulkPin" data-arg="false" class="px-3 py-1 rounded-full bg-white/5 text-white/65 hover:text-white border border-white/[0.07] spring text-[10px] font-semibold">☆ 해제</button>
+        <button data-action="bulkTag" class="px-3 py-1 rounded-full bg-white/5 text-cyan-300 hover:scale-[1.02] border border-cyan-500/30 spring text-[10px] font-semibold">🏷 태그</button>
+        <button data-action="bulkCompare" class="px-3 py-1 rounded-full bg-white/5 text-amber-300 hover:scale-[1.02] border border-amber-500/30 spring text-[10px] font-semibold">⚖ 비교 (2개)</button>
+        <button data-action="bulkDelete" class="px-3 py-1 rounded-full bg-red-500/10 text-red-300 hover:scale-[1.02] border border-red-500/30 spring text-[10px] font-semibold">✕ 삭제</button>
+        <button data-action="bulkClear" class="px-3 py-1 rounded-full text-white/40 hover:text-white/80 border border-white/[0.07] spring text-[10px]">취소</button>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-[13px]">
@@ -598,11 +619,11 @@ tailwind.config = {
         <input id="convSearch" placeholder="대화 내용 검색…" oninput="searchConversations(this.value)"
                class="w-full bg-white/5 border border-white/[0.07] rounded-full px-3 py-1 text-[10px] text-white/50 placeholder:text-white/15 outline-none focus:border-accent/30 spring">
       </div>
-      <div id="convSearchResults" class="hidden border-b border-white/[0.05] max-h-48 overflow-y-auto"></div>
+      <div id="convSearchResults" role="region" aria-live="polite" class="hidden border-b border-white/[0.05] max-h-48 overflow-y-auto"></div>
       <div class="px-3 py-1.5 border-b border-white/[0.04] flex items-center gap-1">
-        <button data-conv-source="claude-code" onclick="switchConvSource('claude-code')"
+        <button data-conv-source="claude-code" data-action="switchConvSource" data-arg="claude-code"
                 class="conv-source-btn active flex-1 px-2 py-0.5 rounded-full text-[9px] font-bold spring">Claude Code</button>
-        <button data-conv-source="claude-ai" onclick="switchConvSource('claude-ai')"
+        <button data-conv-source="claude-ai" data-action="switchConvSource" data-arg="claude-ai"
                 class="conv-source-btn flex-1 px-2 py-0.5 rounded-full text-[9px] font-bold spring">claude.ai</button>
       </div>
       <div class="px-3 py-1.5 border-b border-white/[0.04] flex items-center justify-between gap-2">
@@ -625,20 +646,20 @@ tailwind.config = {
         <button data-role-filter="user" class="conv-role-btn px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">사용자</button>
         <button data-role-filter="assistant" class="conv-role-btn px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">어시스턴트</button>
         <span class="mx-1 text-white/15">|</span>
-        <button onclick="convCollapseAllTools()" class="px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">모두 접기</button>
-        <button onclick="convExpandAllTools()" class="px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">모두 펼치기</button>
+        <button data-action="convCollapseAllTools" class="hide-mobile px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">모두 접기</button>
+        <button data-action="convExpandAllTools" class="hide-mobile px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">모두 펼치기</button>
         <span class="mx-1 text-white/15">|</span>
         <input id="convInlineSearch" placeholder="대화 내 검색…"
                class="bg-white/5 border border-white/[0.07] rounded-full px-2.5 py-0.5 text-[10px] text-white/50 placeholder:text-white/15 outline-none focus:border-accent/30 spring w-28">
         <span id="convSearchMatchInfo" class="text-[9px] text-white/30 tabular-nums"></span>
-        <button onclick="convSearchPrev()" title="이전 매치" class="text-white/40 hover:text-white/70 text-[10px] spring">&lsaquo;</button>
-        <button onclick="convSearchNext()" title="다음 매치" class="text-white/40 hover:text-white/70 text-[10px] spring">&rsaquo;</button>
+        <button data-action="convSearchPrev" title="이전 매치" class="text-white/40 hover:text-white/70 text-[10px] spring">&lsaquo;</button>
+        <button data-action="convSearchNext" title="다음 매치" class="text-white/40 hover:text-white/70 text-[10px] spring">&rsaquo;</button>
         <span class="flex-1"></span>
         <span id="convMsgCount" class="text-white/30 tabular-nums"></span>
-        <button onclick="convCopyMarkdown()" title="마크다운 복사" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring text-[11px]">&#x1F4CB;</button>
-        <button onclick="convDownloadMarkdown()" title="마크다운 다운로드" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring text-[11px]">&#x1F4BE;</button>
-        <button onclick="convJumpTop()" title="처음으로" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">&uarr;</button>
-        <button onclick="convJumpBottom()" title="끝으로" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">&darr;</button>
+        <button data-action="convCopyMarkdown" title="마크다운 복사" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring text-[11px]">&#x1F4CB;</button>
+        <button data-action="convDownloadMarkdown" title="마크다운 다운로드" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring text-[11px]">&#x1F4BE;</button>
+        <button data-action="convJumpTop" title="처음으로" class="hide-mobile w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">&uarr;</button>
+        <button data-action="convJumpBottom" title="끝으로" class="hide-mobile w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">&darr;</button>
       </div>
       <div id="convMessages" class="flex-1 overflow-y-auto p-4 space-y-3 bg-white/[0.01] rounded-b-bezel-inner"></div>
     </div>
@@ -674,8 +695,8 @@ tailwind.config = {
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
         <div class="text-xs font-bold text-white/40 mb-3">내보내기</div>
         <div class="flex gap-2">
-          <button onclick="exportCSV()" class="rounded-full px-4 py-2 text-xs font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">CSV</button>
-          <button onclick="exportJSON()" class="rounded-full px-4 py-2 text-xs font-semibold bg-white/5 text-white/40 border border-white/[0.07] hover:scale-[1.02] active:scale-[0.98] spring">JSON</button>
+          <button data-action="exportCSV" class="rounded-full px-4 py-2 text-xs font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">CSV</button>
+          <button data-action="exportJSON" class="rounded-full px-4 py-2 text-xs font-semibold bg-white/5 text-white/40 border border-white/[0.07] hover:scale-[1.02] active:scale-[0.98] spring">JSON</button>
         </div>
       </div>
     </div>
@@ -683,7 +704,7 @@ tailwind.config = {
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
         <div class="text-xs font-bold text-white/40 mb-1">백업</div>
         <div class="text-[10px] text-white/20 mb-3">DB 크기: <span id="dbSizeLabel">—</span></div>
-        <button onclick="createBackup()" class="rounded-full px-4 py-2 text-xs font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">백업 생성</button>
+        <button data-action="createBackup" class="rounded-full px-4 py-2 text-xs font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">백업 생성</button>
         <div id="backupResult" class="text-[10px] text-white/20 mt-2"></div>
       </div>
     </div>
@@ -695,9 +716,41 @@ tailwind.config = {
           <input type="number" id="retentionDays" value="90" min="7" max="3650"
                  class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-xs text-white/50 w-16 outline-none focus:border-accent/30">
           <span class="text-[10px] text-white/20">일</span>
-          <button onclick="runRetention()" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 hover:scale-[1.02] active:scale-[0.98] spring">삭제</button>
+          <button data-action="runRetention" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 hover:scale-[1.02] active:scale-[0.98] spring">삭제</button>
         </div>
         <div id="retentionResult" class="text-[10px] text-white/20 mt-2"></div>
+      </div>
+    </div>
+  </div>
+  <!-- Remote nodes management -->
+  <div class="mt-3 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d1">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <div class="text-xs font-bold text-white/40">원격 노드</div>
+          <div class="text-[10px] text-white/20 mt-0.5">다른 서버의 Claude 세션 데이터를 수집합니다</div>
+        </div>
+        <button data-action="openNodeRegister" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">+ 노드 추가</button>
+      </div>
+      <div id="nodeList" class="text-[11px]">
+        <div class="text-center text-white/15 text-xs py-4 dots">로딩 중</div>
+      </div>
+      <div id="nodeRegisterForm" class="hidden mt-3 p-3 bg-white/[0.03] rounded-xl ring-1 ring-white/[0.06]">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">노드 ID</label>
+            <input id="nodeIdInput" placeholder="server-prod-1" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring" pattern="[a-zA-Z0-9_\-]+">
+          </div>
+          <div>
+            <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">라벨 (선택)</label>
+            <input id="nodeLabelInput" placeholder="Production Server" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+          </div>
+        </div>
+        <div class="flex items-center gap-2 mt-3">
+          <button data-action="submitNodeRegister" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">등록</button>
+          <button onclick="document.getElementById('nodeRegisterForm').classList.add('hidden')" class="rounded-full px-3 py-1.5 text-[10px] font-semibold text-white/40 border border-white/[0.07] hover:text-white/60 spring">취소</button>
+        </div>
+        <div id="nodeRegisterResult" class="mt-2 text-[10px] text-white/30"></div>
       </div>
     </div>
   </div>
@@ -709,7 +762,7 @@ tailwind.config = {
      PLAN SETTINGS MODAL
      ═══════════════════════════════════════════════════════════════════════ -->
 <!-- Project Detail Modal (tabbed) -->
-<div id="projectModal" style="display:none"
+<div id="projectModal" style="display:none" role="dialog" aria-modal="true"
      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
      onclick="if(event.target===this)closeProjectModal()">
   <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[1100px] max-w-[95vw] h-[88vh] flex flex-col shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
@@ -720,7 +773,7 @@ tailwind.config = {
         <div class="text-base font-bold text-white/90 truncate mt-0.5" id="projModalTitle">—</div>
         <div class="text-[10px] text-white/30 truncate mt-0.5" id="projModalPath">—</div>
       </div>
-      <button onclick="closeProjectModal()" class="text-white/30 hover:text-white/70 spring text-2xl leading-none ml-4" title="닫기 (Esc)">&times;</button>
+      <button data-action="closeProjectModal" class="text-white/30 hover:text-white/70 spring text-2xl leading-none ml-4" title="닫기 (Esc)">&times;</button>
     </div>
     <!-- Tabs -->
     <div class="flex items-center gap-1 px-6 pt-3 border-b border-white/[0.06] flex-shrink-0" role="tablist" aria-label="프로젝트 상세 탭">
@@ -741,13 +794,13 @@ tailwind.config = {
   </div>
 </div>
 
-<div id="planModal" style="display:none"
+<div id="planModal" style="display:none" role="dialog" aria-modal="true"
      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
      onclick="if(event.target===this)closePlanSettings()">
   <div class="bg-[#111] ring-1 ring-white/[0.08] rounded-2xl w-[420px] max-w-[92vw] max-h-[90vh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,.5)] anim-in">
     <div class="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
       <span class="text-sm font-bold text-white/80">설정</span>
-      <button onclick="closePlanSettings()" class="text-white/20 hover:text-white/50 spring text-lg">&times;</button>
+      <button data-action="closePlanSettings" class="text-white/20 hover:text-white/50 spring text-lg">&times;</button>
     </div>
     <!-- Settings sub-tabs (U17) -->
     <div class="flex items-center gap-1 px-5 pt-3 border-b border-white/[0.06]">
@@ -758,9 +811,9 @@ tailwind.config = {
       <div>
         <div class="text-[10px] font-bold text-white/25 uppercase tracking-widest mb-1.5">플랜 프리셋</div>
         <div class="flex gap-1.5">
-          <button onclick="applyPlanPreset('pro')" class="rounded-full px-3 py-1 text-[10px] font-semibold bg-white/5 text-white/30 border border-white/[0.07] hover:text-white/60 spring">Pro</button>
-          <button onclick="applyPlanPreset('max5x')" class="rounded-full px-3 py-1 text-[10px] font-semibold bg-white/5 text-white/30 border border-white/[0.07] hover:text-white/60 spring">Max 5x</button>
-          <button onclick="applyPlanPreset('max20x')" class="rounded-full px-3 py-1 text-[10px] font-semibold bg-white/5 text-white/30 border border-white/[0.07] hover:text-white/60 spring">Max 20x</button>
+          <button data-action="applyPlanPreset" data-arg="pro" class="rounded-full px-3 py-1 text-[10px] font-semibold bg-white/5 text-white/30 border border-white/[0.07] hover:text-white/60 spring">Pro</button>
+          <button data-action="applyPlanPreset" data-arg="max5x" class="rounded-full px-3 py-1 text-[10px] font-semibold bg-white/5 text-white/30 border border-white/[0.07] hover:text-white/60 spring">Max 5x</button>
+          <button data-action="applyPlanPreset" data-arg="max20x" class="rounded-full px-3 py-1 text-[10px] font-semibold bg-white/5 text-white/30 border border-white/[0.07] hover:text-white/60 spring">Max 20x</button>
           <span id="planDetectedHint" class="text-[9px] text-white/15 self-center ml-2"></span>
         </div>
       </div>
@@ -811,7 +864,7 @@ tailwind.config = {
           <div class="text-xs font-semibold text-white/80">테마</div>
           <div class="text-[10px] text-white/30">다크 / 라이트 전환</div>
         </div>
-        <button onclick="toggleTheme()" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">전환</button>
+        <button data-action="toggleTheme" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">전환</button>
       </div>
       <div class="flex items-center justify-between">
         <div>
@@ -825,7 +878,7 @@ tailwind.config = {
           <div class="text-xs font-semibold text-white/80">입력 대기 뱃지 + 차임</div>
           <div class="text-[10px] text-white/30">assistant end_turn 감지 시 TOP 5 행의 프로젝트 이름 좌측에 ⏳ 입력 대기 뱃지 + 짧은 차임 소리 (C5→G5)</div>
         </div>
-        <button id="idleNotifyToggle" onclick="toggleIdleNotify()"
+        <button id="idleNotifyToggle" data-action="toggleIdleNotify"
                 class="rounded-full px-4 py-1.5 text-[11px] font-bold spring">—</button>
       </div>
       <div class="flex items-center justify-between">
@@ -840,12 +893,12 @@ tailwind.config = {
           <div class="text-xs font-semibold text-white/80">키보드 단축키</div>
           <div class="text-[10px] text-white/30">전체 목록 보기</div>
         </div>
-        <button onclick="showKbdHelp()" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">?</button>
+        <button data-action="showKbdHelp" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">?</button>
       </div>
     </div>
     <div class="px-5 py-3 border-t border-white/[0.06] flex justify-end gap-2">
-      <button onclick="closePlanSettings()" class="rounded-full px-4 py-1.5 text-xs font-semibold text-white/30 border border-white/[0.07] hover:text-white/50 spring">취소</button>
-      <button onclick="savePlanConfig()" class="rounded-full px-4 py-1.5 text-xs font-semibold bg-accent/15 text-accent border border-accent/25 hover:scale-[1.02] active:scale-[0.98] spring">저장</button>
+      <button data-action="closePlanSettings" class="rounded-full px-4 py-1.5 text-xs font-semibold text-white/30 border border-white/[0.07] hover:text-white/50 spring">취소</button>
+      <button data-action="savePlanConfig" class="rounded-full px-4 py-1.5 text-xs font-semibold bg-accent/15 text-accent border border-accent/25 hover:scale-[1.02] active:scale-[0.98] spring">저장</button>
     </div>
   </div>
 </div>
@@ -871,9 +924,9 @@ tailwind.config = {
       <div class="text-[10px] text-white/30">콤마로 여러 태그 입력 가능 · 빈 값으로 저장하면 모든 태그 제거</div>
     </div>
     <div class="px-5 py-3 border-t border-white/[0.06] flex justify-end gap-2">
-      <button onclick="closeTagEdit()"
+      <button data-action="closeTagEdit"
               class="rounded-full px-4 py-1.5 text-xs font-semibold text-white/50 border border-white/[0.07] hover:text-white/80 spring">취소</button>
-      <button id="tagEditSaveBtn" onclick="submitTagEdit()"
+      <button id="tagEditSaveBtn" data-action="submitTagEdit"
               class="rounded-full px-4 py-1.5 text-xs font-bold bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 hover:scale-[1.02] active:scale-[0.98] spring">
         저장
       </button>
@@ -901,9 +954,9 @@ tailwind.config = {
       <div id="delConfirmMismatch" class="text-[10px] text-red-400/70 hidden">입력값이 일치하지 않습니다.</div>
     </div>
     <div class="px-5 py-3 border-t border-white/[0.06] flex justify-end gap-2">
-      <button onclick="closeDeleteConfirm()"
+      <button data-action="closeDeleteConfirm"
               class="rounded-full px-4 py-1.5 text-xs font-semibold text-white/50 border border-white/[0.07] hover:text-white/80 spring">취소</button>
-      <button id="delConfirmBtn" disabled onclick="runPendingDelete()"
+      <button id="delConfirmBtn" disabled data-action="runPendingDelete"
               class="rounded-full px-4 py-1.5 text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/40 hover:scale-[1.02] active:scale-[0.98] spring disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100">
         영구 삭제
       </button>
@@ -931,7 +984,7 @@ tailwind.config = {
 </div>
 
 <!-- Keyboard shortcuts help overlay -->
-<div id="kbdHelp" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+<div id="kbdHelp" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="키보드 단축키"
      onclick="if(event.target===this)this.classList.add('hidden')">
   <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[440px] max-w-[92vw] shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
     <div class="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
@@ -958,12 +1011,6 @@ tailwind.config = {
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/app.v66.js" defer></script>
-<script src="/static/sessions.v66.js" defer></script>
-<script src="/static/plan.v66.js" defer></script>
-<script src="/static/overview.v66.js" defer></script>
-<script src="/static/subagents.v66.js" defer></script>
-<script src="/static/charts.v66.js" defer></script>
-<script src="/static/timeline.v66.js" defer></script>
+<script src="/static/bundle.v75.js" defer></script>
 </body>
 </html>

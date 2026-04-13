@@ -1,12 +1,14 @@
 import asyncio
 import base64
 import csv
+import hashlib
 import hmac
 import io
 import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import time
@@ -17,7 +19,7 @@ from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
 try:
@@ -35,8 +37,9 @@ except ImportError:
 
 from database import (
     read_db, write_db, init_db, check_integrity, DB_PATH, _write_lock,
-    close_thread_connections,
+    close_thread_connections, wal_checkpoint,
 )
+from parser import process_record
 from watcher import ClaudeFileWatcher, WatcherMetrics
 
 logging.basicConfig(
@@ -49,6 +52,32 @@ STATIC_DIR = Path(__file__).parent / 'static'
 BACKUP_DIR = Path.home() / '.claude' / 'dashboard-backups'
 CREDENTIALS_PATH = Path.home() / '.claude' / '.credentials.json'
 _AUTH_PW = os.environ.get('DASHBOARD_PASSWORD')
+_SESSION_SECRET = os.environ.get('DASHBOARD_SECRET', secrets.token_hex(32))
+if 'DASHBOARD_SECRET' not in os.environ:
+    logger.warning("DASHBOARD_SECRET not set — sessions will invalidate on restart")
+_SESSION_COOKIE = 'dash_session'
+_SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
+_COOKIE_SECURE = os.environ.get('DASHBOARD_SECURE', '').lower() not in ('0', 'false', '')
+
+
+def _sign_session() -> str:
+    expires = int(time.time()) + _SESSION_MAX_AGE
+    payload = f'dashboard:{expires}'
+    sig = hmac.new(_SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(f'{payload}.{sig}'.encode()).decode()
+
+
+def _verify_session(token: str) -> bool:
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode()).decode()
+        payload, sig = decoded.rsplit('.', 1)
+        expected = hmac.new(_SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return False
+        _, expires_str = payload.split(':', 1)
+        return int(expires_str) > int(time.time())
+    except Exception:
+        return False
 
 
 # ─── Plan auto-detection ──────────────────────────────────────────────────────
@@ -194,17 +223,22 @@ async def lifespan(app: FastAPI):
     await watcher.start_async()
     yield
     watcher.stop()
+    wal_checkpoint()
     close_thread_connections()
 
 
 app = FastAPI(title="Claude Usage Dashboard", lifespan=lifespan)
 
-# CORS — allow any origin so the dashboard works behind reverse proxies
+# CORS — restricted by default; set DASHBOARD_CORS_ORIGINS to allow specific origins.
+# Example: DASHBOARD_CORS_ORIGINS=https://dash.example.com,http://localhost:3000
+_cors_raw = os.environ.get('DASHBOARD_CORS_ORIGINS', '')
+_cors_origins = [o.strip() for o in _cors_raw.split(',') if o.strip()] if _cors_raw else []
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "X-Ingest-Key"],
+    allow_credentials=True,
 )
 
 # ─── Middleware stack (order matters) ────────────────────────────────────
@@ -213,27 +247,35 @@ app.add_middleware(
 # track EVERY request (including 401s from auth), register auth FIRST and
 # metrics SECOND. At runtime the order is: metrics → auth → route.
 
-_AUTH_BYPASS = {'/api/health', '/metrics'}
+_AUTH_BYPASS = {'/api/health', '/metrics', '/api/ingest', '/api/collector.py',
+                '/api/auth/login', '/api/auth/me', '/login', '/features'}
+_AUTH_BYPASS_PREFIX = ('/static/',)
 
 if _AUTH_PW:
     @app.middleware("http")
-    async def _basic_auth_middleware(request: Request, call_next):
-        if request.url.path in _AUTH_BYPASS:
+    async def _session_auth_middleware(request: Request, call_next):
+        path = request.url.path
+        if path in _AUTH_BYPASS or path.startswith(_AUTH_BYPASS_PREFIX):
             return await call_next(request)
+        # Check session cookie
+        token = request.cookies.get(_SESSION_COOKIE, '')
+        if _verify_session(token):
+            return await call_next(request)
+        # Fallback: Basic Auth for API clients (curl, collector)
         auth = request.headers.get('Authorization', '')
         if auth.startswith('Basic '):
             try:
                 decoded = base64.b64decode(auth[6:]).decode()
                 _, pw = decoded.split(':', 1)
-                # Constant-time comparison defeats timing oracles
                 if hmac.compare_digest(pw, _AUTH_PW):
                     return await call_next(request)
             except Exception:
                 pass
-        return Response(
-            status_code=401,
-            headers={'WWW-Authenticate': 'Basic realm="Claude Dashboard"'},
-        )
+        # Browser → redirect to login page; API → 401
+        if 'text/html' in request.headers.get('accept', ''):
+            return Response(status_code=302,
+                            headers={'Location': '/login'})
+        return JSONResponse({'error': 'unauthorized'}, 401)
 
 
 if _PROMETHEUS_OK:
@@ -361,6 +403,22 @@ async def index():
     )
 
 
+@app.get("/login")
+async def login_page():
+    return FileResponse(
+        STATIC_DIR / 'login.html',
+        headers={'Cache-Control': 'no-store'},
+    )
+
+
+@app.get("/features")
+async def features_page():
+    return FileResponse(
+        Path(__file__).parent / 'docs' / 'features.html',
+        headers={'Cache-Control': 'no-store'},
+    )
+
+
 # ─── Health ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
@@ -371,26 +429,82 @@ def api_health():
     return {"ok": True, "messages": n_msg, "sessions": n_sess}
 
 
+# ─── Auth: login / logout / me ────────────────────────────────────────────────
+
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}  # ip → [timestamps]
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW = 60  # seconds
+
+
+def _check_rate_limit(ip: str) -> bool:
+    """Return True if request is allowed, False if rate-limited."""
+    now = time.time()
+    attempts = _LOGIN_ATTEMPTS.get(ip, [])
+    attempts = [t for t in attempts if now - t < _LOGIN_WINDOW]
+    _LOGIN_ATTEMPTS[ip] = attempts
+    return len(attempts) < _LOGIN_MAX_ATTEMPTS
+
+
+class LoginPayload(BaseModel):
+    password: str = Field(..., min_length=1)
+
+
+@app.post("/api/auth/login")
+async def api_login(payload: LoginPayload, request: Request):
+    if not _AUTH_PW:
+        return {'ok': True, 'message': 'no password configured'}
+    client_ip = request.client.host if request.client else '0.0.0.0'
+    if not _check_rate_limit(client_ip):
+        return JSONResponse(
+            {'ok': False, 'error': 'too many attempts, try again later'},
+            429)
+    if not hmac.compare_digest(payload.password, _AUTH_PW):
+        _LOGIN_ATTEMPTS.setdefault(client_ip, []).append(time.time())
+        return JSONResponse({'ok': False, 'error': 'invalid password'}, 401)
+    token = _sign_session()
+    response = JSONResponse({'ok': True})
+    response.set_cookie(
+        _SESSION_COOKIE, token,
+        max_age=_SESSION_MAX_AGE, httponly=True, samesite='lax',
+        secure=_COOKIE_SECURE, path='/')
+    return response
+
+
+@app.post("/api/auth/logout")
+async def api_logout():
+    response = JSONResponse({'ok': True})
+    response.delete_cookie(_SESSION_COOKIE, path='/')
+    return response
+
+
+@app.get("/api/auth/me")
+async def api_auth_me(request: Request):
+    if not _AUTH_PW:
+        return {'authenticated': True, 'auth_required': False}
+    token = request.cookies.get(_SESSION_COOKIE, '')
+    return {'authenticated': _verify_session(token), 'auth_required': True}
+
+
 # ─── WebSocket ────────────────────────────────────────────────────────────────
 
 def _ws_auth_ok(ws: WebSocket) -> bool:
-    """Validate Basic Auth on WebSocket upgrade if DASHBOARD_PASSWORD is set."""
+    """Validate session cookie on WebSocket upgrade if DASHBOARD_PASSWORD is set."""
     if not _AUTH_PW:
         return True
+    # Session cookie
+    token = ws.cookies.get(_SESSION_COOKIE, '')
+    if _verify_session(token):
+        return True
+    # Fallback: Basic Auth header (backward compat for programmatic clients)
     auth = ws.headers.get('authorization', '')
-    # Browser sends auth header on WS if same origin authenticated via Basic Auth
     if auth.startswith('Basic '):
         try:
             decoded = base64.b64decode(auth[6:]).decode()
             _, pw = decoded.split(':', 1)
-            if pw == _AUTH_PW:
+            if hmac.compare_digest(pw, _AUTH_PW):
                 return True
         except Exception:
             pass
-    # Fallback: check query param (?token=...)
-    token = ws.query_params.get('token', '')
-    if token == _AUTH_PW:
-        return True
     return False
 
 
@@ -489,31 +603,28 @@ def _get_stats() -> dict:
             FROM sessions WHERE updated_at >= ?
         ''', (today_utc,)).fetchone()
 
-        # Aggregate from MESSAGES, not sessions — the session's "primary model"
-        # can be misleading when multiple models are used in one session.
-        # See C1 in the architecture audit.
-        models = db.execute('''
+        # Unified model aggregation: cost + cache in a single scan
+        model_rows = db.execute('''
             SELECT model,
                    COUNT(DISTINCT session_id) AS cnt,
-                   SUM(cost_micro)*1.0/1000000 AS cost
-            FROM messages
-            WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
-            GROUP BY model
-            ORDER BY cost DESC
-        ''').fetchall()
-
-        # Per-model cache efficiency: cache_read / (input + cache_read)
-        model_cache = db.execute('''
-            SELECT model,
+                   SUM(cost_micro)*1.0/1000000 AS cost,
                    SUM(input_tokens) AS input_tokens,
                    SUM(cache_read_tokens) AS cache_read_tokens,
                    SUM(cache_creation_tokens) AS cache_creation_tokens
             FROM messages
             WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
-            GROUP BY model ORDER BY input_tokens DESC
+            GROUP BY model ORDER BY cost DESC
         ''').fetchall()
 
-        # Stop reason distribution (all sessions, not just subagents)
+        models = [{'model': m['model'], 'cnt': m['cnt'], 'cost': m['cost']}
+                  for m in model_rows]
+        model_cache = [{'model': m['model'],
+                        'input_tokens': m['input_tokens'],
+                        'cache_read_tokens': m['cache_read_tokens'],
+                        'cache_creation_tokens': m['cache_creation_tokens']}
+                       for m in model_rows]
+
+        # Stop reason distribution
         stop_reasons = db.execute('''
             SELECT COALESCE(NULLIF(final_stop_reason, ''), '(unknown)') AS stop_reason,
                    COUNT(*) AS count,
@@ -525,8 +636,8 @@ def _get_stats() -> dict:
     return {
         'all_time': dict(row) if row else {},
         'today': dict(today) if today else {},
-        'models': [dict(m) for m in models],
-        'model_cache': [dict(mc) for mc in model_cache],
+        'models': models,
+        'model_cache': model_cache,
         'stop_reasons': [dict(sr) for sr in stop_reasons],
     }
 
@@ -566,18 +677,23 @@ def api_sessions(
     cost_min: Optional[float] = Query(None, ge=0),
     cost_max: Optional[float] = Query(None, ge=0),
     tag: Optional[str] = Query(None, max_length=80),
+    node: Optional[str] = Query(None, max_length=64),
 ):
     """List parent sessions. Subagents are excluded by default — use
     ``?include_subagents=true`` or the dedicated ``/api/subagents`` endpoint.
     ``?pinned_only=true`` narrows to starred sessions.
     ``?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`` filters by ``updated_at``.
     ``?cost_min=&cost_max=`` filters by session cost (USD).
+    ``?node=server1`` filters by source node.
     """
     sort_col = _SESSIONS_SORT_MAP.get(sort, 'updated_at')
     order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
     with read_db() as db:
         conds: list[str] = []
         params: list = []
+        if node:
+            conds.append("source_node = ?")
+            params.append(node)
         if not include_subagents:
             conds.append("is_subagent = 0")
         if pinned_only:
@@ -593,9 +709,13 @@ def api_sessions(
             s = f"%{_esc_like(search)}%"
             params.extend([s, s])
         if date_from:
+            if not re.match(r'^\d{4}-\d{2}-\d{2}', date_from):
+                return JSONResponse({'error': 'invalid date format', 'field': 'date_from'}, status_code=400)
             conds.append("updated_at >= ?")
             params.append(date_from)
         if date_to:
+            if not re.match(r'^\d{4}-\d{2}-\d{2}', date_to):
+                return JSONResponse({'error': 'invalid date format', 'field': 'date_to'}, status_code=400)
             # end-of-day: append "T23:59:59Z" so the full day is included
             conds.append("updated_at <= ?")
             params.append(date_to + "T23:59:59Z" if len(date_to) == 10 else date_to)
@@ -623,7 +743,7 @@ def api_sessions(
                    s.is_subagent, s.parent_session_id,
                    s.agent_type, s.agent_description, s.version,
                    s.final_stop_reason, s.tags,
-                   s.turn_duration_ms,
+                   s.turn_duration_ms, s.source_node,
                    {_DURATION_SQL} AS duration_seconds,
                    (SELECT COUNT(*) FROM sessions c
                     WHERE c.parent_session_id = s.id AND c.is_subagent = 1) AS subagent_count,
@@ -823,9 +943,12 @@ _MODELS_SORT_MAP = {
 def api_models(
     sort: str = Query('messages'),
     order: str = Query('desc'),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(500, ge=1, le=500),
 ):
     sort_col = _MODELS_SORT_MAP.get(sort, 'message_count')
     order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
+    offset = (page - 1) * per_page
     with read_db() as db:
         rows = db.execute(f'''
             SELECT model, COUNT(*) AS message_count,
@@ -838,8 +961,10 @@ def api_models(
             WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
             GROUP BY model
             ORDER BY {sort_col} {order_sql}
-        ''').fetchall()
-    return {'models': [dict(r) for r in rows], 'sort': sort, 'order': order_sql.lower()}
+            LIMIT ? OFFSET ?
+        ''', (per_page, offset)).fetchall()
+    return {'models': [dict(r) for r in rows], 'sort': sort, 'order': order_sql.lower(),
+            'page': page, 'per_page': per_page}
 
 
 _PROJECTS_SORT_MAP = {
@@ -858,39 +983,125 @@ def api_timeline(
     date_to: str = Query(..., min_length=10, max_length=30),
     include_subagents: bool = Query(False),
     limit: int = Query(2000, ge=1, le=5000),
+    node: Optional[str] = Query(None, max_length=64),
 ):
     """Return sessions with start/end times for Gantt-style timeline rendering.
 
     Unlike ``/api/sessions``, this endpoint is unpaginated (up to *limit* rows)
     and returns only the columns needed for timeline visualisation.
+    ``?node=server1`` filters by source node.
     """
     # Normalise date_to to end-of-day if only a date was supplied
     dt = date_to if len(date_to) > 10 else date_to + 'T23:59:59Z'
     sub_filter = '' if include_subagents else 'AND is_subagent = 0'
+    node_filter = ''
+    node_params: list = []
+    if node:
+        node_filter = 'AND source_node = ?'
+        node_params = [node]
     with read_db() as db:
         off = _tz_offset(db)
         rows = db.execute(f'''
             SELECT id, project_name, project_path, created_at, updated_at,
                    cost_micro * 1.0 / 1000000 AS cost_usd,
-                   model, is_subagent,
+                   model, is_subagent, source_node,
                    {_DURATION_SQL} AS duration_seconds
             FROM sessions
             WHERE created_at >= ? AND created_at <= ?
               AND created_at != '' AND updated_at != ''
-              {sub_filter}
+              {sub_filter} {node_filter}
             ORDER BY project_name, created_at
             LIMIT ?
-        ''', (date_from, dt, limit)).fetchall()
+        ''', (date_from, dt, *node_params, limit)).fetchall()
         total = db.execute(f'''
             SELECT COUNT(*) FROM sessions
             WHERE created_at >= ? AND created_at <= ?
               AND created_at != '' AND updated_at != ''
-              {sub_filter}
-        ''', (date_from, dt)).fetchone()[0]
+              {sub_filter} {node_filter}
+        ''', (date_from, dt, *node_params)).fetchone()[0]
     return {
         'sessions': [dict(r) for r in rows],
         'total': total,
         'truncated': total > limit,
+        'timezone_offset': off,
+    }
+
+
+@app.get("/api/timeline/hourly")
+def api_timeline_hourly(
+    date: str = Query(..., min_length=10, max_length=10),
+    include_subagents: bool = Query(False),
+):
+    """Hourly breakdown for a single day: messages, cost, tokens per hour per project/session."""
+    sub_filter = '' if include_subagents else 'AND s.is_subagent = 0'
+    with read_db() as db:
+        off = _tz_offset(db)
+        off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
+        # Per-hour per-project aggregation
+        rows = db.execute(f'''
+            SELECT strftime('%H', m.timestamp, ?) AS hour,
+                   s.project_name,
+                   COUNT(*)                        AS message_count,
+                   SUM(m.cost_micro)*1.0/1000000   AS cost_usd,
+                   SUM(m.input_tokens)             AS input_tokens,
+                   SUM(m.output_tokens)            AS output_tokens,
+                   COUNT(DISTINCT m.session_id)    AS session_count
+            FROM messages m
+            JOIN sessions s ON m.session_id = s.id
+            WHERE m.role = 'assistant'
+              AND m.timestamp >= ? AND m.timestamp < ?
+              {sub_filter}
+            GROUP BY hour, s.project_name
+            ORDER BY hour, cost_usd DESC
+        ''', (off_sql, date + 'T00:00:00Z', date + 'T24:00:00Z')).fetchall()
+        # Per-hour per-session detail
+        detail_rows = db.execute(f'''
+            SELECT strftime('%H', m.timestamp, ?) AS hour,
+                   m.session_id,
+                   s.project_name,
+                   s.model,
+                   s.is_subagent,
+                   COUNT(*)                        AS message_count,
+                   SUM(m.cost_micro)*1.0/1000000   AS cost_usd,
+                   SUM(m.input_tokens)             AS input_tokens,
+                   SUM(m.output_tokens)            AS output_tokens
+            FROM messages m
+            JOIN sessions s ON m.session_id = s.id
+            WHERE m.role = 'assistant'
+              AND m.timestamp >= ? AND m.timestamp < ?
+              {sub_filter}
+            GROUP BY hour, m.session_id
+            ORDER BY hour, cost_usd DESC
+        ''', (off_sql, date + 'T00:00:00Z', date + 'T24:00:00Z')).fetchall()
+    # Build hourly map
+    hours: dict[str, dict] = {}
+    for h in range(24):
+        hk = f'{h:02d}'
+        hours[hk] = {'hour': hk, 'projects': {}, 'sessions': [],
+                      'message_count': 0, 'cost_usd': 0,
+                      'input_tokens': 0, 'output_tokens': 0}
+    for r in rows:
+        hk = r['hour']
+        slot = hours[hk]
+        slot['projects'][r['project_name'] or '(unknown)'] = {
+            'message_count': r['message_count'], 'cost_usd': round(r['cost_usd'] or 0, 6),
+            'input_tokens': r['input_tokens'], 'output_tokens': r['output_tokens'],
+            'session_count': r['session_count'],
+        }
+        slot['message_count'] += r['message_count']
+        slot['cost_usd'] = round(slot['cost_usd'] + (r['cost_usd'] or 0), 6)
+        slot['input_tokens'] += r['input_tokens'] or 0
+        slot['output_tokens'] += r['output_tokens'] or 0
+    for r in detail_rows:
+        hours[r['hour']]['sessions'].append({
+            'session_id': r['session_id'], 'project_name': r['project_name'] or '(unknown)',
+            'model': r['model'], 'is_subagent': bool(r['is_subagent']),
+            'message_count': r['message_count'], 'cost_usd': round(r['cost_usd'] or 0, 6),
+            'input_tokens': r['input_tokens'], 'output_tokens': r['output_tokens'],
+        })
+    return {
+        'date': date,
+        'hours': list(hours.values()),
         'timezone_offset': off,
     }
 
@@ -932,12 +1143,15 @@ _PROJECT_GROUP_SQL = "COALESCE(NULLIF(project_path, ''), project_name), project_
 def api_projects(
     sort: str = Query('last_active'),
     order: str = Query('desc'),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(500, ge=1, le=500),
 ):
     """Project roll-up. ``session_count`` is PARENT sessions only;
     ``subagent_count`` is the spawned-subagent count. All cost/token totals
     include everything (parents + subagents)."""
     sort_col = _PROJECTS_SORT_MAP.get(sort, 'last_active')
     order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
+    offset = (page - 1) * per_page
     with read_db() as db:
         rows = db.execute(f'''
             SELECT project_name, project_path,
@@ -949,7 +1163,8 @@ def api_projects(
                    GROUP_CONCAT(tags) AS tags_concat
             FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
             ORDER BY {sort_col} {order_sql}
-        ''').fetchall()
+            LIMIT ? OFFSET ?
+        ''', (per_page, offset)).fetchall()
     projects = []
     for r in rows:
         d = dict(r)
@@ -961,7 +1176,8 @@ def api_projects(
                 seen.append(tok)
         d['tags'] = ','.join(seen)
         projects.append(d)
-    return {'projects': projects, 'sort': sort, 'order': order_sql.lower()}
+    return {'projects': projects, 'sort': sort, 'order': order_sql.lower(),
+            'page': page, 'per_page': per_page}
 
 
 @app.get("/api/projects/top")
@@ -1015,50 +1231,40 @@ def api_projects_top(
         projects = projects[:limit]
 
         if with_last_message and projects:
-            # Fetch the most recent MEANINGFUL assistant message preview per
-            # project. Pure-tool messages (`[Tool: Read]`) and extended-
-            # thinking summaries are noise — we want the most recent actual
-            # text reply. Falls back to any non-empty preview when no clean
-            # text is found.
-            for p in projects:
-                row = db.execute('''
-                    SELECT m.content_preview, m.timestamp, m.model, m.session_id
+            # Single query: fetch best preview per project using ROW_NUMBER.
+            paths = [p['project_path'] for p in projects]
+            ph = ','.join(['?'] * len(paths))
+            preview_rows = db.execute(f'''
+                WITH ranked AS (
+                    SELECT m.content_preview, m.timestamp, m.model, m.session_id,
+                           s.project_path,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY s.project_path
+                               ORDER BY
+                                   CASE WHEN m.content_preview NOT LIKE '[Tool:%%'
+                                        AND m.content_preview NOT LIKE '[Extended Thinking]%%'
+                                        AND m.content_preview NOT LIKE '[생각중:%%'
+                                        AND LENGTH(m.content_preview) >= 20
+                                   THEN 0 ELSE 1 END,
+                                   m.timestamp DESC, m.id DESC
+                           ) AS rn
                     FROM messages m
                     JOIN sessions s ON m.session_id = s.id
-                    WHERE s.project_path = ?
+                    WHERE s.project_path IN ({ph})
                       AND m.role = 'assistant'
                       AND m.content_preview IS NOT NULL
                       AND m.content_preview != ''
-                      AND m.content_preview NOT LIKE '[Tool:%'
-                      AND m.content_preview NOT LIKE '[Extended Thinking]%'
-                      AND m.content_preview NOT LIKE '[생각중:%'
-                      AND LENGTH(m.content_preview) >= 20
-                    ORDER BY m.timestamp DESC, m.id DESC
-                    LIMIT 1
-                ''', (p['project_path'],)).fetchone()
-                if row is None:
-                    # Fallback: accept any non-empty preview
-                    row = db.execute('''
-                        SELECT m.content_preview, m.timestamp, m.model, m.session_id
-                        FROM messages m
-                        JOIN sessions s ON m.session_id = s.id
-                        WHERE s.project_path = ?
-                          AND m.role = 'assistant'
-                          AND m.content_preview IS NOT NULL
-                          AND m.content_preview != ''
-                        ORDER BY m.timestamp DESC, m.id DESC
-                        LIMIT 1
-                    ''', (p['project_path'],)).fetchone()
+                )
+                SELECT * FROM ranked WHERE rn = 1
+            ''', paths).fetchall()
+            preview_map = {r['project_path']: r for r in preview_rows}
+            for p in projects:
+                row = preview_map.get(p['project_path'])
                 if row:
                     preview = row['content_preview'] or ''
-                    # Strip common parser prefixes for a cleaner summary
                     for prefix in ('[Extended Thinking]', '[생각중:'):
                         if preview.startswith(prefix):
                             preview = preview[len(prefix):].lstrip(' ]:')
-                    # Pre-compute the clean flat summary on the server so the
-                    # frontend doesn't need fragile regex logic to strip
-                    # markdown. `preview` keeps the raw content for tooltip;
-                    # `summary_line` is what the UI renders inline.
                     p['last_message'] = {
                         'preview':      preview[:2000],
                         'summary_line': summarize_preview(preview),
@@ -1175,6 +1381,30 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
         ''', (off_sql, f'-{days} days')).fetchall()
         cfg = _plan_cfg(db)
         tz = _user_tz(db)
+        # Pre-fetch MTD + daily/weekly usage in the same connection
+        _now = datetime.now(tz)
+        _mtd_start = _now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        _mtd_utc = _mtd_start.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        _today_local = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+        _today_utc = _today_local.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        _days_since = (_now.weekday() - cfg.get('reset_weekday', 0)) % 7
+        _ws = (_now - timedelta(days=_days_since)).replace(
+            hour=cfg.get('reset_hour', 0), minute=0, second=0, microsecond=0)
+        if _now < _ws:
+            _ws -= timedelta(weeks=1)
+        _ws_utc = _ws.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        _mtd_row = db.execute(
+            "SELECT COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost"
+            " FROM messages WHERE role='assistant' AND timestamp >= ?",
+            (_mtd_utc,)).fetchone()
+        _d_used = db.execute(
+            "SELECT COALESCE(SUM(cost_micro),0)*1.0/1000000 AS c"
+            " FROM messages WHERE role='assistant' AND timestamp >= ?",
+            (_today_utc,)).fetchone()
+        _w_used = db.execute(
+            "SELECT COALESCE(SUM(cost_micro),0)*1.0/1000000 AS c"
+            " FROM messages WHERE role='assistant' AND timestamp >= ?",
+            (_ws_utc,)).fetchone()
 
     daily = [dict(r) for r in rows]
     if not daily:
@@ -1229,15 +1459,8 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
         next_month = now.replace(month=now.month + 1, day=1)
     days_left = (next_month - now).days
 
-    # Month-to-date cost
-    mtd_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    mtd_start_utc = mtd_start.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    with read_db() as db:
-        mtd = db.execute('''
-            SELECT COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost
-            FROM messages WHERE role='assistant' AND timestamp >= ?
-        ''', (mtd_start_utc,)).fetchone()
-    mtd_cost = mtd['cost'] if mtd else 0
+    # Month-to-date cost (pre-fetched above)
+    mtd_cost = _mtd_row['cost'] if _mtd_row else 0
 
     # Weekday-aware projection: walk remaining days individually, adding the
     # appropriate per-weekday average for each. Much closer to reality when
@@ -1267,25 +1490,9 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
             return None
         return int((limit - current) / per_sec)
 
-    # Day spend so far
-    today_local = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_utc = today_local.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    with read_db() as db:
-        d_used = db.execute(
-            "SELECT COALESCE(SUM(cost_micro),0)*1.0/1000000 AS c FROM messages WHERE role='assistant' AND timestamp >= ?",
-            (today_utc,),
-        ).fetchone()
-        # Current week start using plan_config (Mon by default)
-        days_since = (now.weekday() - cfg.get('reset_weekday', 0)) % 7
-        ws = (now - timedelta(days=days_since)).replace(
-            hour=cfg.get('reset_hour', 0), minute=0, second=0, microsecond=0)
-        if now < ws:
-            ws -= timedelta(weeks=1)
-        ws_utc = ws.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        w_used = db.execute(
-            "SELECT COALESCE(SUM(cost_micro),0)*1.0/1000000 AS c FROM messages WHERE role='assistant' AND timestamp >= ?",
-            (ws_utc,),
-        ).fetchone()
+    # Day/week spend (pre-fetched above)
+    d_used = _d_used
+    w_used = _w_used
 
     return {
         'window_days': days,
@@ -1489,7 +1696,10 @@ def api_session_set_tags(session_id: str, body: SessionTagsBody):
 
 
 @app.get("/api/tags")
-def api_tags_list():
+def api_tags_list(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(500, ge=1, le=500),
+):
     """Return every distinct tag across all sessions with its session count."""
     counts: dict[str, int] = {}
     with read_db() as db:
@@ -1502,11 +1712,15 @@ def api_tags_list():
             if not t:
                 continue
             counts[t] = counts.get(t, 0) + 1
+    all_tags = sorted(
+        [{'tag': k, 'count': v} for k, v in counts.items()],
+        key=lambda x: (-x['count'], x['tag'])
+    )
+    offset = (page - 1) * per_page
     return {
-        'tags': sorted(
-            [{'tag': k, 'count': v} for k, v in counts.items()],
-            key=lambda x: (-x['count'], x['tag'])
-        ),
+        'tags': all_tags[offset:offset + per_page],
+        'total': len(all_tags),
+        'page': page, 'per_page': per_page,
     }
 
 
@@ -1799,11 +2013,11 @@ def api_session_chain(session_id: str, depth: int = Query(3, ge=1, le=5)):
     visited: set[str] = set()
     nodes: list[dict] = []
 
-    def _walk(sid: str, level: int):
-        if level >= depth or sid in visited:
-            return
-        visited.add(sid)
-        with read_db() as db:
+    with read_db() as db:
+        def _walk(sid: str, level: int):
+            if level >= depth or sid in visited:
+                return
+            visited.add(sid)
             row = db.execute('''
                 SELECT id, agent_type, agent_description,
                        cost_micro*1.0/1000000 AS cost_usd,
@@ -1814,34 +2028,26 @@ def api_session_chain(session_id: str, depth: int = Query(3, ge=1, le=5)):
             if not row:
                 return
             nodes.append({**dict(row), 'level': level})
-            # Find any Agent/Task tool_use this session emitted by scanning
-            # its assistant messages' content. We then match descriptions to
-            # other subagent sessions.
             ctx = db.execute('''
                 SELECT content FROM messages
-                WHERE session_id = ? AND role = 'assistant' AND content IS NOT NULL
+                WHERE session_id = ? AND role = 'assistant'
+                  AND content IS NOT NULL
+                  AND (content LIKE '%"Agent"%' OR content LIKE '%"Task"%')
             ''', (sid,)).fetchall()
             child_descriptions: list[str] = []
             for c in ctx:
-                txt = c['content'] or ''
-                if '"Agent"' not in txt and '"Task"' not in txt:
-                    continue
                 try:
-                    blocks = json.loads(txt)
+                    blocks = json.loads(c['content'] or '')
                 except Exception:
                     continue
                 if not isinstance(blocks, list):
                     continue
                 for b in blocks:
-                    if not isinstance(b, dict):
-                        continue
-                    if b.get('type') != 'tool_use':
-                        continue
-                    if b.get('name') not in ('Agent', 'Task'):
-                        continue
-                    desc = (b.get('input') or {}).get('description', '')
-                    if desc:
-                        child_descriptions.append(desc)
+                    if isinstance(b, dict) and b.get('type') == 'tool_use' \
+                       and b.get('name') in ('Agent', 'Task'):
+                        desc = (b.get('input') or {}).get('description', '')
+                        if desc:
+                            child_descriptions.append(desc)
             if child_descriptions:
                 placeholders = ','.join(['?'] * len(child_descriptions))
                 children = db.execute(f'''
@@ -1852,7 +2058,7 @@ def api_session_chain(session_id: str, depth: int = Query(3, ge=1, le=5)):
                 for ch in children:
                     _walk(ch['id'], level + 1)
 
-    _walk(session_id, 0)
+        _walk(session_id, 0)
     return {'root': session_id, 'nodes': nodes, 'count': len(nodes)}
 
 
@@ -1957,30 +2163,200 @@ _CSV_COLS = [
 
 @app.get("/api/export/csv")
 def api_export_csv():
-    with read_db() as db:
-        rows = db.execute(f'''
-            SELECT id AS session_id, project_name, project_path, cwd, model,
-                   created_at, updated_at,
-                   {_DURATION_SQL} AS duration_seconds,
-                   total_input_tokens, total_output_tokens,
-                   total_cache_creation_tokens, total_cache_read_tokens,
-                   cost_micro*1.0/1000000 AS total_cost_usd,
-                   message_count, user_message_count,
-                   is_subagent, parent_session_id, parent_tool_use_id,
-                   agent_type, agent_description, final_stop_reason,
-                   pinned, tags
-            FROM sessions ORDER BY updated_at DESC
-        ''').fetchall()
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(_CSV_COLS)
-    for r in rows:
-        d = dict(r)
-        w.writerow([d.get(c, '') if d.get(c) is not None else '' for c in _CSV_COLS])
-    return Response(
-        buf.getvalue(), media_type='text/csv',
+    def _generate():
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(_CSV_COLS)
+        yield buf.getvalue()
+        with read_db() as db:
+            cursor = db.execute(f'''
+                SELECT id AS session_id, project_name, project_path, cwd, model,
+                       created_at, updated_at,
+                       {_DURATION_SQL} AS duration_seconds,
+                       total_input_tokens, total_output_tokens,
+                       total_cache_creation_tokens, total_cache_read_tokens,
+                       cost_micro*1.0/1000000 AS total_cost_usd,
+                       message_count, user_message_count,
+                       is_subagent, parent_session_id, parent_tool_use_id,
+                       agent_type, agent_description, final_stop_reason,
+                       pinned, tags
+                FROM sessions ORDER BY updated_at DESC
+            ''')
+            while True:
+                rows = cursor.fetchmany(500)
+                if not rows:
+                    break
+                buf = io.StringIO()
+                w = csv.writer(buf)
+                for r in rows:
+                    d = dict(r)
+                    w.writerow([d.get(c, '') if d.get(c) is not None else ''
+                                for c in _CSV_COLS])
+                yield buf.getvalue()
+    return StreamingResponse(
+        _generate(), media_type='text/csv',
         headers={'Content-Disposition': 'attachment; filename="claude-usage.csv"'},
     )
+
+
+# ─── Remote node ingestion ────────────────────────────────────────────────────
+
+_COLLECTOR_PATH = Path(__file__).parent / 'collector.py'
+
+
+@app.get("/api/collector.py")
+def api_download_collector():
+    """Download the collector agent script for remote servers."""
+    if not _COLLECTOR_PATH.is_file():
+        return JSONResponse({'error': 'collector.py not found'}, 404)
+    return FileResponse(
+        _COLLECTOR_PATH,
+        media_type='text/x-python',
+        headers={'Content-Disposition': 'attachment; filename="collector.py"'},
+    )
+
+
+def _hash_ingest_key(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def _verify_ingest_key(node_id: str, provided_key: str) -> bool:
+    """Check provided ingest key against stored hash."""
+    with read_db() as db:
+        row = db.execute(
+            'SELECT ingest_key_hash FROM remote_nodes WHERE node_id = ?',
+            (node_id,),
+        ).fetchone()
+    if not row:
+        return False
+    return hmac.compare_digest(
+        row['ingest_key_hash'], _hash_ingest_key(provided_key))
+
+
+class IngestPayload(BaseModel):
+    node_id: str = Field(..., min_length=1, max_length=64)
+    file_path: str = Field(..., min_length=1)
+    records: list[dict] = Field(..., max_length=500)
+
+
+@app.post("/api/ingest")
+async def api_ingest(payload: IngestPayload, request: Request):
+    """Receive JSONL records from a remote collector agent."""
+    ingest_key = request.headers.get('X-Ingest-Key', '')
+    if not ingest_key or not _verify_ingest_key(payload.node_id, ingest_key):
+        return JSONResponse({'error': 'invalid node_id or ingest key'}, 403)
+
+    new_records: list[dict] = []
+    with write_db() as db:
+        for record in payload.records:
+            result = process_record(
+                record, payload.file_path, db,
+                source_node=payload.node_id)
+            if result:
+                new_records.append(result)
+        # Update node stats
+        db.execute('''
+            UPDATE remote_nodes
+            SET last_seen = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+                session_count = (SELECT COUNT(*) FROM sessions
+                                 WHERE source_node = ?),
+                message_count = (SELECT COUNT(*) FROM messages m
+                                 JOIN sessions s ON m.session_id = s.id
+                                 WHERE s.source_node = ?)
+            WHERE node_id = ?
+        ''', (payload.node_id, payload.node_id, payload.node_id))
+
+    if new_records:
+        await manager.broadcast(
+            {'type': 'batch_update', 'records': new_records})
+
+    return {
+        'accepted': len(new_records),
+        'skipped': len(payload.records) - len(new_records),
+    }
+
+
+class NodeRegister(BaseModel):
+    node_id: str = Field(..., min_length=1, max_length=64,
+                         pattern=r'^[a-zA-Z0-9_\-]+$')
+    label: Optional[str] = None
+
+
+@app.get("/api/nodes")
+def api_nodes():
+    """List registered remote nodes + local pseudo-node."""
+    with read_db() as db:
+        rows = db.execute(
+            'SELECT * FROM remote_nodes ORDER BY last_seen DESC'
+        ).fetchall()
+        local_stats = db.execute('''
+            SELECT COUNT(*) AS session_count,
+                   (SELECT COUNT(*) FROM messages m
+                    JOIN sessions s ON m.session_id = s.id
+                    WHERE s.source_node = 'local') AS message_count
+            FROM sessions WHERE source_node = 'local'
+        ''').fetchone()
+    nodes = [{'node_id': 'local', 'label': 'Local',
+              'session_count': local_stats['session_count'],
+              'message_count': local_stats['message_count'],
+              'last_seen': None, 'created_at': None}]
+    nodes.extend(dict(r) for r in rows)
+    return {'nodes': nodes}
+
+
+@app.post("/api/nodes")
+def api_register_node(payload: NodeRegister):
+    """Register a new remote node. Returns a one-time ingest key."""
+    raw_key = secrets.token_urlsafe(32)
+    key_hash = _hash_ingest_key(raw_key)
+    with write_db() as db:
+        existing = db.execute(
+            'SELECT node_id FROM remote_nodes WHERE node_id = ?',
+            (payload.node_id,),
+        ).fetchone()
+        if existing:
+            return JSONResponse(
+                {'error': f'node "{payload.node_id}" already exists'}, 409)
+        db.execute('''
+            INSERT INTO remote_nodes (node_id, label, ingest_key_hash)
+            VALUES (?, ?, ?)
+        ''', (payload.node_id, payload.label or payload.node_id, key_hash))
+    return {
+        'node_id': payload.node_id,
+        'ingest_key': raw_key,
+        'message': 'Save this key — it cannot be retrieved again.',
+    }
+
+
+@app.delete("/api/nodes/{node_id}")
+def api_delete_node(node_id: str):
+    """Unregister a remote node. Does NOT delete its ingested data."""
+    with write_db() as db:
+        deleted = db.execute(
+            'DELETE FROM remote_nodes WHERE node_id = ?', (node_id,),
+        ).rowcount
+    if not deleted:
+        return JSONResponse({'error': 'node not found'}, 404)
+    return {'deleted': node_id}
+
+
+@app.post("/api/nodes/{node_id}/rotate-key")
+def api_rotate_node_key(node_id: str):
+    """Rotate the ingest key for a node. Returns a new one-time key."""
+    raw_key = secrets.token_urlsafe(32)
+    key_hash = _hash_ingest_key(raw_key)
+    with write_db() as db:
+        updated = db.execute(
+            'UPDATE remote_nodes SET ingest_key_hash = ? WHERE node_id = ?',
+            (key_hash, node_id),
+        ).rowcount
+    if not updated:
+        return JSONResponse({'error': 'node not found'}, 404)
+    return {
+        'node_id': node_id,
+        'ingest_key': raw_key,
+        'message': 'Save this key — it cannot be retrieved again.',
+    }
 
 
 # ─── Admin: backup + retention ────────────────────────────────────────────────
@@ -2004,8 +2380,8 @@ def api_backup():
         size = dest.stat().st_size
         return {'ok': True, 'path': str(dest), 'size_bytes': size}
     except Exception as e:
-        logger.error("Backup failed: %s", e)
-        return JSONResponse({'error': str(e)}, status_code=500)
+        logger.exception("Backup failed")
+        return JSONResponse({'error': 'backup failed', 'detail': 'check server logs'}, status_code=500)
 
 
 @app.delete("/api/admin/retention")

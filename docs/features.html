@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Dashboard — Feature Reference</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0a;--surface:rgba(255,255,255,.04);--border:rgba(255,255,255,.07);
+  --text:#fff;--text-dim:rgba(255,255,255,.55);--text-muted:rgba(255,255,255,.3);
+  --accent:#34d399;--accent-dim:rgba(52,211,153,.15);
+}
+body{
+  font-family:'Pretendard Variable',system-ui,sans-serif;
+  background:var(--bg);color:var(--text);
+  line-height:1.6;font-feature-settings:'ss01','tnum';
+  padding:0 16px 80px;
+}
+.container{max-width:1100px;margin:0 auto}
+header{text-align:center;padding:60px 0 40px}
+header h1{font-size:32px;font-weight:800;letter-spacing:-.02em}
+header h1 span{color:var(--accent)}
+header p{color:var(--text-muted);font-size:14px;margin-top:8px}
+.meta{display:flex;gap:16px;justify-content:center;margin-top:20px;flex-wrap:wrap}
+.meta-item{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:8px 16px;font-size:13px;color:var(--text-dim);
+}
+.meta-item strong{color:var(--accent);font-weight:700}
+nav.toc{
+  background:var(--surface);border:1px solid var(--border);border-radius:16px;
+  padding:24px 32px;margin:40px 0;
+}
+nav.toc h2{font-size:14px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+nav.toc ul{list-style:none;columns:2;gap:24px}
+nav.toc li{break-inside:avoid;margin-bottom:6px}
+nav.toc a{color:var(--text-dim);text-decoration:none;font-size:13px;transition:color .2s}
+nav.toc a:hover{color:var(--accent)}
+nav.toc a .num{color:var(--accent);font-weight:700;margin-right:6px;font-size:11px}
+
+section{margin-top:48px}
+section h2{
+  font-size:20px;font-weight:800;margin-bottom:4px;
+  display:flex;align-items:center;gap:10px;
+}
+section h2 .badge{
+  font-size:11px;font-weight:700;padding:2px 8px;border-radius:8px;
+  background:var(--accent-dim);color:var(--accent);
+}
+section>p{color:var(--text-muted);font-size:13px;margin-bottom:16px}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  padding:16px 20px;transition:border-color .3s;
+}
+.card:hover{border-color:rgba(52,211,153,.25)}
+.card h3{font-size:14px;font-weight:700;color:rgba(255,255,255,.85);margin-bottom:4px}
+.card p{font-size:12px;color:var(--text-dim);line-height:1.5}
+.card .tag{
+  display:inline-block;font-size:10px;padding:1px 6px;border-radius:6px;
+  background:rgba(52,211,153,.1);color:var(--accent);font-weight:600;margin-top:8px;
+}
+
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);padding:8px 12px;border-bottom:1px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.03);color:var(--text-dim)}
+td:first-child{color:rgba(255,255,255,.75);font-weight:600;white-space:nowrap}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+.stat-row{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.stat{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:12px 20px;text-align:center;flex:1;min-width:120px;
+}
+.stat .val{font-size:24px;font-weight:800;color:var(--accent)}
+.stat .label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+
+.arch{
+  background:rgba(52,211,153,.04);border:1px solid rgba(52,211,153,.15);
+  border-radius:14px;padding:20px 24px;margin:16px 0;
+  font-family:'Pretendard Variable',monospace;font-size:12px;color:var(--text-dim);
+  white-space:pre;overflow-x:auto;line-height:1.8;
+}
+
+footer{text-align:center;margin-top:60px;padding:24px;color:var(--text-muted);font-size:11px}
+footer a{color:var(--accent);text-decoration:none}
+
+@media(max-width:640px){
+  nav.toc ul{columns:1}
+  .grid{grid-template-columns:1fr}
+  header h1{font-size:24px}
+  .stat-row{flex-direction:column}
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1><span>Claude</span> Dashboard</h1>
+  <p>Claude Code Usage Dashboard — Feature Reference</p>
+  <div class="meta">
+    <div class="meta-item"><strong>58</strong> API Routes</div>
+    <div class="meta-item"><strong>174</strong> Tests</div>
+    <div class="meta-item"><strong>14</strong> Feature Categories</div>
+    <div class="meta-item"><strong>v13</strong> Schema</div>
+  </div>
+</header>
+
+<nav class="toc">
+  <h2>Table of Contents</h2>
+  <ul>
+    <li><a href="#realtime"><span class="num">01</span> Real-time Monitoring</a></li>
+    <li><a href="#cost"><span class="num">02</span> Cost Analysis</a></li>
+    <li><a href="#sessions"><span class="num">03</span> Session Management</a></li>
+    <li><a href="#conversation"><span class="num">04</span> Conversation Viewer</a></li>
+    <li><a href="#projects"><span class="num">05</span> Project Analysis</a></li>
+    <li><a href="#subagents"><span class="num">06</span> Subagent Analysis</a></li>
+    <li><a href="#timeline"><span class="num">07</span> Timeline (Gantt)</a></li>
+    <li><a href="#budget"><span class="num">08</span> Budget Management</a></li>
+    <li><a href="#multiserver"><span class="num">09</span> Multi-Server Collection</a></li>
+    <li><a href="#claudeai"><span class="num">10</span> claude.ai Archive</a></li>
+    <li><a href="#auth"><span class="num">11</span> Authentication &amp; Security</a></li>
+    <li><a href="#admin"><span class="num">12</span> Administration</a></li>
+    <li><a href="#uiux"><span class="num">13</span> UI / UX</a></li>
+    <li><a href="#infra"><span class="num">14</span> Developer Infrastructure</a></li>
+  </ul>
+</nav>
+
+<!-- ═══ 01 ═══ -->
+<section id="realtime">
+  <h2><span class="badge">01</span> Real-time Monitoring</h2>
+  <p>JSONL file changes are detected within seconds and pushed to all connected browsers.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>WebSocket Live Update</h3>
+      <p>watchdog (inotify) + 30s safety poll detects JSONL changes. Batched via 800ms debounce, pushed to all WS clients.</p>
+      <span class="tag">watcher.py + app.js</span>
+    </div>
+    <div class="card">
+      <h3>4-Phase Project Status</h3>
+      <p>Waiting for Input (amber) / Permission Prompt (amber) / Tool Running (cyan) / Agent Working (blue). Auto-detected from message type + 15s timeout.</p>
+      <span class="tag">state.idleProjects</span>
+    </div>
+    <div class="card">
+      <h3>Audio Chime Notification</h3>
+      <p>Web Audio API plays C5-G5 two-note chime when a project enters idle state. Configurable on/off per user.</p>
+      <span class="tag">Web Audio API</span>
+    </div>
+    <div class="card">
+      <h3>Connection Status</h3>
+      <p>WS connected/disconnected indicator. Auto-reconnect with exponential backoff. 15s persistent banner on sustained disconnect.</p>
+      <span class="tag">ConnectionManager</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 02 ═══ -->
+<section id="cost">
+  <h2><span class="badge">02</span> Cost Analysis</h2>
+  <p>11 cost-related metrics and visualizations. All costs stored as INTEGER micro-dollars (zero float drift).</p>
+  <div class="grid">
+    <div class="card"><h3>Live Cost Header</h3><p>Today + all-time cost displayed in nav bar, updated on every WS batch.</p></div>
+    <div class="card"><h3>Period Comparison</h3><p>Day/week/month usage with delta vs previous period (% change).</p></div>
+    <div class="card"><h3>Hourly Token Chart</h3><p>Input/output/cache tokens over 24h, 7d, or 30d. Line chart with fill.</p></div>
+    <div class="card"><h3>Daily Cost Bar Chart</h3><p>Last 30 days of daily spend. Emerald bars.</p></div>
+    <div class="card"><h3>Model Cost Distribution</h3><p>Doughnut chart showing cost per model (Opus/Sonnet/Haiku).</p></div>
+    <div class="card"><h3>Cache Efficiency</h3><p>Input/creation/read/output token ratio. Doughnut.</p></div>
+    <div class="card"><h3>Model Cache Hit Rate</h3><p>Per-model cache_read/(input+cache_read) horizontal bar.</p></div>
+    <div class="card"><h3>Stop Reason Distribution</h3><p>end_turn/tool_use/max_tokens across all sessions.</p></div>
+    <div class="card"><h3>$/hr Efficiency</h3><p>Per-session cost efficiency based on turn_duration_ms.</p></div>
+    <div class="card"><h3>EOM Forecast</h3><p>Weekday/weekend-weighted linear projection to month end + MTD.</p></div>
+    <div class="card"><h3>Budget Burnout</h3><p>At current pace, seconds until daily/weekly budget exhausted.</p></div>
+  </div>
+</section>
+
+<!-- ═══ 03 ═══ -->
+<section id="sessions">
+  <h2><span class="badge">03</span> Session Management</h2>
+  <p>Full CRUD for Claude Code sessions with advanced filtering, bulk operations, and export.</p>
+  <table>
+    <tr><td>Paginated List</td><td>25/page, 8-column sort, total count</td></tr>
+    <tr><td>Advanced Filters</td><td>Date range, cost range, model, project, tag, node</td></tr>
+    <tr><td>FTS5 Search</td><td>Full-text search on message content_preview</td></tr>
+    <tr><td>Pin</td><td>Star important sessions, pin-only filter</td></tr>
+    <tr><td>Tags</td><td>Comma-separated custom tags, filter by tag</td></tr>
+    <tr><td>Bulk Operations</td><td>Multi-select + batch pin/tag/delete (parallel Promise.all)</td></tr>
+    <tr><td>Filter Presets</td><td>Save/apply/delete named filter combinations</td></tr>
+    <tr><td>CSV Export</td><td>23 columns, streaming response (memory-safe)</td></tr>
+    <tr><td>JSON Export</td><td>Clipboard copy</td></tr>
+    <tr><td>Safe Delete</td><td>Type-to-confirm modal (exact name match)</td></tr>
+  </table>
+</section>
+
+<!-- ═══ 04 ═══ -->
+<section id="conversation">
+  <h2><span class="badge">04</span> Conversation Viewer</h2>
+  <p>Rich message viewer with search, navigation, and real-time tail.</p>
+  <table>
+    <tr><td>Message Rendering</td><td>assistant/user/system, tool_use/tool_result collapse/expand</td></tr>
+    <tr><td>Inline Search</td><td>Keyword highlight + prev/next navigation within conversation</td></tr>
+    <tr><td>Stats Bar</td><td>Message count, tokens, cost, duration, $/hr</td></tr>
+    <tr><td>Time Gaps</td><td>30min+ inactivity gaps visualized as dividers</td></tr>
+    <tr><td>Keyboard Nav</td><td>Arrow keys, j/k vim bindings for message focus</td></tr>
+    <tr><td>Markdown Export</td><td>Full conversation as .md file download</td></tr>
+    <tr><td>Clipboard Copy</td><td>Markdown-formatted copy</td></tr>
+    <tr><td>WS Live Tail</td><td>New messages auto-appended to open conversation</td></tr>
+    <tr><td>Lazy Loading</td><td>Progressive "load more" pagination</td></tr>
+    <tr><td>Subagent Chain</td><td>Dispatch tree visualization (up to depth 5)</td></tr>
+  </table>
+</section>
+
+<!-- ═══ 05 ═══ -->
+<section id="projects">
+  <h2><span class="badge">05</span> Project Analysis</h2>
+  <p>Project-level aggregation with drill-down into sessions and messages.</p>
+  <div class="grid">
+    <div class="card"><h3>Project List</h3><p>Session/subagent count, total cost, last activity, tags. Sort/filter/paginate.</p></div>
+    <div class="card"><h3>TOP 5 Widget</h3><p>Active-first + cost-ranked. Real-time status badge. Keyboard accessible.</p></div>
+    <div class="card"><h3>Preview Drawer</h3><p>Last message preview in slide panel from TOP 5.</p></div>
+    <div class="card"><h3>Detail Modal</h3><p>3 tabs: Stats / Session List / Full Conversation. Daily cost chart.</p></div>
+  </div>
+</section>
+
+<!-- ═══ 06 ═══ -->
+<section id="subagents">
+  <h2><span class="badge">06</span> Subagent Analysis</h2>
+  <p>7 visualization sections dedicated to subagent behavior analysis.</p>
+  <table>
+    <tr><td>By Type</td><td>Session count, cost, avg/max duration per agent_type</td></tr>
+    <tr><td>By Stop Reason</td><td>Distribution of how subagents terminated</td></tr>
+    <tr><td>Cost TOP 10</td><td>Most expensive subagent sessions</td></tr>
+    <tr><td>Duration TOP 10</td><td>Longest-running subagent sessions</td></tr>
+    <tr><td>Most Spawned Parents</td><td>Parent sessions that created the most subagents</td></tr>
+    <tr><td>Heatmap</td><td>agent_type x project 2D matrix</td></tr>
+    <tr><td>Success Matrix</td><td>agent_type x stop_reason cross-table</td></tr>
+  </table>
+</section>
+
+<!-- ═══ 07 ═══ -->
+<section id="timeline">
+  <h2><span class="badge">07</span> Timeline (Gantt)</h2>
+  <p>15 timeline-related features for understanding work patterns over time.</p>
+  <div class="grid">
+    <div class="card"><h3>Gantt Chart</h3><p>Project x time horizontal bars. Model colors (Opus=purple, Sonnet=green, Haiku=cyan). Cost intensity alpha.</p></div>
+    <div class="card"><h3>Cumulative Cost Overlay</h3><p>Dashed line chart showing cost accumulation over the Gantt period.</p></div>
+    <div class="card"><h3>Gap Visualization</h3><p>30min+ inactivity between sessions shown as semi-transparent bars.</p></div>
+    <div class="card"><h3>Concurrent Work Detection</h3><p>Cross-project overlapping time ranges highlighted in amber.</p></div>
+    <div class="card"><h3>Zoom / Pan</h3><p>Ctrl+wheel zoom, drag range select, pinch zoom. Reset button.</p></div>
+    <div class="card"><h3>Project Collapse</h3><p>Toggle visibility per project in the Gantt chart.</p></div>
+    <div class="card"><h3>Day x Hour Heatmap</h3><p>7x24 matrix of message activity over 90 days. Click cells to drill down.</p></div>
+    <div class="card"><h3>Heatmap Drill-Down</h3><p>Click a cell to see last 4 weeks of that DOW+hour: projects, cost, messages.</p></div>
+    <div class="card"><h3>Hourly Stacked Bar</h3><p>24-slot chart showing per-project cost/messages/tokens. Metric toggle.</p></div>
+    <div class="card"><h3>Hourly Accordion</h3><p>Expandable per-hour detail in daily report: projects, sessions, tokens.</p></div>
+    <div class="card"><h3>Efficiency Table</h3><p>Project-level cost, $/hr, active ratio with progress bar.</p></div>
+    <div class="card"><h3>Daily Report</h3><p>Date picker: sessions, projects, cost, duration summary.</p></div>
+    <div class="card"><h3>Weekly Trend</h3><p>This week vs last week cost comparison bar chart.</p></div>
+    <div class="card"><h3>Node Filter</h3><p>Dropdown to filter Gantt by local/remote node.</p></div>
+    <div class="card"><h3>Range Selection</h3><p>Today / 7d / 14d / 30d presets + custom date inputs.</p></div>
+  </div>
+</section>
+
+<!-- ═══ 08 ═══ -->
+<section id="budget">
+  <h2><span class="badge">08</span> Budget Management</h2>
+  <table>
+    <tr><td>Plan Auto-Detect</td><td>Reads rateLimitTier from ~/.claude/.credentials.json (local, no API)</td></tr>
+    <tr><td>Daily/Weekly Budget</td><td>Custom limits + presets (Pro, Max 5x, Max 20x)</td></tr>
+    <tr><td>Progress Bar</td><td>Usage % with color gradient (green → yellow → orange → red)</td></tr>
+    <tr><td>Countdown Timer</td><td>Live seconds-until-reset countdown</td></tr>
+    <tr><td>Timezone Config</td><td>IANA timezone + reset day/hour customization</td></tr>
+  </table>
+</section>
+
+<!-- ═══ 09 ═══ -->
+<section id="multiserver">
+  <h2><span class="badge">09</span> Multi-Server Collection</h2>
+  <p>Collect Claude Code session data from remote servers via HTTP push.</p>
+  <div class="arch">[Remote Server]                         [Dashboard Server]
+collector.py                            POST /api/ingest
+  ~/.claude/projects/**/*.jsonl           X-Ingest-Key auth
+  watchdog + 5s poll                      parser.process_record(source_node)
+  state file tracking                     DB write + WS broadcast
+  INGEST_KEY env var                      sessions.source_node = node_id</div>
+  <table>
+    <tr><td>Node Registration</td><td>Admin UI: + Add Node button, one-time ingest key, collector command</td></tr>
+    <tr><td>Collector Agent</td><td>stdlib-only Python script, no pip install needed</td></tr>
+    <tr><td>Collector Download</td><td>GET /api/collector.py from dashboard</td></tr>
+    <tr><td>Key Rotation</td><td>Rotate ingest key without re-registering</td></tr>
+    <tr><td>Node Filter</td><td>Filter sessions/timeline by source_node</td></tr>
+    <tr><td>Node Badge</td><td>Cyan badge + left border on remote sessions</td></tr>
+    <tr><td>Cross-Platform</td><td>Windows path auto-parsing (PureWindowsPath)</td></tr>
+  </table>
+</section>
+
+<!-- ═══ 10 ═══ -->
+<section id="claudeai">
+  <h2><span class="badge">10</span> claude.ai Archive</h2>
+  <table>
+    <tr><td>Import</td><td>import_claude_ai.py --zip CLI (conversations.json)</td></tr>
+    <tr><td>Conversation List</td><td>Sort, search, paginate</td></tr>
+    <tr><td>Viewer</td><td>text/thinking/tool_use/tool_result block rendering</td></tr>
+    <tr><td>Source Toggle</td><td>claude-code / claude-ai switch in conversation view</td></tr>
+    <tr><td>Isolation</td><td>Independent tables, never JOIN with sessions/messages</td></tr>
+  </table>
+</section>
+
+<!-- ═══ 11 ═══ -->
+<section id="auth">
+  <h2><span class="badge">11</span> Authentication &amp; Security</h2>
+  <table>
+    <tr><td>Login Page</td><td>Dedicated /login page with password form</td></tr>
+    <tr><td>Cookie Session</td><td>HMAC-signed dash_session cookie (httpOnly, SameSite=Lax)</td></tr>
+    <tr><td>Token Expiry</td><td>Embedded timestamp in signed token (7-day TTL)</td></tr>
+    <tr><td>Logout</td><td>Cookie deletion + nav button</td></tr>
+    <tr><td>Rate Limit</td><td>5 attempts/min/IP on login</td></tr>
+    <tr><td>Basic Auth Compat</td><td>Header-based auth for curl/collector</td></tr>
+    <tr><td>CORS Restriction</td><td>Environment-based allowed origins</td></tr>
+    <tr><td>SQL Injection</td><td>100% parameterized. ORDER BY whitelist. LIKE ESCAPE</td></tr>
+    <tr><td>XSS Prevention</td><td>h() helper, esc() encoding, innerHTML forbidden</td></tr>
+    <tr><td>Delete Confirmation</td><td>Type-exact-name modal for all destructive actions</td></tr>
+    <tr><td>CDN Integrity</td><td>SRI hashes on all external scripts</td></tr>
+  </table>
+</section>
+
+<!-- ═══ 12 ═══ -->
+<section id="admin">
+  <h2><span class="badge">12</span> Administration</h2>
+  <table>
+    <tr><td>DB Backup</td><td>One-click + auto 10-file rotation</td></tr>
+    <tr><td>Data Retention</td><td>Delete sessions older than N days (preview + confirm)</td></tr>
+    <tr><td>DB Size</td><td>Live display in admin view</td></tr>
+    <tr><td>Prometheus Metrics</td><td>7 metrics: requests, latency, WS, scan, messages, retries, DB size</td></tr>
+    <tr><td>Grafana Dashboard</td><td>4-panel health view (JSON import)</td></tr>
+    <tr><td>Alert Rules</td><td>8 Prometheus alerting rules</td></tr>
+    <tr><td>DR Scripts</td><td>backup.sh / restore.sh / rebuild.sh</td></tr>
+    <tr><td>systemd Timer</td><td>Weekly retention auto-execution</td></tr>
+    <tr><td>WAL Checkpoint</td><td>Automatic TRUNCATE on shutdown</td></tr>
+  </table>
+</section>
+
+<!-- ═══ 13 ═══ -->
+<section id="uiux">
+  <h2><span class="badge">13</span> UI / UX</h2>
+  <div class="grid">
+    <div class="card"><h3>Dark / Light Theme</h3><p>Toggle with WCAG AA 4.5:1 contrast on all text. body.theme-light class.</p></div>
+    <div class="card"><h3>Responsive</h3><p>3-tier breakpoints: 640px, 480px, 360px. Mobile-friendly tables.</p></div>
+    <div class="card"><h3>Keyboard Shortcuts</h3><p>g+o/b/s/c view switch, Cmd+K command palette, vim-style j/k.</p></div>
+    <div class="card"><h3>Command Palette</h3><p>Fuzzy search across views, projects, settings. 30s TTL cache.</p></div>
+    <div class="card"><h3>Toast Notifications</h3><p>Success/warning/error with undo support. 3-strike persistent banner.</p></div>
+    <div class="card"><h3>Animations</h3><p>fadeInUp + blur(3px) + stagger. Spring transitions. Respects prefers-reduced-motion.</p></div>
+    <div class="card"><h3>Accessibility</h3><p>Focus traps on modals, tabindex + role on interactive elements, aria-live regions.</p></div>
+    <div class="card"><h3>Design System</h3><p>Supanova: #0a0a0a bg, Emerald #34d399 accent, double-bezel cards, Pretendard font, Iconify Solar icons.</p></div>
+  </div>
+</section>
+
+<!-- ═══ 14 ═══ -->
+<section id="infra">
+  <h2><span class="badge">14</span> Developer Infrastructure</h2>
+  <div class="stat-row">
+    <div class="stat"><div class="val">58</div><div class="label">API Routes</div></div>
+    <div class="stat"><div class="val">174</div><div class="label">Tests</div></div>
+    <div class="stat"><div class="val">186KB</div><div class="label">Bundle</div></div>
+    <div class="stat"><div class="val">28KB</div><div class="label">CSS</div></div>
+    <div class="stat"><div class="val">65ms</div><div class="label">Build Time</div></div>
+    <div class="stat"><div class="val">6</div><div class="label">ADRs</div></div>
+  </div>
+  <table>
+    <tr><td>esbuild Bundle</td><td>7 JS files concat + minify into one bundle.js with sourcemap</td></tr>
+    <tr><td>Tailwind Production</td><td>CLI build: only used utilities (28KB vs 80KB CDN)</td></tr>
+    <tr><td>Watch Mode</td><td>npm run dev: auto-rebuild on file change</td></tr>
+    <tr><td>CI/CD</td><td>GitHub Actions: ruff + bandit + pip-audit + pytest + esbuild</td></tr>
+    <tr><td>174 Tests</td><td>parser, DB, API, contract, e2e, auth, ingest, collector, WebSocket</td></tr>
+    <tr><td>6 ADRs</td><td>SQLite, micro-dollars, cookie auth, esbuild, collector, event bus</td></tr>
+    <tr><td>8 Quality Gates</td><td>Tests, build, lint, security, deps, migration, frontend, API</td></tr>
+    <tr><td>SRI Hashes</td><td>Subresource integrity on all CDN scripts</td></tr>
+    <tr><td>Event Bus</td><td>CustomEvent pub/sub: bus.emit/on for decoupled modules</td></tr>
+    <tr><td>State Accessors</td><td>getChart/setChart/destroyChart, setPage/setAdvFilters</td></tr>
+    <tr><td>data-action Delegation</td><td>59 data-action handlers via delegated event (11 legacy onclick remaining)</td></tr>
+  </table>
+</section>
+
+<footer>
+  Claude Dashboard Feature Reference &mdash; Generated 2026-04-14 &mdash; <a href="/">Open Dashboard</a>
+</footer>
+
+</div>
+</body>
+</html>

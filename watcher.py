@@ -69,7 +69,7 @@ POLL_INTERVAL_FAST = 3.0    # fallback polling when watchdog unavailable
 POLL_INTERVAL_SLOW = 30.0   # safety-net polling while watchdog is active
 OBSERVER_HEALTH_INTERVAL = 60.0  # check observer liveness every 60s
 MAX_RETRIES = 3
-SCAN_BATCH = 8              # parallel file-parse workers during initial scan
+SCAN_BATCH = 4              # parallel file-parse workers during initial scan
 
 
 class _JsonlEventHandler(FileSystemEventHandler if _WATCHDOG_OK else object):
@@ -118,6 +118,7 @@ class ClaudeFileWatcher:
         self._file_mtimes: dict[str, float] = {}
         self._retry_queue: dict[str, int] = {}
         self._state_lock = threading.Lock()     # protects _file_mtimes + _retry_queue
+        self._stop_event = threading.Event()    # prevents new _process_file after stop()
         self._task: Optional[asyncio.Task] = None
         self._observer: Optional["Observer"] = None  # type: ignore[name-defined]
         self._event_queue: Optional[asyncio.Queue] = None
@@ -127,6 +128,7 @@ class ClaudeFileWatcher:
         self._task = asyncio.create_task(self._lifecycle())
 
     def stop(self):
+        self._stop_event.set()
         if self._task and not self._task.done():
             self._task.cancel()
         if self._observer is not None:
@@ -172,7 +174,7 @@ class ClaudeFileWatcher:
         total = len(files)
         logger.info("Found %d JSONL files to scan", total)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         for i in range(0, total, SCAN_BATCH):
             batch = files[i:i + SCAN_BATCH]
@@ -212,7 +214,7 @@ class ClaudeFileWatcher:
 
     async def _event_loop(self):
         """Primary driver: drain watchdog events, periodic safety-net poll."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         poll_interval = POLL_INTERVAL_SLOW if self._observer else POLL_INTERVAL_FAST
         last_health_check = loop.time()
         logger.info("Watcher event loop: poll every %.0fs, watchdog=%s",
@@ -305,6 +307,8 @@ class ClaudeFileWatcher:
           2. Parse file (pure I/O, no lock)
           3. Write to DB (serialised via _write_lock inside write_db())
         """
+        if self._stop_event.is_set():
+            return None
         try:
             with read_db() as rdb:
                 row = rdb.execute(

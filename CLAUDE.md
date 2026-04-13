@@ -1,170 +1,146 @@
-# CLAUDE.md — 코드 수정 시 지켜야 할 불변식
+# CLAUDE.md — 코드 수정 불변식
 
-이 문서는 **에이전트가 이 코드베이스를 수정할 때 지켜야 할 규칙**만 담는다.
-사용자용 설명·API 레퍼런스·DB 스키마는 `README.md`, `docs/API.md`, `docs/SCHEMA.md` 를 본다.
+에이전트가 이 코드베이스를 수정할 때 지켜야 할 규칙.
 
-## 파일 라인맵
+- 사용자 문서: `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/SCHEMA.md`
+- 아키텍처 결정: `docs/adr/` (6건)
+- **품질 게이트**: `docs/QUALITY-GATES.md` — 머지 전 필수 통과 기준
 
-```
-main.py             2220줄  FastAPI 49 routes + /metrics + WS (per-conn lock) + summarize_preview + _iso_to_epoch + /api/timeline + /api/timeline/heatmap
-database.py          755줄  WAL + thread-local + v1→v12 마이그레이션 + FTS5 × 2 + auto_vacuum=INCREMENTAL
-parser.py            570줄  JSONL 파싱 (assistant+user+system), cwd 식별 (최초 고정), subagent split, turn_duration 누적
-watcher.py           371줄  watchdog (health check + auto-restart) + safety poll + WatcherMetrics 의존성 주입
-import_claude_ai.py  282줄  일회성 CLI — claude.ai export 인포터 (update detection)
-backup.sh · restore.sh · rebuild.sh           DR 스크립트 (백업/복원/재빌드)
-claude-dashboard-retention.{service,timer}    주간 retention 타이머
-tests/              3098줄  131 pytest (parser 37 · database 10 · watcher 9 · api 33 · contract 31 · backup 3 · e2e 8)
+## 파일 구조
 
-# Frontend — 9 파일 모듈화
-static/index.html    910줄  Tailwind 쉘 + drawer preview 패널 + idle notify 설정 + Charts Row 3 + timeline
-static/app.js       2970줄  core: state/ws(safeFetch dedup+재시도)/routing/utils/modals + h() + 4단계 상태 감지 + Web Audio chime + 대화뷰어(인라인검색·통계바·갭표시·키보드내비·MD내보내기·WS실시간)
-static/sessions.js   547줄  sessions domain: load, filters, presets, bulk, mgmt, $/hr, 모바일 hide-sm, 키보드 내비게이션
-static/overview.js   345줄  hero/chips/forecast/top5 + slide drawer + active-first sort + 캐시 사실 표시 + 4단계 상태 뱃지
-static/plan.js       177줄  plan usage + settings modal (사용량 경고 팝업 제거됨)
-static/subagents.js  247줄  7개 섹션 전체 시각화 (유형별·종료사유·비용TOP10·소요TOP10·최다부모·히트맵·매트릭스)
-static/charts.js     148줄  theme-aware Chart.js (6 charts: usage, models, dailyCost, cache, stopReason, modelCache) + CB dash patterns
-static/timeline.js   520줄  타임라인 Gantt (모델색상·비용오버레이·갭·동시작업·줌팬·히트맵·효율·일간리포트·트렌드비교)
-static/app.css       410줄  스타일 + 라이트모드 전체 매핑 (WCAG AA 4.5:1) + 반응형 + reduced-motion + 타임라인
+| 파일 | 역할 |
+|------|------|
+| `main.py` | FastAPI 58 routes + WS + 쿠키 세션 인증 + /api/ingest |
+| `database.py` | SQLite WAL, write/read 분리, v0→v13 마이그레이션 |
+| `parser.py` | JSONL 파싱 (assistant/user/system), 비용 계산, source_node |
+| `watcher.py` | watchdog + safety poll, WatcherMetrics DI |
+| `collector.py` | 원격 수집 에이전트 (stdlib only) |
+| `build.js` | esbuild concat+minify + tailwindcss CLI |
+| `static/app.js` | core: state, bus, accessors, WS, routing, 대화뷰어 |
+| `static/sessions.js` | 세션 목록, 필터, 벌크, 노드 필터 |
+| `static/timeline.js` | Gantt, 히트맵, 시간별 분석, 트렌드 |
+| `static/charts.js` | Chart.js 6개 차트 + 테마 |
+| `static/overview.js` | 히어로 카드, TOP 5, 예측 |
+| `static/app.css` | 스타일 + 라이트모드 (WCAG AA 4.5:1) |
+| `tests/` | 174 pytest (11개 파일) |
 
-docs/API.md                  REST API + OpenAPI 스펙 링크 (/docs, /openapi.json)
-docs/alert-rules.yml         Prometheus alert rules (8 경보)
-docs/grafana-dashboard.json  Grafana 4-패널 헬스 뷰 (import 가능)
-.github/workflows/ci.yml     GitHub Actions (ruff + pytest + node --check)
-pyproject.toml               ruff + pytest 설정
-```
-
-## 실행·테스트 (수정 검증)
+## 실행·빌드·테스트
 
 ```bash
-./start.sh                                                           # 부트스트랩 + uvicorn
-./.venv/bin/python -m pytest tests/ -v                               # 131 tests in ~6s
-./.venv/bin/python import_claude_ai.py --zip <path>                  # claude.ai export 인포터
-./.venv/bin/python import_claude_ai.py --zip <path> --dry-run        # 파싱만 (DB 변경 없음)
+./start.sh                                    # .env 로드 + npm build + uvicorn
+npm run build                                 # bundle.js + tailwind.css
+./.venv/bin/python -m pytest tests/ -v        # 174 tests
 
-# DR
-./backup.sh                                                          # 수동 백업
-./restore.sh [--latest|<file>]                                       # 복원 (integrity_check 포함)
-./rebuild.sh                                                         # 스냅샷 → rm db → 자동 재빌드
+# 원격 수집
+curl -o collector.py http://dashboard:8765/api/collector.py
+INGEST_KEY=<key> python3 collector.py --url http://dashboard:8765 --node-id <id>
+```
+
+## 환경변수 (.env)
+
+```bash
+DASHBOARD_PASSWORD=           # 설정 시 로그인 필수. 미설정 시 인증 비활성화
+DASHBOARD_SECRET=             # 세션 서명 키. 미설정 시 재시작마다 세션 무효화
+DASHBOARD_SECURE=true         # HTTPS 배포 시 쿠키 Secure 플래그
+DASHBOARD_CORS_ORIGINS=       # 허용 오리진 (쉼표 구분). 미설정 시 same-origin만
+PORT=8765                     # 서버 포트
 ```
 
 ## 절대 깨면 안 되는 불변식
 
 ### uvicorn
-- **반드시** `--loop asyncio --http h11`. 다른 조합은 미지원이다.
+`--loop asyncio --http h11` 필수. 다른 조합 미지원.
 
 ### DB 쓰기·읽기 분리
-- 쓰기: `database.write_db()` — `threading.Lock` + `BEGIN IMMEDIATE` + auto-commit/rollback. 전 쓰기는 이 컨텍스트를 통과해야 한다.
-- 읽기: `database.read_db()` — **thread-local 커넥션 캐시**. WAL 덕분에 다중 리더가 동시 실행된다.
-- 백업은 반드시 `_write_lock` 획득 후 `sqlite3.backup()` (트랜잭션 중 복사 방지).
+- 쓰기: `write_db()` — `threading.Lock` + `BEGIN IMMEDIATE`
+- 읽기: `read_db()` — thread-local 캐시 (TTL 300s), WAL 다중 리더
+- 백업: `_write_lock` 획득 후 `sqlite3.backup()`
 
 ### 비용은 INTEGER micro-dollars
-- 저장 컬럼 `cost_micro` (1 USD = 1,000,000). float 누적 오차 차단.
-- SQL 읽기 시 `cost_micro * 1.0 / 1000000 AS cost_usd` 로 변환.
-- **float 로 누적하는 새 코드를 추가하지 말 것.**
+`cost_micro` (1 USD = 1,000,000). SQL 읽기 시 `cost_micro * 1.0 / 1000000 AS cost_usd`. **float 누적 금지.**
 
-### 프로젝트 식별은 cwd 가 정답 — 최초 값 고정
-- JSONL 레코드의 `cwd` 필드가 1차 소스. `Path(cwd).name` 이 display name (`project_name`), 원본이 `project_path`.
-- parser 는 cwd 우선, fallback 으로만 디렉터리 dash 인코딩 추정.
-- **세션의 `project_path`/`project_name` 은 최초 INSERT 시 결정되며 이후 변경되지 않는다.** 후속 레코드의 `cwd` 가 서브디렉터리·subagent 등으로 달라져도 무시. 빈 값 back-fill 만 허용.
-- 디렉터리명에서 프로젝트를 역산하면 `claude-dashboard` ↔ `dashboard` 같은 손실이 생긴다 — **하지 말 것.**
+### 프로젝트 식별 — cwd 최초 고정
+- `record.cwd` → `PureWindowsPath(cwd).name` (크로스 플랫폼)
+- **최초 INSERT 시 결정, 이후 변경 불가.** 빈 값 back-fill만 허용.
 
-### session.model 은 real model 일 때만 갱신
-- `parser.is_real_model(model)` 이 True 일 때만 `sessions.model` 을 업데이트한다.
-- `<synthetic>` 같은 메타 모델이 세션 주모델을 하이재킹하면 안 된다.
-- 가격표는 `parser.py:MODEL_PRICING`. 미지 모델은 family fallback (`opus`/`sonnet`/`haiku` substring) + 1 회성 WARNING.
+### session.model — real model만 갱신
+`parser.is_real_model()` True일 때만. `<synthetic>` 등 메타 모델 하이재킹 금지.
 
 ### Subagent 식별
-- `~/.claude/projects/*/subagents/agent-<hash>.jsonl` 파일은 **filename basename** 을 세션 키로 사용한다. 레코드 안의 `sessionId` (부모를 가리킴) 는 무시.
-- `.meta.json` sidecar 에서 `agentType` / `description` 로드.
-- `agent-acompact-*` prefix 는 sidecar 없이도 `agent_type='compact'` 자동 태깅 (v6).
-- 부모 링크 (v7): subagent 의 `meta.json.description` 을 부모 JSONL 의 `Agent` tool_use 블록과 매칭해 `parent_tool_use_id` 연결.
-- broadcast record 에 `is_subagent` 플래그 포함 → 프론트 4단계 상태 분기에 사용.
+- `subagents/agent-<hash>.jsonl` — filename이 세션 키 (레코드 `sessionId` 무시)
+- `agent-acompact-*` → `agent_type='compact'` 자동 태깅
+- 부모 링크: `meta.json.description` ↔ 부모 `Agent` tool_use 매칭
 
-### 프로젝트 상태 4단계 (`state.idleProjects`)
-- `end_turn` (부모): **입력 대기** (amber, chime) — 사용자 입력 필요.
-- `tool_use` (부모, 15초 무응답): **권한 승인 대기** (amber, chime) — 도구 권한 프롬프트 가능성.
-- `active_tool` (부모, 15초 이내): **도구 실행 중** (cyan) — 정상 실행, chime 없음.
-- `active_subagent` (subagent tool_use): **에이전트 작업 중** (blue) — subagent 활동, chime 없음.
-- subagent `end_turn` → 상태 해제 (부모가 결과 받아 계속 작업).
-- 새 메시지 도착 시 해당 프로젝트의 이전 상태 및 pending 타이머 해제.
-- chime 은 batch 전체 처리 후 아직 idle 상태인 프로젝트에만 재생.
+### 프로젝트 상태 4단계
+| 상태 | 조건 | 색상 | chime |
+|------|------|------|-------|
+| 입력 대기 | `end_turn` (부모) | amber | O |
+| 권한 대기 | `tool_use` (부모, 15s 무응답) | amber | O |
+| 도구 실행 | `tool_use` (부모, 15s 이내) | cyan | X |
+| 에이전트 작업 | subagent `tool_use` | blue | X |
 
-### stop_reason (v7) 은 sticky
-- parser 가 매 assistant 메시지의 `message.stop_reason` 을 `messages.stop_reason` 에 저장.
-- 세션의 `final_stop_reason` 은 **sticky update** — 빈 값은 기존 값을 덮어쓰지 않는다.
-
-### system 레코드 파싱 (v12)
-- `_process_system()` 이 `type: 'system'` 레코드의 `durationMs` 를 `sessions.turn_duration_ms` 에 **누적 합산**.
-- 프론트에서 `turn_duration_ms > 0 && cost > 0` 일 때 $/hr 효율성 표시.
+### stop_reason — sticky update
+빈 값은 기존 `final_stop_reason` 덮어쓰지 않음.
 
 ### 타임존
-- DB 의 모든 timestamp 는 **UTC**. 시계열 쿼리는 `plan_config.timezone_name` (IANA) 으로 변환한다.
-- `reset_hour` / `reset_weekday` 도 이 타임존 기준.
+DB는 **UTC**. 시계열 쿼리는 `plan_config.timezone_name` (IANA)으로 변환.
 
-### 플랜 감지
-- `~/.claude/.credentials.json` → `rateLimitTier` **로컬 읽기 전용**. API 호출 금지.
-- Anthropic rate limit 조회 API 는 비공개이다. 예산 추적은 전적으로 로컬 JSONL 기반 추정.
+### claude.ai export 격리
+`claude_ai_*` 테이블은 `sessions`/`messages` 와 **절대 JOIN/UNION 금지** — 비용 오염.
 
-## 마이그레이션 (`PRAGMA user_version` 기반)
+## 마이그레이션
 
-`SCHEMA_VERSION=12`. `init_db()` 가 시작 시 차분 적용 (v0→v12). 새 마이그레이션 추가 시:
+`SCHEMA_VERSION=13`. `init_db()`가 차분 적용. 각 단계는 `_commit_migration()`으로 원자적 커밋.
 
-1. `SCHEMA_VERSION` 을 bump.
-2. `v(N-1)_to_v(N)()` 함수를 `database.py` 에 추가.
-3. 기존 버전에서 한 번 통과하면 다시 실행되지 않도록 idempotent 하게 작성.
-4. 무거운 재계산/백필 (v5, v7 같은) 은 write_lock 안에서 단일 트랜잭션으로 수행.
+| 버전 | 내용 |
+|------|------|
+| v2 | 복합 인덱스 |
+| v3 | FTS5 + 트리거 |
+| v4 | cwd/model 치유 |
+| v5 | subagent 재분류 (878 파일, 91k 메시지) |
+| v6 | acompact 자동 태깅 |
+| v7 | stop_reason + parent_tool_use_id + 58k 백필 |
+| v8 | sessions.tags |
+| v9 | claude_ai 독립 테이블 + FTS5 |
+| v10 | parent_session_id 인덱스 (N² → N log N) |
+| v11 | claude_ai_messages.updated_at |
+| v12 | sessions.turn_duration_ms |
+| v13 | sessions.source_node + remote_nodes 테이블 |
 
-단계 요약:
-
-- v2 복합 인덱스 · v3 FTS5 + 트리거 + rebuild · v4 cwd/model 치유 · **v5 subagent 재분류 (878 파일, 91k 메시지 reassign)** · v6 acompact 자동 태깅 · **v7 stop_reason + parent_tool_use_id 컬럼 + 58k 메시지 백필 + 875 부모 링크** · v8 `sessions.tags` · **v9 claude_ai_conversations + claude_ai_messages + claude_ai_messages_fts (독립 테이블)** · **v10 parent_session_id 핫 패스 인덱스 (N² → N log N)** · **v11 claude_ai_messages.updated_at (update detection)** · **v12 sessions.turn_duration_ms (system 레코드 파싱)**
-
-전체 표는 `docs/SCHEMA.md` 참고.
-
-## claude.ai export 통합 (v9)
-
-별도 경로. `~/.claude/projects/` JSONL 과 완전히 분리되어 있다.
-
-- **원본**: claude.ai → Settings → Privacy → *Export data* 로 받는 `conversations.json` (토큰/모델/비용 **없음**)
-- **수집 경로**: `import_claude_ai.py` CLI → `claude_ai_*` 테이블 upsert (conversation uuid / message uuid 가 idempotent key)
-- **격리 원칙**: 기존 `sessions` / `messages` 집계 쿼리는 **절대로 claude_ai_* 를 JOIN/UNION 해서는 안 된다**. cost_micro·forecast·budget·burn-out 위젯이 오염된다. 읽기 라우트는 `/api/claude-ai/*` 전용.
-- **프런트 진입점**: 대화 뷰 좌측 상단 source 토글 (`claude-code` ↔ `claude-ai`). `state.convSource` + `localStorage` 로 지속.
-- **content block 렌더링**: 웹 UI 블록 (`text` / `thinking` / `tool_use` / `tool_result`) 은 Claude Code 의 블록과 shape 이 다르다. `renderClaudeAiContent(container, msg)` 가 DOM API 로 렌더 (`innerHTML` 금지 — 보안 훅이 막는다).
-
-## 관측성·미들웨어 순서
-
-- `/api/health`, `/metrics` 는 **인증 우회**.
-- 미들웨어 스택: **metrics (외부) → auth (내부) → route**. 순서를 뒤집으면 401 이 메트릭에서 누락된다.
-- `http_requests_total{method,path,status}` 은 **라우트 템플릿** 기반 (path param 을 그대로 쓰면 cardinality 폭발).
-- 새 WebSocket 연결이 추가되면 `dashboard_ws_connections` 게이지를 increment/decrement 할 것.
-- **WebSocket concurrent write 방지**: `ConnectionManager` 가 per-connection `asyncio.Lock` 을 관리. `broadcast()` 와 keepalive ping 모두 이 lock 을 통과해야 한다.
+새 마이그레이션: `SCHEMA_VERSION` bump → `_commit_migration()` 사용 → idempotent. 전체 표: `docs/SCHEMA.md`.
 
 ## 보안 체크리스트
 
-- **SQL**: 전 엔드포인트 파라미터화. `ORDER BY` 는 화이트리스트 (`_SESSIONS_SORT_MAP` 등). LIKE 는 ESCAPE 필수.
-- **입력 검증**: Pydantic + `model_validator`. 예산 저장 시 `daily ≤ weekly` 강제.
-- **이름 매칭 삭제**: 모든 destructive 프런트 액션 (`/api/sessions/{id}`, `/api/projects/{name}`, `/api/admin/retention`) 은 `openDeleteConfirm({target, message, onConfirm})` 을 거쳐 target 이름 정확 입력 후에만 confirm 버튼이 활성화된다. 새 destructive 라우트는 반드시 동일 패턴을 따라야 한다.
-- **XSS**:
-  - **새 코드 규칙**: `h(tag, attrs, children)` 헬퍼 사용 필수 (`app.js` 정의). `innerHTML` + 템플릿 리터럴 조합 금지.
-  - 기존 `innerHTML` 사이트는 `esc()` 를 반드시 통과시켜야 함. `esc()` 는 `&<>"'` 모두 escape.
-  - 델리트/핀/태그 버튼, 모달 confirm 입력, 검색 결과 등 **사용자 조작 가능 영역**은 이미 `h()` 또는 명시적 DOM API (`createElement` + `addEventListener`) 로 구성되어 있음. 새 기능 추가 시 이 패턴 준수.
-- **CSRF**: `allow_origins=["*"]` + Basic Auth 조합이 브라우저 credentialed cross-origin 차단 덕분에 현재 안전하다. `allow_origins` 를 좁힐 경우 **반드시** CSRF 토큰 또는 `Origin`/`Referer` 검사를 같이 추가할 것.
+- **SQL**: 전 파라미터화. `ORDER BY` 화이트리스트. LIKE에 ESCAPE.
+- **XSS**: `h()` 헬퍼 또는 DOM API. `innerHTML` + 템플릿 리터럴 금지. `esc()`로 `&<>"'` escape.
+- **인증**: 쿠키 세션 (`dash_session`, HMAC 서명, 만료 내장). rate limit 5회/분/IP.
+- **CSRF**: `SameSite=Lax`. CORS 변경 시 CSRF 토큰 필수.
+- **삭제**: `openDeleteConfirm()` — 이름 정확 입력 필수.
 
-## 프런트 수정 시
+## 빌드 시스템
 
-- 캐시버스팅: **파일명 기반** — `/static/app.vN.js` / `app.vN.css`. `index.html` 의 `.vN` 을 일괄 bump (현재 v=64). 서버의 `/static/{path:path}` 라우트가 정규식으로 `.vN` 을 strip 해 실제 파일을 서빙한다.
-- SPA 엔트리 HTML (`/`) 은 `Cache-Control: no-store` — 브라우저가 stale HTML 을 들고 stale 에셋을 참조하는 것을 막는다.
-- 정렬/필터 파라미터는 URL hash 에 반영되어야 한다 (`#/sessions?sort=cost&order=desc`).
-- WebSocket 이벤트는 `debouncedRefresh` 로 batch. 개별 refresh 로 돌리지 말 것.
-- 에러: `reportError(ctx, e)` (첫 실패 toast, 3회 연속 시 persistent 배너) / `reportSuccess(ctx)` 로 배너 해제.
-- 모든 모달은 focus trap 필수.
-- **라이트 테마**: `bg-[#0f0f0f]` 계열만 사용 (`bg-[#0a0a0a]` 사용 금지 — CSS 매핑 없음). 새 text-white/* 사용 시 `app.css` 라이트 매핑에 포함되어 있는지 확인.
+```bash
+npm run build    # concat → esbuild minify → bundle.js + tailwindcss → tailwind.css
+npm run dev      # watch 모드
+```
+- `index.html`은 `bundle.vN.js` + `tailwind.vN.css` 2개만 로드 (현재 v=75)
+- 서버가 `.vN` strip하여 실제 파일 서빙
+- 빌드 산출물은 git tracked — 배포 시 Node 불필요
 
-## 디자인 시스템 (Supanova)
+## 프런트 수정 규칙
 
-- 배경 `#0a0a0a` (never pure black), 액센트 Emerald `#34d399` (단일), 라이트 accent `#065f46`
-- 카드: 더블베젤 (`bg-white/5` + `ring-white/[0.07]` + inset shadow)
-- 네비: 플로팅 글래스 필 (`backdrop-blur-xl` + `rounded-full`)
-- 폰트: Pretendard + `break-keep-all` + `tabular-nums` + +25% 스케일
-- 아이콘: Iconify Solar (`solar:*-linear`)
-- 전환: `cubic-bezier(.16,1,.3,1)` (spring), 진입 `fadeInUp` + `blur(3px)` + 시차
-- 라이트모드: `body.theme-light` 토글, WCAG AA 4.5:1 전 텍스트 검증 완료, `text-white/25~35` 다크 전용 WCAG 보정은 `body:not(.theme-light)` 스코프
+- **캐시버스팅**: `index.html`의 `.vN` 일괄 bump
+- **이벤트**: `data-action="fnName"` + 중앙 위임. 새 버튼은 inline onclick 대신 `data-action` 사용
+- **상태 접근자**: `getChart`/`setChart`/`destroyChart`, `setPage`/`setAdvFilters` 등. `state.*` 직접 변경 지양
+- **이벤트 버스**: `bus.emit('refresh')` / `bus.on('refresh', fn)` — 모듈 간 직접 함수 호출 대신 사용
+- **WS 이벤트**: `debouncedRefresh`로 batch
+- **에러**: `reportError(ctx, e)` / `reportSuccess(ctx)`
+- **라이트 테마**: `bg-[#0f0f0f]` 사용 (`bg-[#0a0a0a]` 금지). 새 색상은 `app.css` 라이트 매핑 확인
+- **디자인**: Emerald `#34d399` 액센트, 더블베젤 카드, Pretendard 폰트, Iconify Solar, `cubic-bezier(.16,1,.3,1)` spring
+
+## 관측성
+
+- 미들웨어: **metrics → auth → route** (순서 필수)
+- `/api/health`, `/metrics` 인증 우회
+- `http_requests_total{method,path,status}` — 라우트 템플릿 기반
+- WS: `ConnectionManager` per-connection `asyncio.Lock`. broadcast + ping 모두 lock 경유

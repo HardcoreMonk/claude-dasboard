@@ -13,7 +13,7 @@ async function loadSubagentDetails() {
     _renderTopList('subagentTopCost', d.top_by_cost || [], 'cost');
     _renderTopList('subagentTopDuration', d.top_by_duration || [], 'duration');
     _renderTopParents(d.parents_with_most_subs || []);
-  } catch (e) { console.error('loadSubagentDetails:', e); }
+  } catch (e) { reportError('loadSubagentDetails', e); }
 }
 
 function _renderByType(d) {
@@ -189,7 +189,7 @@ async function loadSubagentSuccessMatrix() {
     html += '</tbody></table>';
     wrap.innerHTML = html;
   } catch (e) {
-    console.error('loadSubagentSuccessMatrix:', e);
+    reportError('loadSubagentSuccessMatrix', e);
     wrap.innerHTML = '<div class="text-center text-red-400/40 text-xs py-6">로딩 실패</div>';
   }
 }
@@ -241,7 +241,7 @@ async function loadSubagentHeatmap() {
     const totalEl = document.getElementById('subagentHeatmapTotal');
     if (totalEl) totalEl.textContent = `${fmtN(total)} subagents · ${fmt$(totalCost)} 누적`;
   } catch (e) {
-    console.error('loadSubagentHeatmap:', e);
+    reportError('loadSubagentHeatmap', e);
     wrap.innerHTML = '<div class="text-center text-red-400/40 text-xs py-6">로딩 실패</div>';
   }
 }

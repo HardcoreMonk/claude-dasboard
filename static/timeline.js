@@ -53,7 +53,10 @@ function _modelFamily(model) {
 async function loadTimeline() {
   const { dateFrom, dateTo } = _tlDates();
   const showSubs = document.getElementById('tlShowSubagents')?.checked || false;
-  const url = `/api/timeline?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&include_subagents=${showSubs}`;
+  const nodeVal = document.getElementById('tlNodeFilter')?.value || '';
+  let url = `/api/timeline?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&include_subagents=${showSubs}`;
+  if (nodeVal) url += '&node=' + encodeURIComponent(nodeVal);
+  _populateTlNodeFilter();
   try {
     const data = await safeFetch(url);
     _tlLastData = { data, dateFrom, dateTo };
@@ -61,10 +64,12 @@ async function loadTimeline() {
     _renderEfficiency(data);
     reportSuccess('loadTimeline');
   } catch (e) {
+    _tlLastData = null;
     reportError('loadTimeline', e);
   }
   _loadHeatmap();
   _loadTrend();
+  _loadHourlyStacked();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -154,7 +159,7 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
 
   const concurrentZones = _findConcurrentZones(sessions, tzOffsetMs, visibleProjects, projectMap);
 
-  if (state.charts.timeline) { state.charts.timeline.destroy(); state.charts.timeline = null; }
+  destroyChart('timeline');
 
   const tc = themeColors();
   const resetBtn = document.getElementById('tlResetZoom');
@@ -175,7 +180,7 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
     });
   }
 
-  state.charts.timeline = new Chart(canvas, {
+  setChart('timeline', new Chart(canvas, {
     data: { labels: visibleProjects, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
@@ -209,7 +214,8 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
             label: (ctx) => {
               const s = barMeta[ctx.dataIndex];
               if (!s || s._isGap) return '';
-              return ` ${fmtDurationSec(s.duration_seconds||0)} \u00b7 ${fmt$(s.cost_usd)} \u00b7 ${s.model?shortModel(s.model):'\u2014'}${s.is_subagent?' [sub]':''}`;
+              const node = s.source_node && s.source_node !== 'local' ? ` [${s.source_node}]` : '';
+              return ` ${fmtDurationSec(s.duration_seconds||0)} \u00b7 ${fmt$(s.cost_usd)} \u00b7 ${s.model?shortModel(s.model):'\u2014'}${s.is_subagent?' [sub]':''}${node}`;
             },
             afterLabel: (ctx) => { const s = barMeta[ctx.dataIndex]; return s && !s._isGap ? ` ${fmtTime(s.created_at)} ~ ${fmtTime(s.updated_at)}` : ''; },
           },
@@ -250,7 +256,7 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
         ctx.restore();
       },
     }],
-  });
+  }));
 
   _renderTimelineLegend(sessions, data.truncated, projects.length, collapsedCount, concurrentZones.length);
 }
@@ -275,6 +281,7 @@ function _handleHoverCard(evt, elements, barMeta) {
     '\uBE44\uC6A9: ' + fmt$(s.cost_usd) + ' \u00b7 \uBAA8\uB378: ' + (s.model ? shortModel(s.model) : '\u2014'),
   ].forEach(l => { const r = document.createElement('div'); r.textContent = l; details.appendChild(r); });
   if (s.is_subagent) { const sb = document.createElement('div'); sb.textContent = 'Subagent'; sb.className = 'text-blue-300/70'; details.appendChild(sb); }
+  if (s.source_node && s.source_node !== 'local') { const nd = document.createElement('div'); nd.textContent = '\uB178\uB4DC: ' + s.source_node; nd.className = 'text-cyan-300/70'; details.appendChild(nd); }
   const hint = document.createElement('div');
   hint.className = 'text-white/25 mt-1.5 text-[9px]';
   hint.textContent = '\uD074\uB9AD\uD558\uC5EC \uB300\uD654 \uC5F4\uAE30';
@@ -336,7 +343,7 @@ function _expandAll() {
 
 // ─── Empty state ─────────────────────────────────────────────────────────
 function _renderEmptyTimeline() {
-  if (state.charts.timeline) { state.charts.timeline.destroy(); state.charts.timeline = null; }
+  destroyChart('timeline');
   const wrap = document.getElementById('timelineChartWrap');
   wrap.style.height = '200px';
   document.getElementById('timelineLegend').textContent = '';
@@ -431,6 +438,11 @@ function _renderHeatmap(data, wrap) {
       if (count > 0) {
         inner.style.background = 'rgba(52,211,153,' + (0.1 + (count / maxCount) * 0.7).toFixed(2) + ')';
         inner.title = DOW_LABELS[dow] + ' ' + hr + '\uC2DC: ' + fmtN(count) + '\uAC74, ' + fmt$(cost);
+        inner.style.cursor = 'pointer';
+        inner.addEventListener('click', ((d, h) => () => _heatmapDrillDown(d, h))(dow, hr));
+        inner.setAttribute('tabindex', '0');
+        inner.setAttribute('role', 'button');
+        inner.addEventListener('keydown', ((d, h) => (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _heatmapDrillDown(d, h); } })(dow, hr));
       } else {
         inner.style.background = 'rgba(255,255,255,0.02)';
       }
@@ -520,8 +532,31 @@ function _renderEfficiency(data) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. DAILY REPORT
+// 4. DAILY REPORT  +  (A) HOURLY ACCORDION
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Shared project colour palette for stacked chart & accordion
+const _PROJ_PALETTE = [
+  'rgba(52,211,153,A)',  'rgba(167,139,250,A)', 'rgba(34,211,238,A)',
+  'rgba(251,191,36,A)',  'rgba(244,114,182,A)', 'rgba(96,165,250,A)',
+  'rgba(248,113,113,A)', 'rgba(163,230,53,A)',  'rgba(232,121,249,A)',
+  'rgba(45,212,191,A)',  'rgba(253,186,116,A)', 'rgba(129,140,248,A)',
+];
+function _projColor(idx, alpha) { return (_PROJ_PALETTE[idx % _PROJ_PALETTE.length]).replace('A', String(alpha ?? 0.6)); }
+let _hourlyCache = {};
+const _HOURLY_CACHE_MAX = 10;
+
+async function _fetchHourly(dateStr) {
+  if (_hourlyCache[dateStr]) return _hourlyCache[dateStr];
+  const d = await safeFetch('/api/timeline/hourly?date=' + encodeURIComponent(dateStr));
+  // LRU eviction: drop oldest entries when cache exceeds max
+  const keys = Object.keys(_hourlyCache);
+  while (keys.length >= _HOURLY_CACHE_MAX) {
+    delete _hourlyCache[keys.shift()];
+  }
+  _hourlyCache[dateStr] = d;
+  return d;
+}
 
 async function _loadDailyReport(dateStr) {
   const el = document.getElementById('tlDailyReport');
@@ -529,7 +564,10 @@ async function _loadDailyReport(dateStr) {
   el.textContent = '';
   const loading = document.createElement('div'); loading.className = 'text-center text-white/15 text-xs py-4 dots'; loading.textContent = '\uB85C\uB529 \uC911'; el.appendChild(loading);
   try {
-    const d = await safeFetch('/api/timeline?date_from=' + dateStr + '&date_to=' + dateStr);
+    const [d, hourlyData] = await Promise.all([
+      safeFetch('/api/timeline?date_from=' + dateStr + '&date_to=' + dateStr),
+      _fetchHourly(dateStr),
+    ]);
     const sessions = d.sessions || [];
     el.textContent = '';
     if (!sessions.length) {
@@ -564,14 +602,105 @@ async function _loadDailyReport(dateStr) {
       right.append(s1, s2, s3);
       row.append(left, right); el.appendChild(row);
     }
+    // ── (A) Hourly accordion ──
+    _renderHourlyAccordion(el, hourlyData);
   } catch (e) {
     el.textContent = '';
     const err = document.createElement('div'); err.className = 'text-center text-red-400/60 text-xs py-4'; err.textContent = '\uB9AC\uD3EC\uD2B8 \uB85C\uB4DC \uC2E4\uD328'; el.appendChild(err);
   }
 }
 
+function _renderHourlyAccordion(container, hourlyData) {
+  const hours = (hourlyData.hours || []).filter(h => h.message_count > 0);
+  if (!hours.length) return;
 
-// ═══════════════════════════════════════════════════════════════════════════
+  const section = document.createElement('div');
+  section.className = 'mt-4 border-t border-white/[0.05] pt-3';
+  const title = document.createElement('div');
+  title.className = 'text-[10px] font-bold text-white/30 uppercase tracking-widest mb-2';
+  title.textContent = '\uC2DC\uAC04\uBCC4 \uC0C1\uC138 (' + hours.length + '\uAC1C \uC2DC\uAC04\uB300)';
+  section.appendChild(title);
+
+  for (const slot of hours) {
+    const wrap = document.createElement('div');
+    wrap.className = 'border-b border-white/[0.03]';
+    const header = document.createElement('button');
+    header.className = 'w-full flex items-center justify-between py-2 px-1 text-[11px] hover:bg-white/[0.02] spring group';
+    const left = document.createElement('div');
+    left.className = 'flex items-center gap-2';
+    const arrow = document.createElement('span');
+    arrow.className = 'text-white/20 text-[9px] spring group-hover:text-white/40';
+    arrow.textContent = '\u25B6';
+    const hourLabel = document.createElement('span');
+    hourLabel.className = 'font-bold text-white/60 tabular-nums';
+    hourLabel.textContent = slot.hour + ':00';
+    const projCount = document.createElement('span');
+    projCount.className = 'text-white/25 text-[9px]';
+    const pNames = Object.keys(slot.projects);
+    projCount.textContent = pNames.length + '\uAC1C \uD504\uB85C\uC81D\uD2B8';
+    left.append(arrow, hourLabel, projCount);
+    const right = document.createElement('div');
+    right.className = 'flex items-center gap-3 text-white/40 tabular-nums';
+    const msgSpan = document.createElement('span'); msgSpan.textContent = fmtN(slot.message_count) + '\uAC74';
+    const costSpan = document.createElement('span'); costSpan.className = 'text-amber-400/70 font-bold'; costSpan.textContent = fmt$(slot.cost_usd);
+    right.append(msgSpan, costSpan);
+    header.append(left, right);
+
+    const detail = document.createElement('div');
+    detail.className = 'hidden pb-2 px-1';
+    header.addEventListener('click', () => {
+      const open = !detail.classList.contains('hidden');
+      detail.classList.toggle('hidden');
+      arrow.textContent = open ? '\u25B6' : '\u25BC';
+    });
+
+    for (const [pName, pData] of Object.entries(slot.projects)) {
+      const pRow = document.createElement('div');
+      pRow.className = 'flex items-center justify-between py-1 pl-5 text-[10px]';
+      const pLeft = document.createElement('span');
+      pLeft.className = 'text-white/50 truncate max-w-[150px]'; pLeft.textContent = pName; pLeft.title = pName;
+      const pRight = document.createElement('div');
+      pRight.className = 'flex items-center gap-3 text-white/35 tabular-nums';
+      const pm = document.createElement('span'); pm.textContent = fmtN(pData.session_count) + '\uC138\uC158';
+      const pc = document.createElement('span'); pc.className = 'text-amber-400/60'; pc.textContent = fmt$(pData.cost_usd);
+      const pt = document.createElement('span'); pt.className = 'text-white/25';
+      pt.textContent = fmtN((pData.input_tokens || 0) + (pData.output_tokens || 0)) + ' tok';
+      pRight.append(pm, pc, pt); pRow.append(pLeft, pRight); detail.appendChild(pRow);
+    }
+
+    if (slot.sessions.length) {
+      const sesTitle = document.createElement('div');
+      sesTitle.className = 'text-[9px] text-white/20 uppercase tracking-wider mt-1.5 mb-1 pl-5';
+      sesTitle.textContent = '\uD65C\uC131 \uC138\uC158';
+      detail.appendChild(sesTitle);
+      for (const ses of slot.sessions.slice(0, 10)) {
+        const sRow = document.createElement('div');
+        sRow.className = 'flex items-center justify-between py-0.5 pl-5 text-[10px] hover:bg-white/[0.02] spring cursor-pointer rounded';
+        sRow.addEventListener('click', () => openConversation(ses.session_id));
+        const sLeft = document.createElement('div');
+        sLeft.className = 'flex items-center gap-1.5 text-white/40 truncate';
+        const sProj = document.createElement('span'); sProj.className = 'truncate max-w-[100px]'; sProj.textContent = ses.project_name;
+        const sModel = document.createElement('span'); sModel.className = 'text-white/20 text-[9px]'; sModel.textContent = ses.model ? shortModel(ses.model) : '';
+        sLeft.append(sProj, sModel);
+        if (ses.is_subagent) { const sb = document.createElement('span'); sb.className = 'text-blue-300/50 text-[8px]'; sb.textContent = 'sub'; sLeft.appendChild(sb); }
+        const sRight = document.createElement('span');
+        sRight.className = 'text-amber-400/50 tabular-nums'; sRight.textContent = fmt$(ses.cost_usd);
+        sRow.append(sLeft, sRight); detail.appendChild(sRow);
+      }
+      if (slot.sessions.length > 10) {
+        const more = document.createElement('div');
+        more.className = 'text-[9px] text-white/15 pl-5 mt-0.5';
+        more.textContent = '+' + (slot.sessions.length - 10) + '\uAC1C \uC138\uC158 \uB354';
+        detail.appendChild(more);
+      }
+    }
+    wrap.append(header, detail); section.appendChild(wrap);
+  }
+  container.appendChild(section);
+}
+
+
+// ═════════════════════════��══════════════════════════════════���══════════════
 // 5. TREND COMPARISON (this week vs last week)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -595,12 +724,12 @@ function _renderTrendChart(thisWeekData, lastWeekData) {
   const thisData = aggregate(thisWeekData), lastData = aggregate(lastWeekData);
   const labels = ['\uC6D4', '\uD654', '\uC218', '\uBAA9', '\uAE08', '\uD1A0', '\uC77C'];
 
-  if (state.charts.trend) { state.charts.trend.destroy(); state.charts.trend = null; }
+  destroyChart('trend');
   const canvas = document.getElementById('chartTrend');
   if (!canvas) return;
   const tc = themeColors();
 
-  state.charts.trend = new Chart(canvas, {
+  setChart('trend', new Chart(canvas, {
     type: 'bar',
     data: { labels, datasets: [
       { label: '\uC774\uBC88 \uC8FC', data: thisData, backgroundColor: 'rgba(52,211,153,0.35)', borderColor: CC.emerald, borderWidth: 1, borderRadius: 3 },
@@ -614,7 +743,275 @@ function _renderTrendChart(thisWeekData, lastWeekData) {
       },
       scales: { x: { grid: grd(), ticks: tck() }, y: { grid: grd(), ticks: { ...tck(), callback: v => '$' + v.toFixed(2) } } },
     },
+  }));
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. (B) HOURLY STACKED BAR CHART
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _hourlyStackedChart = null;
+
+function cleanupTimelineCharts() {
+  if (_hourlyStackedChart) { _hourlyStackedChart.destroy(); _hourlyStackedChart = null; }
+}
+
+async function _loadHourlyStacked(dateStr) {
+  const canvas = document.getElementById('chartHourlyStacked');
+  if (!canvas) return;
+  if (!dateStr) {
+    dateStr = new Date().toISOString().slice(0, 10);
+    const dateInput = document.getElementById('tlHourlyDate');
+    if (dateInput && !dateInput.value) dateInput.value = dateStr;
+  }
+  try {
+    const data = await _fetchHourly(dateStr);
+    _renderHourlyStacked(data);
+  } catch (e) { console.error('hourlyStacked:', e); }
+}
+
+function _renderHourlyStacked(data) {
+  const hours = data.hours || [];
+  const metric = document.getElementById('tlHourlyMetric')?.value || 'cost';
+
+  // Collect all project names across all hours, sorted by total cost desc
+  const projTotals = new Map();
+  for (const h of hours) {
+    for (const [name, d] of Object.entries(h.projects)) {
+      projTotals.set(name, (projTotals.get(name) || 0) + (d.cost_usd || 0));
+    }
+  }
+  const projects = [...projTotals.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+  if (!projects.length) {
+    if (_hourlyStackedChart) { _hourlyStackedChart.destroy(); _hourlyStackedChart = null; }
+    return;
+  }
+
+  const labels = hours.map(h => h.hour + ':00');
+  const datasets = projects.map((proj, idx) => ({
+    label: proj,
+    data: hours.map(h => {
+      const p = h.projects[proj];
+      if (!p) return 0;
+      if (metric === 'messages') return p.message_count || 0;
+      if (metric === 'tokens') return (p.input_tokens || 0) + (p.output_tokens || 0);
+      return p.cost_usd || 0;
+    }),
+    backgroundColor: _projColor(idx, 0.55),
+    borderColor: _projColor(idx, 0.8),
+    borderWidth: 1,
+    borderRadius: 2,
+  }));
+
+  if (_hourlyStackedChart) { _hourlyStackedChart.destroy(); _hourlyStackedChart = null; }
+  const canvas = document.getElementById('chartHourlyStacked');
+  if (!canvas) return;
+  const tc = themeColors();
+
+  const yCallback = metric === 'cost' ? (v => '$' + v.toFixed(2))
+    : metric === 'tokens' ? (v => v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v)
+    : (v => v);
+  const tooltipLabel = (ctx) => {
+    const v = ctx.raw;
+    if (metric === 'cost') return ' ' + ctx.dataset.label + ': ' + fmt$(v);
+    if (metric === 'tokens') return ' ' + ctx.dataset.label + ': ' + fmtN(v) + ' tok';
+    return ' ' + ctx.dataset.label + ': ' + fmtN(v) + '\uAC74';
+  };
+
+  _hourlyStackedChart = new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: _prefersReducedMotion ? 0 : 350 },
+      plugins: {
+        legend: { display: false },
+        tooltip: tooltipOpts({ callbacks: { label: tooltipLabel } }),
+      },
+      scales: {
+        x: {
+          stacked: true,
+          grid: { color: tc.gridColor, drawBorder: false },
+          ticks: { color: tc.tickColor, font: { size: 10, family: 'Pretendard' }, maxRotation: 0 },
+        },
+        y: {
+          stacked: true,
+          grid: { color: tc.gridColor, drawBorder: false },
+          ticks: { color: tc.tickColor, font: { size: 10, family: 'Pretendard' }, callback: yCallback },
+        },
+      },
+    },
   });
+
+  // Legend
+  const legendEl = document.getElementById('tlHourlyLegend');
+  if (legendEl) {
+    legendEl.textContent = '';
+    for (let i = 0; i < Math.min(projects.length, 8); i++) {
+      const w = document.createElement('span'); w.className = 'inline-flex items-center gap-1 mr-3';
+      const dot = document.createElement('span'); dot.className = 'w-2 h-2 rounded-sm inline-block'; dot.style.background = _projColor(i, 0.7);
+      const txt = document.createElement('span'); txt.textContent = projects[i];
+      w.append(dot, txt); legendEl.appendChild(w);
+    }
+    if (projects.length > 8) {
+      const more = document.createElement('span'); more.className = 'text-white/15';
+      more.textContent = '+' + (projects.length - 8) + '\uAC1C \uD504\uB85C\uC81D\uD2B8';
+      legendEl.appendChild(more);
+    }
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. (C) HEATMAP DRILL-DOWN
+// ═══════════════════════════════════════════════════════════════════════════
+
+function _heatmapDrillDown(dow, hour) {
+  const drillEl = document.getElementById('tlHeatmapDrill');
+  if (!drillEl) return;
+  drillEl.classList.remove('hidden');
+  drillEl.textContent = '';
+
+  const loading = document.createElement('div');
+  loading.className = 'text-center text-white/15 text-xs py-3 dots';
+  loading.textContent = '\uB85C\uB529 \uC911';
+  drillEl.appendChild(loading);
+
+  // Find the most recent date matching this dow within 90 days, then load its hourly data
+  const now = new Date();
+  const candidates = [];
+  for (let i = 0; i < 90; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    if (d.getDay() === dow) candidates.push(d.toISOString().slice(0, 10));
+  }
+
+  // Load aggregated data for the last 4 matching days
+  const datesToLoad = candidates.slice(0, 4);
+  Promise.all(datesToLoad.map(date => _fetchHourly(date).catch(() => null)))
+    .then(results => {
+      drillEl.textContent = '';
+      const valid = results.filter(Boolean);
+      if (!valid.length) {
+        const empty = document.createElement('div');
+        empty.className = 'text-center text-white/20 text-xs py-3';
+        empty.textContent = '\uB370\uC774\uD130 \uC5C6\uC74C';
+        drillEl.appendChild(empty);
+        return;
+      }
+
+      // Header with close button
+      const headerRow = document.createElement('div');
+      headerRow.className = 'flex items-center justify-between mb-2';
+      const titleText = document.createElement('span');
+      titleText.className = 'text-[10px] font-bold text-white/40 uppercase tracking-widest';
+      titleText.textContent = DOW_LABELS[dow] + ' ' + hour + '\uC2DC \uC0C1\uC138 (\uCD5C\uADFC ' + valid.length + '\uC8FC)';
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'text-white/25 hover:text-white/50 text-xs spring';
+      closeBtn.textContent = '\u2715';
+      closeBtn.addEventListener('click', () => { drillEl.classList.add('hidden'); drillEl.textContent = ''; });
+      headerRow.append(titleText, closeBtn);
+      drillEl.appendChild(headerRow);
+
+      // Aggregate the specific hour across the loaded dates
+      const projAgg = new Map();
+      let totalMsg = 0, totalCost = 0;
+      for (const data of valid) {
+        const hSlot = (data.hours || []).find(h => parseInt(h.hour, 10) === hour);
+        if (!hSlot || !hSlot.message_count) continue;
+        totalMsg += hSlot.message_count;
+        totalCost += hSlot.cost_usd || 0;
+        for (const [name, p] of Object.entries(hSlot.projects)) {
+          const prev = projAgg.get(name) || { msg: 0, cost: 0, sessions: 0 };
+          prev.msg += p.message_count || 0;
+          prev.cost += p.cost_usd || 0;
+          prev.sessions += p.session_count || 0;
+          projAgg.set(name, prev);
+        }
+      }
+
+      // Summary cards
+      const grid = document.createElement('div');
+      grid.className = 'grid grid-cols-3 gap-2 mb-2';
+      const mkC = (label, val, cls) => {
+        const c = document.createElement('div'); c.className = 'bg-white/[0.03] rounded-lg p-1.5 text-center';
+        const v = document.createElement('div'); v.className = 'text-xs font-bold ' + (cls || 'text-white/70'); v.textContent = val;
+        const l = document.createElement('div'); l.className = 'text-[8px] text-white/25 mt-0.5'; l.textContent = label;
+        c.append(v, l); return c;
+      };
+      grid.append(
+        mkC('\uBA54\uC2DC\uC9C0', fmtN(totalMsg) + '\uAC74'),
+        mkC('\uBE44\uC6A9', fmt$(totalCost), 'text-amber-400/70'),
+        mkC('\uD504\uB85C\uC81D\uD2B8', fmtN(projAgg.size) + '\uAC1C', 'text-cyan-400/70'),
+      );
+      drillEl.appendChild(grid);
+
+      // Per-project breakdown
+      const sorted = [...projAgg.entries()].sort((a, b) => b[1].cost - a[1].cost);
+      for (const [name, agg] of sorted) {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between py-1 text-[10px] border-b border-white/[0.02]';
+        const rLeft = document.createElement('span');
+        rLeft.className = 'text-white/50 truncate max-w-[140px]'; rLeft.textContent = name; rLeft.title = name;
+        const rRight = document.createElement('div');
+        rRight.className = 'flex items-center gap-2 text-white/35 tabular-nums';
+        const rm = document.createElement('span'); rm.textContent = fmtN(agg.msg) + '\uAC74';
+        const rc = document.createElement('span'); rc.className = 'text-amber-400/60'; rc.textContent = fmt$(agg.cost);
+        const rs = document.createElement('span'); rs.className = 'text-white/20'; rs.textContent = fmtN(agg.sessions) + '\uC138\uC158';
+        rRight.append(rm, rc, rs);
+        row.append(rLeft, rRight); drillEl.appendChild(row);
+      }
+
+      // Per-date breakdown
+      const dateSection = document.createElement('div');
+      dateSection.className = 'mt-2 pt-2 border-t border-white/[0.04]';
+      const dateTitle = document.createElement('div');
+      dateTitle.className = 'text-[9px] text-white/20 uppercase tracking-wider mb-1';
+      dateTitle.textContent = '\uB0A0\uC9DC\uBCC4';
+      dateSection.appendChild(dateTitle);
+      for (let i = 0; i < valid.length; i++) {
+        const data = valid[i];
+        const hSlot = (data.hours || []).find(h => parseInt(h.hour, 10) === hour);
+        if (!hSlot || !hSlot.message_count) continue;
+        const dRow = document.createElement('div');
+        dRow.className = 'flex items-center justify-between py-0.5 text-[10px]';
+        const dLeft = document.createElement('span'); dLeft.className = 'text-white/40 tabular-nums'; dLeft.textContent = datesToLoad[i];
+        const dRight = document.createElement('div'); dRight.className = 'flex gap-2 text-white/30 tabular-nums';
+        const dm = document.createElement('span'); dm.textContent = fmtN(hSlot.message_count) + '\uAC74';
+        const dc = document.createElement('span'); dc.className = 'text-amber-400/50'; dc.textContent = fmt$(hSlot.cost_usd);
+        dRight.append(dm, dc); dRow.append(dLeft, dRight);
+        dateSection.appendChild(dRow);
+      }
+      drillEl.appendChild(dateSection);
+    });
+}
+
+
+// ─── Timeline node filter population ─────────────────────────────────
+let _tlNodePopulated = false;
+function _populateTlNodeFilter() {
+  const sel = document.getElementById('tlNodeFilter');
+  if (!sel || _tlNodePopulated) return;
+  if (!state.nodes || !state.nodes.length) {
+    // Retry after loadNodes completes
+    if (typeof loadNodes === 'function') {
+      loadNodes().then(() => { _tlNodePopulated = false; _populateTlNodeFilter(); });
+    }
+    return;
+  }
+  _tlNodePopulated = true;
+  const cur = sel.value;
+  sel.textContent = '';
+  const all = document.createElement('option');
+  all.value = ''; all.textContent = '\uC804\uCCB4 \uB178\uB4DC'; sel.appendChild(all);
+  for (const n of state.nodes) {
+    const o = document.createElement('option');
+    o.value = n.node_id;
+    o.textContent = (n.label || n.node_id) + (n.session_count ? ' (' + n.session_count + ')' : '');
+    sel.appendChild(o);
+  }
+  sel.value = cur;
 }
 
 
@@ -664,10 +1061,17 @@ document.querySelectorAll('.tl-range').forEach(btn => {
 });
 
 document.getElementById('tlShowSubagents')?.addEventListener('change', loadTimeline);
+document.getElementById('tlNodeFilter')?.addEventListener('change', () => { _tlNodePopulated = false; loadTimeline(); });
 document.getElementById('tlResetZoom')?.addEventListener('click', () => {
-  if (state.charts.timeline) { state.charts.timeline.resetZoom(); document.getElementById('tlResetZoom')?.classList.add('hidden'); }
+  const _tlChart = getChart('timeline'); if (_tlChart) { _tlChart.resetZoom(); document.getElementById('tlResetZoom')?.classList.add('hidden'); }
 });
 document.getElementById('tlReportDate')?.addEventListener('change', (e) => _loadDailyReport(e.target.value));
+document.getElementById('tlHourlyDate')?.addEventListener('change', (e) => _loadHourlyStacked(e.target.value));
+document.getElementById('tlHourlyMetric')?.addEventListener('change', () => {
+  const dateVal = document.getElementById('tlHourlyDate')?.value;
+  if (dateVal && _hourlyCache[dateVal]) _renderHourlyStacked(_hourlyCache[dateVal]);
+  else if (dateVal) _loadHourlyStacked(dateVal);
+});
 document.getElementById('timelineChartWrap')?.addEventListener('mouseleave', () => {
   document.getElementById('tlHoverCard')?.classList.add('hidden');
 });

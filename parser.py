@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Generator, Optional
 
@@ -18,12 +19,18 @@ CONTENT_MAX_BYTES = 100_000  # 100 KB cap
 
 # Process-wide counters for malformed / skipped input. The watcher can
 # sample these to expose Prometheus gauges without adding tight coupling.
+_stats_lock = threading.Lock()
 PARSE_STATS: dict[str, int] = {
     'malformed_json': 0,      # json.loads() raised — the line was not valid JSON
     'read_errors': 0,         # OSError reading the file
     'process_errors': 0,      # a parseable record blew up inside process_record
     'skipped_no_sid': 0,      # record had no sessionId — cannot place
 }
+
+
+def _inc_stat(key: str) -> None:
+    with _stats_lock:
+        PARSE_STATS[key] += 1
 
 
 def reset_parse_stats() -> None:
@@ -47,6 +54,7 @@ _DATE_SUFFIX_RE = re.compile(r'-\d{8}$')
 
 # One-shot warning cache so unknown models don't spam the log per-message
 _WARNED_MODELS: set[str] = set()
+_warned_lock = threading.Lock()
 
 
 def get_pricing(model: str) -> dict:
@@ -67,15 +75,17 @@ def get_pricing(model: str) -> dict:
                         ('sonnet', 'claude-sonnet-4-6'),
                         ('haiku', 'claude-haiku-4-5')]:
         if family in m:
-            if model not in _WARNED_MODELS:
-                _WARNED_MODELS.add(model)
-                logger.warning(
-                    "Unknown model %r — using %s pricing as fallback", model, key)
+            with _warned_lock:
+                if model not in _WARNED_MODELS:
+                    _WARNED_MODELS.add(model)
+                    logger.warning(
+                        "Unknown model %r — using %s pricing as fallback", model, key)
             return MODEL_PRICING[key]
-    if model not in _WARNED_MODELS:
-        _WARNED_MODELS.add(model)
-        logger.warning(
-            "Unknown model %r with no family match — using Sonnet pricing", model)
+    with _warned_lock:
+        if model not in _WARNED_MODELS:
+            _WARNED_MODELS.add(model)
+            logger.warning(
+                "Unknown model %r with no family match — using Sonnet pricing", model)
     return DEFAULT_PRICING
 
 
@@ -155,11 +165,15 @@ def project_info_from_cwd(cwd: str) -> tuple[str, str]:
 
     Unlike the legacy ``encoded_dir.replace('-', '/')`` approach, this handles
     original paths that contain dashes correctly (e.g. ``claude-dashboard``).
+
+    Uses ``PureWindowsPath`` for cross-platform name extraction — it correctly
+    parses both ``/unix/path`` and ``D:\\windows\\path`` on any host OS.
     """
     if not cwd:
         return '', ''
-    p = Path(cwd)
-    return str(p), p.name or str(p)
+    from pathlib import PureWindowsPath
+    name = PureWindowsPath(cwd).name
+    return cwd, name or cwd
 
 
 def _fallback_project_from_filepath(file_path: str) -> tuple[str, str]:
@@ -267,19 +281,19 @@ def parse_jsonl_file(file_path: str, start_line: int = 0) -> Generator[dict, Non
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError as e:
-                    PARSE_STATS['malformed_json'] += 1
+                    _inc_stat('malformed_json')
                     logger.info("Skipping malformed JSON at %s:%d — %s", file_path, i, e)
                     continue
                 if not isinstance(record, dict):
                     # A JSONL line must be an object. Arrays/strings/numbers
                     # are nonsensical here; skip and count.
-                    PARSE_STATS['malformed_json'] += 1
+                    _inc_stat('malformed_json')
                     logger.info("Skipping non-object JSONL at %s:%d", file_path, i)
                     continue
                 record['_line_number'] = i
                 yield record
     except OSError as e:
-        PARSE_STATS['read_errors'] += 1
+        _inc_stat('read_errors')
         logger.error("Error reading %s: %s", file_path, e)
 
 
@@ -295,7 +309,8 @@ def effective_session_id(record_session_id: str, file_path: str) -> str:
     return sub_id or record_session_id
 
 
-def process_record(record: dict, file_path: str, db: sqlite3.Connection) -> Optional[dict]:
+def process_record(record: dict, file_path: str, db: sqlite3.Connection,
+                   source_node: str = 'local') -> Optional[dict]:
     """Insert/update DB rows for one JSONL record.  No commit — caller does that.
 
     All exceptions inside a record are contained: a single malformed record
@@ -304,26 +319,27 @@ def process_record(record: dict, file_path: str, db: sqlite3.Connection) -> Opti
     transaction to roll back.
     """
     if not isinstance(record, dict):
-        PARSE_STATS['process_errors'] += 1
+        _inc_stat('process_errors')
         return None
     rtype = record.get('type')
     try:
         if rtype == 'assistant':
-            return _process_assistant(record, file_path, db)
+            return _process_assistant(record, file_path, db, source_node)
         if rtype == 'user':
-            return _process_user(record, file_path, db)
+            return _process_user(record, file_path, db, source_node)
         if rtype == 'system':
-            return _process_system(record, file_path, db)
+            return _process_system(record, file_path, db, source_node)
     except sqlite3.Error:
         raise  # let the outer write_db() rollback
     except Exception as e:
-        PARSE_STATS['process_errors'] += 1
+        _inc_stat('process_errors')
         logger.warning("Skipping record at %s (uuid=%s): %s",
                        file_path, record.get('uuid', '?'), e)
     return None
 
 
-def _ensure_session(sid: str, file_path: str, record: dict, db: sqlite3.Connection):
+def _ensure_session(sid: str, file_path: str, record: dict,
+                    db: sqlite3.Connection, source_node: str = 'local'):
     """Ensure a session row exists.
 
     Notes on subagents (C5 fix):
@@ -347,14 +363,15 @@ def _ensure_session(sid: str, file_path: str, record: dict, db: sqlite3.Connecti
         INSERT OR IGNORE INTO sessions
             (id, project_path, project_name, created_at, updated_at, cwd,
              entrypoint, version, is_subagent, parent_session_id,
-             agent_type, agent_description)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             agent_type, agent_description, source_node)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         sid, project_path, project_name,
         record.get('timestamp', ''), record.get('timestamp', ''),
         record.get('cwd', ''), record.get('entrypoint', 'cli'),
         record.get('version', ''),
         1 if is_sub else 0, parent_sid, agent_type, agent_desc,
+        source_node,
     ))
 
     # Freshly-inserted row already has correct values.
@@ -386,10 +403,11 @@ def _ensure_session(sid: str, file_path: str, record: dict, db: sqlite3.Connecti
     return stored_path or project_path, stored_name or project_name
 
 
-def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection) -> Optional[dict]:
+def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection,
+                       source_node: str = 'local') -> Optional[dict]:
     raw_sid = record.get('sessionId', '')
     if not raw_sid:
-        PARSE_STATS['skipped_no_sid'] += 1
+        _inc_stat('skipped_no_sid')
         return None
     sid = effective_session_id(raw_sid, file_path)
 
@@ -397,7 +415,7 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection) -> 
     if msg_raw is not None and not isinstance(msg_raw, dict):
         # Malformed: ``message`` should always be an object on assistant
         # records. Skip entirely instead of silently creating a zero-cost row.
-        PARSE_STATS['process_errors'] += 1
+        _inc_stat('process_errors')
         return None
     msg = msg_raw or {}
     usage = msg.get('usage') or {}
@@ -418,7 +436,7 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection) -> 
     content_str = _safe_json_content(content_raw)
     preview = extract_content_text(content_raw)
 
-    project_path, project_name = _ensure_session(sid, file_path, record, db)
+    project_path, project_name = _ensure_session(sid, file_path, record, db, source_node)
 
     cur = db.execute('''
         INSERT OR IGNORE INTO messages
@@ -499,14 +517,15 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection) -> 
     }
 
 
-def _process_user(record: dict, file_path: str, db: sqlite3.Connection) -> Optional[dict]:
+def _process_user(record: dict, file_path: str, db: sqlite3.Connection,
+                   source_node: str = 'local') -> Optional[dict]:
     raw_sid = record.get('sessionId', '')
     if not raw_sid:
-        PARSE_STATS['skipped_no_sid'] += 1
+        _inc_stat('skipped_no_sid')
         return None
     sid = effective_session_id(raw_sid, file_path)
 
-    _ensure_session(sid, file_path, record, db)
+    project_path, project_name = _ensure_session(sid, file_path, record, db, source_node)
 
     msg = record.get('message') or {}
     if not isinstance(msg, dict):
@@ -536,11 +555,22 @@ def _process_user(record: dict, file_path: str, db: sqlite3.Connection) -> Optio
             UPDATE sessions SET updated_at = ?, user_message_count = user_message_count + 1
             WHERE id = ?
         ''', (record.get('timestamp', ''), sid))
+        return {
+            'type': 'new_message',
+            'session_id': sid,
+            'project_name': project_name,
+            'project_path': project_path,
+            'role': 'user',
+            'timestamp': record.get('timestamp', ''),
+            'preview': preview[:300],
+            'is_subagent': is_subagent_file(file_path),
+        }
 
     return None
 
 
-def _process_system(record: dict, file_path: str, db: sqlite3.Connection) -> Optional[dict]:
+def _process_system(record: dict, file_path: str, db: sqlite3.Connection,
+                     source_node: str = 'local') -> Optional[dict]:
     """Extract turn duration from system records.
 
     Claude Code writes a system record at the end of each turn with
@@ -550,7 +580,7 @@ def _process_system(record: dict, file_path: str, db: sqlite3.Connection) -> Opt
     """
     raw_sid = record.get('sessionId', '')
     if not raw_sid:
-        PARSE_STATS['skipped_no_sid'] += 1
+        _inc_stat('skipped_no_sid')
         return None
     sid = effective_session_id(raw_sid, file_path)
 
@@ -558,7 +588,7 @@ def _process_system(record: dict, file_path: str, db: sqlite3.Connection) -> Opt
     if not isinstance(duration_ms, (int, float)) or duration_ms <= 0:
         return None
 
-    _ensure_session(sid, file_path, record, db)
+    _ensure_session(sid, file_path, record, db, source_node)
 
     db.execute('''
         UPDATE sessions

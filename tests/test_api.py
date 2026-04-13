@@ -495,3 +495,64 @@ def test_session_chain_endpoint(api_client):
     assert body['root'] == 'parent-A'
     assert 'nodes' in body
     assert isinstance(body['nodes'], list)
+
+
+# ─── Auth-enabled smoke test ──────────────────────────────────────────────
+
+_AUTH_PASSWORD = 'test-secret-42'
+
+
+def test_api_works_with_auth_cookie(tmp_path, monkeypatch):
+    """Verify the API works end-to-end with auth enabled via cookie session.
+
+    This complements the no-auth api_client tests above by proving:
+    1. POST /api/auth/login sets a session cookie.
+    2. A cookie-authenticated client can call /api/sessions → 200.
+    3. A fresh client without the cookie gets 401.
+    """
+    db_file = tmp_path / 'authapi.db'
+    fake_projects = tmp_path / 'projects'
+    fake_projects.mkdir()
+
+    monkeypatch.setenv('DASHBOARD_PASSWORD', _AUTH_PASSWORD)
+    monkeypatch.setenv('DASHBOARD_SECRET', 'fixed-test-secret-for-determinism')
+
+    try:
+        from prometheus_client import REGISTRY
+        for c in list(REGISTRY._collector_to_names.keys()):
+            try:
+                REGISTRY.unregister(c)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    for name in list(sys.modules):
+        if name in ('database', 'parser', 'watcher', 'main'):
+            sys.modules.pop(name, None)
+
+    import database
+    monkeypatch.setattr(database, 'DB_PATH', db_file)
+    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
+    import parser as app_parser
+    monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
+    import main
+    monkeypatch.setattr(main, '_AUTH_PW', _AUTH_PASSWORD)
+    database.init_db()
+
+    from fastapi.testclient import TestClient
+    with TestClient(main.app) as client:
+        # Step 1 — login and obtain session cookie
+        r = client.post('/api/auth/login', json={'password': _AUTH_PASSWORD})
+        assert r.status_code == 200
+        assert 'dash_session' in r.cookies
+
+        # Step 2 — cookie-authenticated request succeeds
+        r = client.get('/api/sessions')
+        assert r.status_code == 200
+        assert 'sessions' in r.json()
+
+    # Step 3 — a fresh client (no cookie) must be rejected
+    with TestClient(main.app) as fresh:
+        r = fresh.get('/api/sessions')
+        assert r.status_code == 401
