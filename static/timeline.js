@@ -248,7 +248,10 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
         y: {
           type: 'category', labels: visibleProjects,
           grid: { color: tc.gridColor, drawBorder: false },
-          ticks: { color: tc.tickColor, font: { size: 11, family: 'Pretendard', weight: 'bold' }, autoSkip: false },
+          ticks: {
+            color: (ctx) => _projColorByName(ctx.tick?.label || visibleProjects[ctx.index] || '', 0.95),
+            font: { size: 11, family: 'Pretendard', weight: 'bold' }, autoSkip: false,
+          },
         },
         yCost: {
           type: 'linear', position: 'right', display: costTimeline.length > 1,
@@ -632,6 +635,7 @@ function _renderEfficiency(data) {
     const nameCell = document.createElement('td');
     nameCell.className = 'px-2 py-1.5 font-semibold text-white/70 truncate max-w-[180px]';
     nameCell.title = r.name;
+    nameCell.appendChild(_projDot(r.name));
     const isOutlier = _tlOutlierProjs.has(r.name) && document.getElementById('tlShowOutliers')?.checked;
     if (isOutlier) {
       const badge = document.createElement('span');
@@ -684,6 +688,25 @@ const _PROJ_PALETTE = [
   'rgba(45,212,191,A)',  'rgba(253,186,116,A)', 'rgba(129,140,248,A)',
 ];
 function _projColor(idx, alpha) { return (_PROJ_PALETTE[idx % _PROJ_PALETTE.length]).replace('A', String(alpha ?? 0.6)); }
+// Deterministic project → palette color. Same name always maps to same slot
+// regardless of current sort order, so users learn the color=project association
+// once and it stays stable across views (Gantt y-axis, efficiency, delta, hourly).
+function _projColorByName(name, alpha) {
+  let h = 0;
+  const s = name || '';
+  for (let i = 0; i < s.length; i++) h = (h * 131 + s.charCodeAt(i)) >>> 0;
+  return _PROJ_PALETTE[h % _PROJ_PALETTE.length].replace('A', String(alpha ?? 0.85));
+}
+// Small colored dot element for table labels.
+function _projDot(name, size) {
+  const d = document.createElement('span');
+  d.className = 'inline-block rounded-sm align-middle mr-1.5 flex-shrink-0';
+  const px = size || 8;
+  d.style.width = px + 'px';
+  d.style.height = px + 'px';
+  d.style.background = _projColorByName(name, 0.9);
+  return d;
+}
 let _hourlyCache = {};
 const _HOURLY_CACHE_MAX = 10;
 
@@ -735,7 +758,9 @@ async function _loadDailyReport(dateStr) {
       const cost = ss.reduce((s, x) => s + (x.cost_usd || 0), 0);
       const dur = ss.reduce((s, x) => s + (x.duration_seconds || 0), 0);
       const row = document.createElement('div'); row.className = 'flex items-center justify-between py-1.5 border-b border-white/[0.03] text-[11px]';
-      const left = document.createElement('span'); left.className = 'text-white/65 font-semibold truncate'; left.textContent = name;
+      const left = document.createElement('span'); left.className = 'text-white/65 font-semibold truncate flex items-center';
+      left.appendChild(_projDot(name));
+      const leftTxt = document.createElement('span'); leftTxt.textContent = name; left.appendChild(leftTxt);
       const right = document.createElement('span'); right.className = 'text-white/40 tabular-nums flex gap-3';
       const s1 = document.createElement('span'); s1.textContent = fmtN(ss.length) + '\uAC74';
       const s2 = document.createElement('span'); s2.className = 'text-amber-400/70'; s2.textContent = fmt$(cost);
@@ -799,7 +824,10 @@ function _renderHourlyAccordion(container, hourlyData) {
       const pRow = document.createElement('div');
       pRow.className = 'flex items-center justify-between py-1 pl-5 text-[10px]';
       const pLeft = document.createElement('span');
-      pLeft.className = 'text-white/50 truncate max-w-[150px]'; pLeft.textContent = pName; pLeft.title = pName;
+      pLeft.className = 'text-white/50 truncate max-w-[150px] inline-flex items-center';
+      pLeft.appendChild(_projDot(pName, 6));
+      const pLeftTxt = document.createElement('span'); pLeftTxt.textContent = pName; pLeft.appendChild(pLeftTxt);
+      pLeft.title = pName;
       const pRight = document.createElement('div');
       pRight.className = 'flex items-center gap-3 text-white/35 tabular-nums';
       const pm = document.createElement('span'); pm.textContent = fmtN(pData.session_count) + '\uC138\uC158';
@@ -1066,6 +1094,7 @@ function _renderDelta(todaySessions, yestSessions, summaryEl, bodyEl) {
     const nameTd = document.createElement('td');
     nameTd.className = 'px-2 py-1.5 truncate max-w-[220px]';
     nameTd.title = r.name;
+    nameTd.appendChild(_projDot(r.name));
     if (r.isNew) {
       const b = document.createElement('span');
       b.className = 'inline-block mr-1 px-1 rounded text-[8px] font-bold bg-emerald-400/15 text-emerald-300 align-middle';
@@ -1187,7 +1216,7 @@ function _renderHourlyStacked(data) {
   }
 
   const labels = hours.map(h => h.hour + ':00');
-  const datasets = projects.map((proj, idx) => ({
+  const datasets = projects.map((proj) => ({
     label: proj,
     data: hours.map(h => {
       const p = h.projects[proj];
@@ -1196,8 +1225,8 @@ function _renderHourlyStacked(data) {
       if (metric === 'tokens') return (p.input_tokens || 0) + (p.output_tokens || 0);
       return p.cost_usd || 0;
     }),
-    backgroundColor: _projColor(idx, 0.55),
-    borderColor: _projColor(idx, 0.8),
+    backgroundColor: _projColorByName(proj, 0.55),
+    borderColor: _projColorByName(proj, 0.85),
     borderWidth: 1,
     borderRadius: 2,
   }));
@@ -1248,7 +1277,7 @@ function _renderHourlyStacked(data) {
     legendEl.textContent = '';
     for (let i = 0; i < Math.min(projects.length, 8); i++) {
       const w = document.createElement('span'); w.className = 'inline-flex items-center gap-1 mr-3';
-      const dot = document.createElement('span'); dot.className = 'w-2 h-2 rounded-sm inline-block'; dot.style.background = _projColor(i, 0.7);
+      const dot = document.createElement('span'); dot.className = 'w-2 h-2 rounded-sm inline-block'; dot.style.background = _projColorByName(projects[i], 0.75);
       const txt = document.createElement('span'); txt.textContent = projects[i];
       w.append(dot, txt); legendEl.appendChild(w);
     }
