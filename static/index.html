@@ -7,7 +7,7 @@
 <meta name="description" content="Claude Code 토큰 사용량 실시간 추적 대시보드">
 
 <!-- Tailwind CSS (built from app.css via build.js) -->
-<link rel="stylesheet" href="/static/tailwind.v75.css">
+<link rel="stylesheet" href="/static/tailwind.v77.css">
 
 <!-- Pretendard (Korean) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
@@ -445,6 +445,12 @@
           <label class="text-[10px] text-white/30 flex items-center gap-1 ml-1 cursor-pointer select-none">
             <input type="checkbox" id="tlShowSubagents" class="cursor-pointer"> Subagents
           </label>
+          <label class="text-[10px] text-white/30 flex items-center gap-1 cursor-pointer select-none" title="부모→자식 에이전트 연결선">
+            <input type="checkbox" id="tlShowLinks" class="cursor-pointer"> 연결
+          </label>
+          <label class="text-[10px] text-white/30 flex items-center gap-1 cursor-pointer select-none" title="$/hr 이상치 강조">
+            <input type="checkbox" id="tlShowOutliers" class="cursor-pointer" checked> 이상치
+          </label>
           <button id="tlResetZoom" class="hidden px-2 py-1 rounded-full text-[10px] font-semibold spring border border-amber-500/30 bg-amber-500/10 text-amber-300 ml-1">줌 리셋</button>
         </div>
       </div>
@@ -521,6 +527,27 @@
         <span class="text-xs font-bold text-white/40 uppercase tracking-widest">이번 주 vs 저번 주</span>
         <div class="relative chart-h mt-3">
           <canvas id="chartTrend"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Row 4: Delta view (yesterday → today) -->
+  <div class="mt-3">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d4">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-white/40 uppercase tracking-widest">어제 → 오늘 델타</span>
+            <span class="text-[9px] text-white/20" id="tlDeltaRange"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="date" id="tlDeltaDate" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="기준일">
+            <button id="tlDeltaRefresh" class="text-[10px] text-white/40 hover:text-accent spring px-2 py-1 rounded-full border border-white/[0.07]" title="새로고침">↻</button>
+          </div>
+        </div>
+        <div id="tlDeltaSummary" class="grid grid-cols-4 gap-2 mb-3"></div>
+        <div id="tlDeltaBody">
+          <div class="text-center text-white/15 text-xs py-6 dots">로딩 중</div>
         </div>
       </div>
     </div>
@@ -1011,6 +1038,6 @@
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/bundle.v75.js" defer></script>
+<script src="/static/bundle.v77.js" defer></script>
 </body>
 </html>

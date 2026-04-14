@@ -19,6 +19,8 @@ const DOW_LABELS = ['\uC77C', '\uC6D4', '\uD654', '\uC218', '\uBAA9', '\uAE08', 
 let _tlRange = _prefs.tlRange || '7d';
 let _tlLastData = null;
 let _tlCollapsed = new Set(_prefs.tlCollapsed || []);
+let _tlOutlierIds = new Set();   // session ids flagged as $/hr outliers
+let _tlOutlierProjs = new Set(); // project names flagged as outliers
 
 function _daysAgo(base, n) {
   const d = new Date(base);
@@ -38,6 +40,46 @@ function _tlDates() {
   else if (_tlRange === '30d') dateFrom = _daysAgo(now, 30);
   else dateFrom = _daysAgo(now, 7);
   return { dateFrom, dateTo };
+}
+
+// Compute $/hr outliers (projects where cost_per_hour > mean + 2σ).
+// Also flags individual sessions within those projects whose cost > project mean.
+function _computeOutliers(data) {
+  _tlOutlierIds = new Set();
+  _tlOutlierProjs = new Set();
+  const sessions = data.sessions || [];
+  if (sessions.length < 3) return;
+  const byProj = new Map();
+  for (const s of sessions) {
+    const k = s.project_name || '(unknown)';
+    if (!byProj.has(k)) byProj.set(k, []);
+    byProj.get(k).push(s);
+  }
+  const perHrVals = [];
+  const projStats = [];
+  for (const [name, list] of byProj) {
+    const totalCost = list.reduce((a, x) => a + (x.cost_usd || 0), 0);
+    const totalDur = list.reduce((a, x) => a + (x.duration_seconds || 0), 0);
+    if (totalDur < 300) continue; // skip near-zero-duration projects
+    const perHr = totalCost / (totalDur / 3600);
+    perHrVals.push(perHr);
+    projStats.push({ name, perHr, list });
+  }
+  if (perHrVals.length < 3) return;
+  const mean = perHrVals.reduce((a, b) => a + b, 0) / perHrVals.length;
+  const variance = perHrVals.reduce((a, v) => a + (v - mean) ** 2, 0) / perHrVals.length;
+  const std = Math.sqrt(variance);
+  const threshold = mean + 2 * std;
+  for (const p of projStats) {
+    if (p.perHr > threshold && p.perHr > 5) { // need meaningful absolute $/hr too
+      _tlOutlierProjs.add(p.name);
+      // within project, flag top-cost sessions that drove the excess
+      const projMean = p.list.reduce((a, x) => a + (x.cost_usd || 0), 0) / p.list.length;
+      for (const s of p.list) {
+        if ((s.cost_usd || 0) > projMean * 1.5 && (s.cost_usd || 0) > 0.5) _tlOutlierIds.add(s.id);
+      }
+    }
+  }
 }
 
 function _modelFamily(model) {
@@ -60,6 +102,7 @@ async function loadTimeline() {
   try {
     const data = await safeFetch(url);
     _tlLastData = { data, dateFrom, dateTo };
+    _computeOutliers(data);
     _renderTimelineChart(data, dateFrom, dateTo);
     _renderEfficiency(data);
     reportSuccess('loadTimeline');
@@ -70,6 +113,7 @@ async function loadTimeline() {
   _loadHeatmap();
   _loadTrend();
   _loadHourlyStacked();
+  _loadDelta();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -100,7 +144,7 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
   const visibleProjects = projects.filter(p => !_tlCollapsed.has(p));
   const collapsedCount = projects.length - visibleProjects.length;
 
-  const barData = [], barMeta = [], barBg = [], barBorder = [];
+  const barData = [], barMeta = [], barBg = [], barBorder = [], barBorderW = [];
   const costTimeline = [];
   let cumulCost = 0;
 
@@ -133,6 +177,7 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
           barMeta.push({ _isGap: true, gapMs });
           barBg.push('rgba(255,255,255,0.03)');
           barBorder.push('rgba(255,255,255,0.06)');
+          barBorderW.push(1);
         }
       }
 
@@ -143,7 +188,14 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
       const intensity = Math.min(1, (s.cost_usd || 0) / maxCost);
       const alpha = (0.3 + intensity * 0.5).toFixed(2);
       barBg.push(palette.bg.replace('A', alpha));
-      barBorder.push(palette.border);
+      const showOutliers = document.getElementById('tlShowOutliers')?.checked;
+      if (showOutliers && _tlOutlierIds.has(s.id)) {
+        barBorder.push('rgba(251,113,133,0.95)'); // rose-400 — outlier
+        barBorderW.push(2.5);
+      } else {
+        barBorder.push(palette.border);
+        barBorderW.push(1);
+      }
     }
   }
 
@@ -167,7 +219,7 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
   const datasets = [{
     type: 'bar', label: 'Sessions', data: barData,
     backgroundColor: barBg, borderColor: barBorder,
-    borderWidth: 1, borderRadius: 3, borderSkipped: false,
+    borderWidth: barBorderW, borderRadius: 3, borderSkipped: false,
     barPercentage: 0.7, categoryPercentage: 0.85, yAxisID: 'y', xAxisID: 'x',
   }];
 
@@ -255,6 +307,9 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
         }
         ctx.restore();
       },
+    }, {
+      id: 'parentChildLinks',
+      afterDatasetsDraw: (chart) => _drawParentLinks(chart, barMeta),
     }],
   }));
 
@@ -297,6 +352,74 @@ function _handleHoverCard(evt, elements, barMeta) {
   card.classList.remove('hidden');
 }
 
+// ─── Parent → child (subagent) link arrows ───────────────────────────────
+// Draws a subtle curved line from each subagent bar's left edge back to its
+// parent session's right edge. Parent must also be visible in the current
+// projection (same range, same project not collapsed).
+function _drawParentLinks(chart, barMeta) {
+  const enabled = document.getElementById('tlShowLinks')?.checked;
+  if (!enabled) return;
+  const dsMeta = chart.getDatasetMeta(0);
+  if (!dsMeta || !dsMeta.data) return;
+
+  // Build lookup: session_id → datapoint index (only real sessions, not gaps)
+  const idToIdx = new Map();
+  for (let i = 0; i < barMeta.length; i++) {
+    const m = barMeta[i];
+    if (m && !m._isGap && m.id) idToIdx.set(m.id, i);
+  }
+
+  const { ctx, chartArea } = chart;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(96,165,250,0.45)';  // sky-ish blue
+  ctx.fillStyle = 'rgba(96,165,250,0.55)';
+  ctx.lineWidth = 1;
+
+  let drawn = 0;
+  for (let i = 0; i < barMeta.length; i++) {
+    const child = barMeta[i];
+    if (!child || child._isGap || !child.is_subagent || !child.parent_session_id) continue;
+    const pIdx = idToIdx.get(child.parent_session_id);
+    if (pIdx === undefined) continue;
+
+    const parentEl = dsMeta.data[pIdx];
+    const childEl = dsMeta.data[i];
+    if (!parentEl || !childEl) continue;
+
+    // Parent bar right edge, child bar left edge (horizontal bars)
+    const pr = parentEl.getProps(['x', 'y', 'width', 'height', 'base'], false);
+    const cr = childEl.getProps(['x', 'y', 'width', 'height', 'base'], false);
+    // For horizontal bars: x is the *end* (right edge), base is the *start*
+    const px = pr.x;  // parent right edge
+    const py = pr.y;
+    const cx = cr.base; // child left edge
+    const cy = cr.y;
+
+    // Clip to chart area
+    if (px < chartArea.left || cx > chartArea.right) continue;
+    if (Math.abs(cx - px) < 2 && Math.abs(cy - py) < 2) continue;
+
+    // Curved connector: horizontal offset controls curvature
+    const dx = Math.max(18, Math.min(80, Math.abs(cx - px) * 0.4));
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.bezierCurveTo(px + dx, py, cx - dx, cy, cx, cy);
+    ctx.stroke();
+
+    // Small arrowhead at child side
+    const ah = 4;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx - ah, cy - ah * 0.6);
+    ctx.lineTo(cx - ah, cy + ah * 0.6);
+    ctx.closePath();
+    ctx.fill();
+    drawn++;
+    if (drawn > 300) break; // safety cap
+  }
+  ctx.restore();
+}
+
 // ─── Concurrent work detection ───────────────────────────────────────────
 function _findConcurrentZones(sessions, tzOffsetMs, visibleProjects, projectMap) {
   const intervals = [];
@@ -328,6 +451,7 @@ function _toggleProjectCollapse(projectName) {
   else _tlCollapsed.add(projectName);
   savePrefs({ tlCollapsed: [..._tlCollapsed] });
   if (_tlLastData) {
+    _computeOutliers(_tlLastData.data);
     _renderTimelineChart(_tlLastData.data, _tlLastData.dateFrom, _tlLastData.dateTo);
     _renderEfficiency(_tlLastData.data);
   }
@@ -336,6 +460,7 @@ function _expandAll() {
   _tlCollapsed.clear();
   savePrefs({ tlCollapsed: [] });
   if (_tlLastData) {
+    _computeOutliers(_tlLastData.data);
     _renderTimelineChart(_tlLastData.data, _tlLastData.dateFrom, _tlLastData.dateTo);
     _renderEfficiency(_tlLastData.data);
   }
@@ -368,6 +493,10 @@ function _renderTimelineLegend(sessions, truncated, totalProjects, collapsedCoun
   el.appendChild(span(fmtN(sessions.length) + '\uAC1C \uC138\uC158 \u00b7 ' + fmtN(totalProjects) + '\uAC1C \uD504\uB85C\uC81D\uD2B8 \u00b7 ' + fmt$(totalCost)));
   if (subs > 0) el.appendChild(span('(subagent ' + fmtN(subs) + ')', 'text-blue-300/60'));
   if (concurrentCount > 0) el.appendChild(span('\u26A1 \uB3D9\uC2DC\uC791\uC5C5 ' + fmtN(concurrentCount) + '\uAD6C\uAC04', 'text-amber-300/60'));
+  const showOutliers = document.getElementById('tlShowOutliers')?.checked;
+  if (showOutliers && _tlOutlierProjs.size > 0) {
+    el.appendChild(span('\u26A0 \uC774\uC0C1\uCE58 \uD504\uB85C\uC81D\uD2B8 ' + fmtN(_tlOutlierProjs.size) + '\uAC1C', 'text-rose-300/70 font-bold'));
+  }
   if (truncated) el.appendChild(span('(\uBC94\uC704 \uCD08\uACFC \u2014 \uC77C\uBD80\uB9CC \uD45C\uC2DC)', 'text-amber-400/60 font-bold'));
   if (collapsedCount > 0) {
     const btn = document.createElement('button');
@@ -500,7 +629,19 @@ function _renderEfficiency(data) {
   for (const r of rows.slice(0, 15)) {
     const tr = document.createElement('tr'); tr.className = 'border-b border-white/[0.03] hover:bg-white/[0.03] spring';
     const mkTd = (text, cls) => { const td = document.createElement('td'); td.className = cls; td.textContent = text; return td; };
-    const nameCell = mkTd(r.name, 'px-2 py-1.5 font-semibold text-white/70 truncate max-w-[180px]'); nameCell.title = r.name;
+    const nameCell = document.createElement('td');
+    nameCell.className = 'px-2 py-1.5 font-semibold text-white/70 truncate max-w-[180px]';
+    nameCell.title = r.name;
+    const isOutlier = _tlOutlierProjs.has(r.name) && document.getElementById('tlShowOutliers')?.checked;
+    if (isOutlier) {
+      const badge = document.createElement('span');
+      badge.className = 'inline-block mr-1 px-1 rounded text-[9px] font-bold bg-rose-400/15 text-rose-300 align-middle';
+      badge.textContent = '\u26A0';
+      badge.title = '$/hr 평균 + 2σ 초과';
+      nameCell.appendChild(badge);
+    }
+    const nameText = document.createElement('span'); nameText.textContent = r.name;
+    nameCell.appendChild(nameText);
     tr.appendChild(nameCell);
     tr.appendChild(mkTd(fmtN(r.sessionCount), 'px-2 py-1.5 text-right text-white/50 tabular-nums'));
     tr.appendChild(mkTd(fmt$(r.totalCost), 'px-2 py-1.5 text-right text-amber-400/80 font-bold tabular-nums'));
@@ -744,6 +885,263 @@ function _renderTrendChart(thisWeekData, lastWeekData) {
       scales: { x: { grid: grd(), ticks: tck() }, y: { grid: grd(), ticks: { ...tck(), callback: v => '$' + v.toFixed(2) } } },
     },
   }));
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5b. DELTA VIEW (yesterday → today per-project)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function _aggByProject(sessions) {
+  const m = new Map();
+  for (const s of sessions || []) {
+    const k = s.project_name || '(unknown)';
+    const prev = m.get(k) || { cost: 0, sessions: 0, duration: 0 };
+    prev.cost += s.cost_usd || 0;
+    prev.sessions += 1;
+    prev.duration += s.duration_seconds || 0;
+    m.set(k, prev);
+  }
+  return m;
+}
+
+function _deltaBaseDate() {
+  const input = document.getElementById('tlDeltaDate');
+  if (input && input.value) return input.value;
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function _loadDelta() {
+  const body = document.getElementById('tlDeltaBody');
+  const summary = document.getElementById('tlDeltaSummary');
+  const rangeLabel = document.getElementById('tlDeltaRange');
+  if (!body || !summary) return;
+
+  const today = _deltaBaseDate();
+  const ymd = new Date(today + 'T00:00:00Z');
+  ymd.setUTCDate(ymd.getUTCDate() - 1);
+  const yesterday = ymd.toISOString().slice(0, 10);
+  if (rangeLabel) rangeLabel.textContent = yesterday + '  →  ' + today;
+
+  body.textContent = '';
+  summary.textContent = '';
+  const loading = document.createElement('div');
+  loading.className = 'text-center text-white/15 text-xs py-6 dots';
+  loading.textContent = '\uB85C\uB529 \uC911';
+  body.appendChild(loading);
+
+  try {
+    const [todayD, yestD] = await Promise.all([
+      safeFetch('/api/timeline?date_from=' + today + '&date_to=' + today),
+      safeFetch('/api/timeline?date_from=' + yesterday + '&date_to=' + yesterday),
+    ]);
+    _renderDelta(todayD.sessions || [], yestD.sessions || [], summary, body);
+  } catch (e) {
+    body.textContent = '';
+    const err = document.createElement('div');
+    err.className = 'text-center text-red-400/60 text-xs py-4';
+    err.textContent = '\uB378\uD0C0 \uB85C\uB4DC \uC2E4\uD328';
+    body.appendChild(err);
+  }
+}
+
+function _renderDelta(todaySessions, yestSessions, summaryEl, bodyEl) {
+  const todayAgg = _aggByProject(todaySessions);
+  const yestAgg = _aggByProject(yestSessions);
+  const totalToday = { cost: 0, sessions: todaySessions.length, duration: 0 };
+  for (const v of todayAgg.values()) { totalToday.cost += v.cost; totalToday.duration += v.duration; }
+  const totalYest = { cost: 0, sessions: yestSessions.length, duration: 0 };
+  for (const v of yestAgg.values()) { totalYest.cost += v.cost; totalYest.duration += v.duration; }
+
+  summaryEl.textContent = '';
+  const mkSummary = (label, todayVal, yestVal, formatter, colorPositive) => {
+    const card = document.createElement('div');
+    card.className = 'bg-white/[0.03] rounded-lg p-2.5';
+    const lbl = document.createElement('div');
+    lbl.className = 'text-[9px] text-white/30 uppercase tracking-widest mb-1';
+    lbl.textContent = label;
+    const valRow = document.createElement('div');
+    valRow.className = 'flex items-baseline gap-1.5';
+    const val = document.createElement('div');
+    val.className = 'text-sm font-bold text-white/85 tabular-nums';
+    val.textContent = formatter(todayVal);
+    valRow.appendChild(val);
+
+    const delta = todayVal - yestVal;
+    const pct = yestVal > 0 ? (delta / yestVal) * 100 : (todayVal > 0 ? 100 : 0);
+    const sign = delta > 0 ? '+' : '';
+    const deltaEl = document.createElement('span');
+    const goodDirection = colorPositive ? delta > 0 : delta < 0;
+    deltaEl.className = 'text-[10px] tabular-nums ' + (delta === 0 ? 'text-white/30' : goodDirection ? 'text-emerald-300/80' : 'text-rose-300/80');
+    if (delta === 0) deltaEl.textContent = '=';
+    else deltaEl.textContent = sign + formatter(delta) + ' (' + sign + pct.toFixed(0) + '%)';
+    valRow.appendChild(deltaEl);
+
+    const yestRow = document.createElement('div');
+    yestRow.className = 'text-[9px] text-white/25 mt-0.5';
+    yestRow.textContent = '\uC5B4\uC81C ' + formatter(yestVal);
+
+    card.append(lbl, valRow, yestRow);
+    return card;
+  };
+
+  summaryEl.append(
+    mkSummary('\uBE44\uC6A9', totalToday.cost, totalYest.cost, fmt$, true),
+    mkSummary('\uC138\uC158', totalToday.sessions, totalYest.sessions, fmtN, true),
+    mkSummary('\uC18C\uC694', totalToday.duration, totalYest.duration, fmtDurationSec, true),
+    mkSummary('\uD504\uB85C\uC81D\uD2B8', todayAgg.size, yestAgg.size, fmtN, true),
+  );
+
+  bodyEl.textContent = '';
+  if (todayAgg.size === 0 && yestAgg.size === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'text-center text-white/20 text-xs py-6';
+    empty.textContent = '\uB450 \uB0A0\uC9DC \uBAA8\uB450 \uB370\uC774\uD130 \uC5C6\uC74C';
+    bodyEl.appendChild(empty);
+    return;
+  }
+
+  // Union of projects
+  const allProj = new Set([...todayAgg.keys(), ...yestAgg.keys()]);
+  const rows = [...allProj].map(name => {
+    const t = todayAgg.get(name) || { cost: 0, sessions: 0, duration: 0 };
+    const y = yestAgg.get(name) || { cost: 0, sessions: 0, duration: 0 };
+    return {
+      name,
+      todayCost: t.cost, yestCost: y.cost,
+      todaySes: t.sessions, yestSes: y.sessions,
+      deltaCost: t.cost - y.cost,
+      isNew: t.cost > 0 && y.cost === 0 && y.sessions === 0,
+      isEnded: t.cost === 0 && t.sessions === 0 && y.cost > 0,
+    };
+  });
+
+  // Sort: new first, then by absolute |deltaCost| desc
+  rows.sort((a, b) => {
+    if (a.isNew !== b.isNew) return a.isNew ? -1 : 1;
+    return Math.abs(b.deltaCost) - Math.abs(a.deltaCost);
+  });
+
+  const newCount = rows.filter(r => r.isNew).length;
+  const endedCount = rows.filter(r => r.isEnded).length;
+
+  // Header strip for new/ended counts
+  if (newCount + endedCount > 0) {
+    const strip = document.createElement('div');
+    strip.className = 'flex items-center gap-3 text-[10px] mb-2';
+    if (newCount > 0) {
+      const s = document.createElement('span'); s.className = 'text-emerald-300/80 font-bold';
+      s.textContent = '\uC2E0\uADDC ' + fmtN(newCount) + '\uAC1C';
+      strip.appendChild(s);
+    }
+    if (endedCount > 0) {
+      const s = document.createElement('span'); s.className = 'text-white/30';
+      s.textContent = '\uC911\uB2E8 ' + fmtN(endedCount) + '\uAC1C';
+      strip.appendChild(s);
+    }
+    bodyEl.appendChild(strip);
+  }
+
+  // Find max absolute delta for bar scaling
+  const maxAbs = Math.max(1e-6, ...rows.map(r => Math.abs(r.deltaCost)));
+
+  const table = document.createElement('table');
+  table.className = 'w-full text-[11px]';
+  const thead = document.createElement('thead');
+  const htr = document.createElement('tr');
+  htr.className = 'text-[9px] text-white/30 uppercase tracking-widest border-b border-white/[0.05]';
+  ['\uD504\uB85C\uC81D\uD2B8', '\uC5B4\uC81C', '\uC624\uB298', '\uBCC0\uD654', ''].forEach((t, i) => {
+    const th = document.createElement('th');
+    th.className = (i === 0 ? 'text-left' : 'text-right') + ' px-2 py-1.5 font-bold';
+    th.textContent = t;
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr); table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (const r of rows.slice(0, 20)) {
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-white/[0.03] hover:bg-white/[0.03] spring';
+
+    const nameTd = document.createElement('td');
+    nameTd.className = 'px-2 py-1.5 truncate max-w-[220px]';
+    nameTd.title = r.name;
+    if (r.isNew) {
+      const b = document.createElement('span');
+      b.className = 'inline-block mr-1 px-1 rounded text-[8px] font-bold bg-emerald-400/15 text-emerald-300 align-middle';
+      b.textContent = 'NEW';
+      nameTd.appendChild(b);
+    } else if (r.isEnded) {
+      const b = document.createElement('span');
+      b.className = 'inline-block mr-1 px-1 rounded text-[8px] font-bold bg-white/5 text-white/40 align-middle';
+      b.textContent = 'END';
+      nameTd.appendChild(b);
+    }
+    const nameSpan = document.createElement('span');
+    nameSpan.className = r.isEnded ? 'text-white/40' : 'text-white/75 font-semibold';
+    nameSpan.textContent = r.name;
+    nameTd.appendChild(nameSpan);
+    tr.appendChild(nameTd);
+
+    const mkNumTd = (text, cls) => {
+      const td = document.createElement('td');
+      td.className = 'px-2 py-1.5 text-right tabular-nums ' + cls;
+      td.textContent = text;
+      return td;
+    };
+    tr.appendChild(mkNumTd(r.yestCost > 0 ? fmt$(r.yestCost) : '\u2014',
+      'text-white/40'));
+    tr.appendChild(mkNumTd(r.todayCost > 0 ? fmt$(r.todayCost) : '\u2014',
+      'text-amber-400/80 font-bold'));
+
+    // Delta bar (signed, centered)
+    const dTd = document.createElement('td');
+    dTd.className = 'px-2 py-1.5';
+    const dWrap = document.createElement('div');
+    dWrap.className = 'flex items-center gap-2 justify-end';
+    const dText = document.createElement('span');
+    const delta = r.deltaCost;
+    const sign = delta > 0 ? '+' : '';
+    dText.className = 'tabular-nums text-[10px] ' + (Math.abs(delta) < 0.005 ? 'text-white/30' : delta > 0 ? 'text-emerald-300/85' : 'text-rose-300/85');
+    dText.textContent = Math.abs(delta) < 0.005 ? '=' : (sign + fmt$(delta));
+    const barWrap = document.createElement('div');
+    barWrap.className = 'relative w-20 h-2 bg-white/[0.04] rounded-full overflow-hidden';
+    const bar = document.createElement('div');
+    const mag = Math.min(1, Math.abs(delta) / maxAbs);
+    bar.style.position = 'absolute';
+    bar.style.top = '0'; bar.style.bottom = '0';
+    bar.style.width = (mag * 50).toFixed(1) + '%';
+    if (delta >= 0) { bar.style.left = '50%'; bar.style.background = 'rgba(52,211,153,0.55)'; }
+    else { bar.style.right = '50%'; bar.style.background = 'rgba(251,113,133,0.55)'; }
+    // midline
+    const mid = document.createElement('div');
+    mid.style.position = 'absolute'; mid.style.left = '50%'; mid.style.top = '0'; mid.style.bottom = '0';
+    mid.style.width = '1px'; mid.style.background = 'rgba(255,255,255,0.1)';
+    barWrap.append(bar, mid);
+    dWrap.append(dText, barWrap);
+    dTd.appendChild(dWrap);
+    tr.appendChild(dTd);
+
+    const spark = document.createElement('td');
+    spark.className = 'px-2 py-1.5 text-right text-[9px] text-white/25 tabular-nums';
+    const sesDelta = r.todaySes - r.yestSes;
+    spark.textContent = r.yestSes + '\u2192' + r.todaySes + '\uC138\uC158';
+    if (sesDelta !== 0) {
+      const ssign = sesDelta > 0 ? '+' : '';
+      spark.textContent += ' (' + ssign + sesDelta + ')';
+    }
+    tr.appendChild(spark);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  bodyEl.appendChild(table);
+
+  if (rows.length > 20) {
+    const more = document.createElement('div');
+    more.className = 'text-[9px] text-white/20 text-center mt-2';
+    more.textContent = '+' + (rows.length - 20) + '\uAC1C \uB354';
+    bodyEl.appendChild(more);
+  }
 }
 
 
@@ -1061,6 +1459,15 @@ document.querySelectorAll('.tl-range').forEach(btn => {
 });
 
 document.getElementById('tlShowSubagents')?.addEventListener('change', loadTimeline);
+document.getElementById('tlShowLinks')?.addEventListener('change', () => {
+  const c = getChart('timeline'); if (c) c.update('none');
+});
+document.getElementById('tlShowOutliers')?.addEventListener('change', () => {
+  if (_tlLastData) {
+    _renderTimelineChart(_tlLastData.data, _tlLastData.dateFrom, _tlLastData.dateTo);
+    _renderEfficiency(_tlLastData.data);
+  }
+});
 document.getElementById('tlNodeFilter')?.addEventListener('change', () => { _tlNodePopulated = false; loadTimeline(); });
 document.getElementById('tlResetZoom')?.addEventListener('click', () => {
   const _tlChart = getChart('timeline'); if (_tlChart) { _tlChart.resetZoom(); document.getElementById('tlResetZoom')?.classList.add('hidden'); }
@@ -1075,3 +1482,5 @@ document.getElementById('tlHourlyMetric')?.addEventListener('change', () => {
 document.getElementById('timelineChartWrap')?.addEventListener('mouseleave', () => {
   document.getElementById('tlHoverCard')?.classList.add('hidden');
 });
+document.getElementById('tlDeltaDate')?.addEventListener('change', _loadDelta);
+document.getElementById('tlDeltaRefresh')?.addEventListener('click', _loadDelta);

@@ -1004,7 +1004,7 @@ def api_timeline(
         rows = db.execute(f'''
             SELECT id, project_name, project_path, created_at, updated_at,
                    cost_micro * 1.0 / 1000000 AS cost_usd,
-                   model, is_subagent, source_node,
+                   model, is_subagent, parent_session_id, source_node,
                    {_DURATION_SQL} AS duration_seconds
             FROM sessions
             WHERE created_at >= ? AND created_at <= ?
