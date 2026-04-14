@@ -4,7 +4,7 @@ Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간
 다중 서버의 Claude Code 데이터를 중앙 수집하고, claude.ai 웹 대화 export 도 통합 뷰어에서 검색할 수 있다.
 
 ```
-~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 58 routes  →  SPA 브라우저
+~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 62 routes  →  SPA 브라우저
                                                                   ↑
                                 [원격 서버] collector.py  →  POST /api/ingest
 ```
@@ -12,8 +12,8 @@ Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간
 | 스택 | 상세 |
 |------|------|
 | 백엔드 | Python 3.12, FastAPI, uvicorn, watchdog |
-| 저장소 | SQLite WAL + FTS5, micro-dollar 정수 비용, v13 스키마 |
-| 프런트 | esbuild 번들 (187KB) + Tailwind v3 빌드 (50KB) + Pretendard + Chart.js |
+| 저장소 | SQLite WAL + FTS5, micro-dollar 정수 비용, v14 스키마 |
+| 프런트 | esbuild 번들 (198KB) + Tailwind v3 빌드 (51KB) + Pretendard + Chart.js |
 | 테스트 | 174 pytest (10초), CI: ruff + bandit + pip-audit + esbuild |
 
 ## 빠른 시작
@@ -73,10 +73,12 @@ npm run dev                                   # watch 모드 (개발)
 - 통계 바, 시간 갭, 키보드 내비게이션 (j/k), 마크다운 내보내기
 - WS 실시간 tail, subagent 디스패치 체인 시각화 (depth 5)
 
-### 타임라인 (Gantt) — 15개 기능
+### 타임라인 (Gantt) — 18개 기능
 - 프로젝트별 Gantt, 누적 비용 오버레이, 동시 작업 감지
 - 줌/팬, 요일x시간 히트맵 + 드릴다운, 시간별 스택드 바 차트
 - 시간별 아코디언, 효율 분석, 일간 리포트, 주간 트렌드
+- 부모→자식(subagent) 연결 화살표, $/hr 이상치 자동 강조
+- 어제→오늘 델타 카드 (신규/중단 프로젝트), 이름 해시 기반 프로젝트별 고유 색상
 
 ### 다중 서버 수집
 - 원격 서버의 `~/.claude/projects/` 를 중앙 대시보드로 push
@@ -89,6 +91,12 @@ INGEST_KEY=<key> python3 collector.py --url http://dashboard:8765 --node-id serv
 ```
 
 - 세션/타임라인에서 노드별 필터링, Windows 경로 자동 파싱
+
+### 관리자 (Admin)
+- **대시보드 상태**: 가동시간, 스키마 버전, DB/WAL 크기, 세션·메시지·subagent·원격노드 카운트, Watcher 상태·큐
+- **보존 스케줄**: 내장 asyncio 스케줄러 (enable/interval/days), 마지막·다음 실행 시각 표시
+- **감사 로그**: 모든 관리자 액션(backup/retention/node_*)을 IP·상태·상세 JSON과 함께 기록·필터 조회
+- **백업·복원·보존**: `sqlite3.backup()` 기반 일관 백업 (10개 로테이션), 보존 preview → confirm
 
 ### 그 외
 - **Subagent 분석**: 유형별/종료사유/비용TOP10/소요TOP10/히트맵/매트릭스 (7개 섹션)
@@ -129,8 +137,8 @@ dashboard.example.com {
 ## 프로젝트 구조
 
 ```
-main.py              FastAPI 58 routes + WS + 쿠키 세션 인증
-database.py          SQLite WAL, v0→v13 마이그레이션, write/read 분리
+main.py              FastAPI 62 routes + WS + 쿠키 세션 인증 + in-app 스케줄러
+database.py          SQLite WAL, v0→v14 마이그레이션, write/read 분리
 parser.py            JSONL 파싱, 비용 계산, cross-platform cwd
 watcher.py           watchdog + safety poll
 collector.py         원격 수집 에이전트 (stdlib only)
@@ -173,7 +181,11 @@ docs/
 ./rebuild.sh                   # DB 전체 재빌드 (스냅샷 → rm → 자동 재스캔)
 ```
 
-### 자동 보존 정책
+### 자동 보존 정책 — 두 가지 경로
+
+**A. 내장 asyncio 스케줄러 (권장)** — Export/Admin UI에서 토글로 활성화. `interval_hours`와 `older_than_days`를 설정하면 백그라운드 루프가 주기 체크 후 자동 실행. 설정은 `app_config` 테이블에 영속화되어 재시작에도 유지. Docker/VPS 동일하게 동작.
+
+**B. systemd timer (레거시)** — 기존 설치 유지용.
 
 ```bash
 sudo cp claude-dashboard-retention.{service,timer} /etc/systemd/system/
@@ -185,7 +197,7 @@ sudo systemctl enable --now claude-dashboard-retention.timer
 
 | 문서 | 내용 |
 |------|------|
-| [`docs/API.md`](docs/API.md) | REST API 58 routes + WebSocket |
+| [`docs/API.md`](docs/API.md) | REST API 62 routes + WebSocket |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 아키텍처 가이드 |
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | DB 스키마, 마이그레이션, SQL 예제 |
 | [`docs/QUALITY-GATES.md`](docs/QUALITY-GATES.md) | 8단계 품질 게이트 |

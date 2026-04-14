@@ -1,6 +1,6 @@
 # REST API
 
-58 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features` 은 인증 우회.
+62 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features` 은 인증 우회.
 
 ## 자동 생성 스펙 (FastAPI)
 
@@ -93,10 +93,21 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 | GET / POST | `/api/plan/config` | 예산 조회/저장 (daily ≤ weekly 검증) |
 | GET | `/api/plan/usage` | 일/주간 사용량 vs 예산 + 잔여 시각 |
 | GET | `/api/export/csv` | CSV 23 컬럼 (tags, stop_reason, parent_tool_use_id, duration, agent_type/description 포함) |
-| POST | `/api/admin/backup` | DB 백업 (write_lock, 10개 유지) |
-| DELETE | `/api/admin/retention` | preview → confirm |
-| GET | `/api/admin/db-size` | DB 파일 크기 |
 | WS | `/ws` | 실시간 (init / batch_update / scan_progress / scan_complete, ping 30s). 쿠키 세션 인증 (`dash_session`) |
+
+## 관리자 (admin)
+
+관리자 UI의 "내보내기/Admin" 뷰에서 사용되는 라우트. 모든 admin 액션은 `admin_audit` 테이블에 `{action, actor_ip, status, detail}` 로 기록된다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/admin/backup` | DB 백업 (`_write_lock` + `sqlite3.backup()`, 10개 유지). 감사 `action=backup` |
+| DELETE | `/api/admin/retention` | 오래된 세션 삭제. `?older_than_days=N&confirm=true`. preview → confirm 2단계. 감사 `action=retention` |
+| GET | `/api/admin/db-size` | DB 파일 크기 (bytes / MB) |
+| GET | `/api/admin/status` | 가동시간, 스키마 버전, DB·WAL 크기, 세션·메시지·subagent·원격노드·audit 카운트, watcher 상태·큐·추적 파일 수 |
+| GET | `/api/admin/audit?limit=100&action=` | 감사 로그 조회 (최근순, action 필터) |
+| GET | `/api/admin/retention/schedule` | 보존 스케줄 설정 조회 — `{enabled, interval_hours, older_than_days, last_run_at, last_result, next_run_at}` |
+| PUT | `/api/admin/retention/schedule` | 스케줄 갱신 (enabled/interval_hours/older_than_days). 감사 `action=retention_schedule_update`. 내장 asyncio 루프가 60초마다 확인하여 due 시 자동 실행 (`action=retention_scheduled`) |
 
 ## 원격 노드 수집
 

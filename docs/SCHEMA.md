@@ -1,7 +1,7 @@
 # 데이터베이스 스키마
 
 SQLite 파일: `~/.claude/dashboard.db`
-모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA auto_vacuum=INCREMENTAL`, `PRAGMA user_version=11`
+모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA auto_vacuum=INCREMENTAL`, `PRAGMA user_version=14`
 
 ## 비용은 INTEGER micro-dollars
 
@@ -33,6 +33,8 @@ SELECT cost_micro * 1.0 / 1000000 AS cost_usd FROM messages;
 | `parent_tool_use_id` | TEXT | **v7** | 부모의 `toolu_*` id |
 | `task_prompt` | TEXT | **v7** | 부모가 dispatch 시 보낸 prompt (≤2KB) |
 | `tags` | TEXT | **v8** | 콤마 구분 사용자 태그 |
+| `turn_duration_ms` | INTEGER | **v12** | 마지막 user→assistant turn의 실행 시간 (ms) |
+| `source_node` | TEXT | **v13** | `'local'` 또는 원격 `node_id` — 다중 서버 구분자 |
 
 ## messages
 
@@ -98,6 +100,56 @@ CREATE VIRTUAL TABLE claude_ai_messages_fts USING fts5(
 -- cai_msg_fts_ai / _ad / _au 트리거가 동기화
 ```
 
+## remote_nodes (v13)
+
+다중 서버 수집을 위한 등록된 원격 노드. `collector.py` 가 `X-Ingest-Key` 헤더로 인증하며, 해시는 이 테이블에 저장.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `node_id` | TEXT PK | `[a-zA-Z0-9_-]+` |
+| `label` | TEXT | 사람이 읽는 이름 |
+| `ingest_key_hash` | TEXT | SHA-256 해시 (원본 키는 서버에 저장 안 됨) |
+| `last_seen` | TEXT | 마지막 `/api/ingest` 호출 시각 |
+| `session_count`, `message_count` | INTEGER | 수집 누적 카운트 |
+| `created_at` | TEXT | ISO 8601 |
+
+## admin_audit (v14)
+
+관리자 액션 감사 로그. `/api/admin/backup`, `/retention`, `/retention/schedule`, `/api/nodes/*` 호출이 기록됨.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `id` | INTEGER PK | autoincrement |
+| `ts` | TEXT | ISO 8601 with ms |
+| `action` | TEXT | `backup` / `retention` / `retention_scheduled` / `retention_schedule_update` / `node_register` / `node_delete` / `node_rotate_key` |
+| `actor_ip` | TEXT | 요청자 IP (스케줄러 자동 실행 시 `local`) |
+| `status` | TEXT | `ok` / `error` |
+| `detail` | TEXT | JSON (옵션) — 예: `{"sessions_deleted": 42, "messages_deleted": 1800}` |
+
+인덱스: `idx_admin_audit_ts ON admin_audit(ts DESC)`
+
+## app_config (v14)
+
+키-값 스토어. 현재 `retention_schedule` 한 키만 사용하지만 향후 in-app 설정 전반에 재사용 가능.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `key` | TEXT PK | `'retention_schedule'` 등 |
+| `value` | TEXT | JSON 문자열 |
+| `updated_at` | TEXT | ISO 8601 |
+
+`retention_schedule` 값 구조:
+
+```json
+{
+  "enabled": true,
+  "interval_hours": 24,
+  "older_than_days": 90,
+  "last_run_at": "2026-04-14T11:45:00Z",
+  "last_result": {"sessions": 12, "messages": 340}
+}
+```
+
 ## plan_config
 
 | 컬럼 | 설명 |
@@ -134,13 +186,16 @@ idx_sessions_parent_tool_use
 | v9 | `claude_ai_conversations` + `claude_ai_messages` + `claude_ai_messages_fts` (독립 FTS5) + 트리거. claude.ai 웹 export 전용, 기존 sessions/messages 와 격리 |
 | v10 | `idx_sessions_parent_is_sub` — `(parent_session_id, is_subagent)` 복합 인덱스. `/api/sessions` 핫 패스 서브쿼리가 **SCAN → SEARCH** 로 전환되어 O(N²) → O(N log N) |
 | v11 | `claude_ai_messages.updated_at` — 재import 시 버전 비교 후 UPDATE 가능 (이전엔 `INSERT OR IGNORE` 로 조용히 drop) |
+| v12 | `sessions.turn_duration_ms` — user→assistant 턴 실행 시간 (ms) |
+| v13 | `sessions.source_node` + `remote_nodes` 테이블 — 다중 서버 수집 식별 (`idx_sessions_source_node`) |
+| v14 | `admin_audit` + `app_config` — 관리자 액션 감사 로그 + in-app 설정 스토어 (`idx_admin_audit_ts`) |
 
 ### DB 재구축 (드물게)
 
 ```bash
 rm ~/.claude/dashboard.db
 sudo systemctl restart claude-dashboard
-# 시작 시 JSONL 재스캔 + v0→v8 마이그레이션 + integrity check
+# 시작 시 JSONL 재스캔 + v0→v14 마이그레이션 + integrity check
 ```
 
 ## 모델 가격표

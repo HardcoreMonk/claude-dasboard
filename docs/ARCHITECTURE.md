@@ -16,7 +16,7 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
            |
      [SQLite WAL 쓰기]          database.py
            |
-     [FastAPI 58 routes]        main.py
+     [FastAPI 62 routes]        main.py
        /       \
    REST API   WebSocket
        \       /
@@ -41,7 +41,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 
 ### main.py — FastAPI 애플리케이션
 
-**58 HTTP routes + 1 WebSocket** 을 호스팅.
+**62 HTTP routes + 1 WebSocket** 을 호스팅.
 
 | 그룹 | 라우트 | 역할 |
 |---|---|---|
@@ -59,7 +59,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 | 플랜 | `/api/plan/detect`, `/plan/config`, `/plan/usage` | 요금제 감지, 예산 설정 |
 | claude.ai | `/api/claude-ai/conversations`, `/search`, `/stats` | claude.ai export 데이터 |
 | 원격 수집 | `/api/ingest`, `/api/nodes` | 다중 서버 JSONL 수집 (collector.py → POST /api/ingest) |
-| 관리 | `/api/admin/backup`, `/retention`, `/db-size` | 백업, 보존 정책, DB 용량 |
+| 관리 | `/api/admin/backup`, `/retention`, `/retention/schedule`, `/db-size`, `/status`, `/audit` | 백업, 보존 + 자동 스케줄러, 대시보드 상태, 감사 로그 |
 | 내보내기 | `/api/export/csv` | 세션 CSV 다운로드 |
 | WebSocket | `/ws` | 실시간 메시지 브로드캐스트 |
 
@@ -75,7 +75,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 ### database.py — SQLite 데이터 계층
 
 ```
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 모드: WAL, busy_timeout=5000, auto_vacuum=INCREMENTAL
 ```
 
@@ -98,8 +98,10 @@ SCHEMA_VERSION = 13
 | `claude_ai_conversations` | claude.ai export 대화 (sessions 와 완전 격리) |
 | `claude_ai_messages` | claude.ai export 메시지 |
 | `remote_nodes` | 원격 수집 노드 등록 (node_id, label, ingest_key) |
+| `admin_audit` | 관리자 액션 감사 로그 (ts/action/actor_ip/status/detail) |
+| `app_config` | in-app 설정 키-값 스토어 (현재 `retention_schedule`) |
 
-**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v13). 각 단계는 idempotent.
+**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v14). 각 단계는 idempotent.
 
 ### parser.py — JSONL 파싱 엔진
 
@@ -330,12 +332,32 @@ ProtectSystem=strict
 | `restore.sh` | `integrity_check` 후 복원 |
 | `rebuild.sh` | DB 삭제 → 전체 JSONL 재파싱 |
 
-### 주간 보존
+### 보존 정책 (두 가지 경로)
+
+**A. 내장 asyncio 스케줄러 (v14~, 권장)**
+
+```
+lifespan 시작 → _retention_scheduler_loop() 태스크 생성
+  → 60초 sleep
+  → app_config['retention_schedule'] 읽기
+  → enabled && (now - last_run_at) ≥ interval_hours 면 _run_retention() 호출
+  → last_run_at / last_result 저장
+  → admin_audit 기록 (action=retention_scheduled)
+lifespan 종료 → 태스크 cancel
+```
+
+설정은 `PUT /api/admin/retention/schedule` 로 영속화. Docker/Fly/Railway 등 컨테이너 배포에서도 동일하게 동작. UI: Export/Admin 뷰.
+
+**B. systemd timer (레거시)**
 
 ```
 claude-dashboard-retention.timer  → 일요일 03:30 (15분 랜덤)
 claude-dashboard-retention.service → 오래된 데이터 정리
 ```
+
+### 감사 로그 (v14~)
+
+모든 관리자 액션(backup/retention/node_*)은 `_audit(action, request, detail)` 헬퍼를 통해 `admin_audit` 테이블에 기록. 스케줄러 자동 실행은 `actor_ip='local'`. 조회: `GET /api/admin/audit?limit=&action=`.
 
 ### CI/CD
 
