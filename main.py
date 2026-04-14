@@ -214,14 +214,21 @@ def _make_watcher_metrics() -> "WatcherMetrics":
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global watcher
+    global watcher, _sched_task
     init_db()
     if DB_PATH.exists() and not check_integrity():
         logger.error("DATABASE INTEGRITY CHECK FAILED — consider restoring from backup")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     watcher = ClaudeFileWatcher(manager.broadcast, metrics=_make_watcher_metrics())
     await watcher.start_async()
+    _sched_task = asyncio.create_task(_retention_scheduler_loop())
     yield
+    if _sched_task:
+        _sched_task.cancel()
+        try:
+            await _sched_task
+        except asyncio.CancelledError:
+            pass
     watcher.stop()
     wal_checkpoint()
     close_thread_connections()
@@ -2305,7 +2312,7 @@ def api_nodes():
 
 
 @app.post("/api/nodes")
-def api_register_node(payload: NodeRegister):
+def api_register_node(payload: NodeRegister, request: Request):
     """Register a new remote node. Returns a one-time ingest key."""
     raw_key = secrets.token_urlsafe(32)
     key_hash = _hash_ingest_key(raw_key)
@@ -2321,6 +2328,7 @@ def api_register_node(payload: NodeRegister):
             INSERT INTO remote_nodes (node_id, label, ingest_key_hash)
             VALUES (?, ?, ?)
         ''', (payload.node_id, payload.label or payload.node_id, key_hash))
+    _audit('node_register', request, detail={'node_id': payload.node_id, 'label': payload.label})
     return {
         'node_id': payload.node_id,
         'ingest_key': raw_key,
@@ -2329,7 +2337,7 @@ def api_register_node(payload: NodeRegister):
 
 
 @app.delete("/api/nodes/{node_id}")
-def api_delete_node(node_id: str):
+def api_delete_node(node_id: str, request: Request):
     """Unregister a remote node. Does NOT delete its ingested data."""
     with write_db() as db:
         deleted = db.execute(
@@ -2337,11 +2345,12 @@ def api_delete_node(node_id: str):
         ).rowcount
     if not deleted:
         return JSONResponse({'error': 'node not found'}, 404)
+    _audit('node_delete', request, detail={'node_id': node_id})
     return {'deleted': node_id}
 
 
 @app.post("/api/nodes/{node_id}/rotate-key")
-def api_rotate_node_key(node_id: str):
+def api_rotate_node_key(node_id: str, request: Request):
     """Rotate the ingest key for a node. Returns a new one-time key."""
     raw_key = secrets.token_urlsafe(32)
     key_hash = _hash_ingest_key(raw_key)
@@ -2352,6 +2361,7 @@ def api_rotate_node_key(node_id: str):
         ).rowcount
     if not updated:
         return JSONResponse({'error': 'node not found'}, 404)
+    _audit('node_rotate_key', request, detail={'node_id': node_id})
     return {
         'node_id': node_id,
         'ingest_key': raw_key,
@@ -2359,48 +2369,31 @@ def api_rotate_node_key(node_id: str):
     }
 
 
-# ─── Admin: backup + retention ────────────────────────────────────────────────
+# ─── Admin: audit log + backup + retention + scheduler + status ──────────────
 
-@app.post("/api/admin/backup")
-def api_backup():
-    """Create a timestamped SQLite backup (acquires write lock for consistency)."""
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    dest = BACKUP_DIR / f'dashboard_{ts}.db'
+def _client_ip(request: Optional[Request]) -> str:
+    if not request or not request.client:
+        return 'local'
+    return request.client.host or 'local'
+
+
+def _audit(action: str, request: Optional[Request], *, status: str = 'ok', detail: Optional[dict] = None) -> None:
+    """Record an admin action. Never raises — audit failure must not block the action."""
     try:
-        with _write_lock:
-            src_conn = sqlite3.connect(str(DB_PATH))
-            dst_conn = sqlite3.connect(str(dest))
-            src_conn.backup(dst_conn)
-            dst_conn.close()
-            src_conn.close()
-        # Keep only last 10 backups
-        backups = sorted(BACKUP_DIR.glob('dashboard_*.db'))
-        for old in backups[:-10]:
-            old.unlink(missing_ok=True)
-        size = dest.stat().st_size
-        return {'ok': True, 'path': str(dest), 'size_bytes': size}
-    except Exception as e:
-        logger.exception("Backup failed")
-        return JSONResponse({'error': 'backup failed', 'detail': 'check server logs'}, status_code=500)
+        with write_db() as db:
+            db.execute(
+                'INSERT INTO admin_audit (action, actor_ip, status, detail) VALUES (?, ?, ?, ?)',
+                (action, _client_ip(request), status,
+                 json.dumps(detail, ensure_ascii=False, default=str) if detail else None),
+            )
+    except Exception:
+        logger.exception("Audit log insert failed for action=%s", action)
 
 
-@app.delete("/api/admin/retention")
-def api_retention(
-    older_than_days: int = Query(90, ge=7, le=3650),
-    confirm: bool = Query(False),
-):
-    """Delete sessions older than N days. Set confirm=true to execute."""
+def _run_retention(older_than_days: int) -> dict:
+    """Core retention delete. Returns counts. Shared by HTTP route + scheduler."""
     cutoff = (datetime.now(_tz.utc) - timedelta(days=older_than_days)).strftime(
         '%Y-%m-%dT%H:%M:%SZ')
-
-    if not confirm:
-        # Preview only — show what WOULD be deleted
-        with read_db() as db:
-            cnt = db.execute(
-                'SELECT COUNT(*) FROM sessions WHERE updated_at < ?', (cutoff,)
-            ).fetchone()[0]
-        return {'preview': True, 'sessions_to_delete': cnt, 'cutoff': cutoff}
-
     with write_db() as db:
         old = db.execute(
             'SELECT id FROM sessions WHERE updated_at < ?', (cutoff,)
@@ -2417,8 +2410,62 @@ def api_retention(
             ).rowcount
     logger.info("Retention: deleted %d sessions, %d messages (cutoff=%s)",
                 sess_del, msg_del, cutoff)
-    return {'preview': False, 'deleted_sessions': sess_del,
-            'deleted_messages': msg_del, 'cutoff': cutoff}
+    return {'sessions': sess_del, 'messages': msg_del, 'cutoff': cutoff}
+
+
+@app.post("/api/admin/backup")
+def api_backup(request: Request):
+    """Create a timestamped SQLite backup (acquires write lock for consistency)."""
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    dest = BACKUP_DIR / f'dashboard_{ts}.db'
+    try:
+        with _write_lock:
+            src_conn = sqlite3.connect(str(DB_PATH))
+            dst_conn = sqlite3.connect(str(dest))
+            src_conn.backup(dst_conn)
+            dst_conn.close()
+            src_conn.close()
+        # Keep only last 10 backups
+        backups = sorted(BACKUP_DIR.glob('dashboard_*.db'))
+        for old in backups[:-10]:
+            old.unlink(missing_ok=True)
+        size = dest.stat().st_size
+        _audit('backup', request, detail={'path': str(dest), 'size_bytes': size})
+        return {'ok': True, 'path': str(dest), 'size_bytes': size}
+    except Exception as e:
+        _audit('backup', request, status='error', detail={'error': str(e)[:200]})
+        logger.exception("Backup failed")
+        return JSONResponse({'error': 'backup failed', 'detail': 'check server logs'}, status_code=500)
+
+
+@app.delete("/api/admin/retention")
+def api_retention(
+    request: Request,
+    older_than_days: int = Query(90, ge=7, le=3650),
+    confirm: bool = Query(False),
+):
+    """Delete sessions older than N days. Set confirm=true to execute."""
+    cutoff = (datetime.now(_tz.utc) - timedelta(days=older_than_days)).strftime(
+        '%Y-%m-%dT%H:%M:%SZ')
+
+    if not confirm:
+        # Preview only — show what WOULD be deleted
+        with read_db() as db:
+            cnt = db.execute(
+                'SELECT COUNT(*) FROM sessions WHERE updated_at < ?', (cutoff,)
+            ).fetchone()[0]
+        return {'preview': True, 'sessions_to_delete': cnt, 'cutoff': cutoff}
+
+    result = _run_retention(older_than_days)
+    _audit('retention', request, detail={
+        'older_than_days': older_than_days,
+        'sessions_deleted': result['sessions'],
+        'messages_deleted': result['messages'],
+    })
+    return {'preview': False,
+            'deleted_sessions': result['sessions'],
+            'deleted_messages': result['messages'],
+            'cutoff': result['cutoff']}
 
 
 @app.get("/api/admin/db-size")
@@ -2430,6 +2477,233 @@ def api_db_size():
         return {'size_bytes': size, 'size_mb': round(size / 1048576, 1)}
     except OSError:
         return {'size_bytes': 0, 'size_mb': 0}
+
+
+# ─── Audit log retrieval ─────────────────────────────────────────────────────
+
+@app.get("/api/admin/audit")
+def api_audit(
+    limit: int = Query(100, ge=1, le=500),
+    action: Optional[str] = Query(None, max_length=50),
+):
+    """Recent admin actions (descending by timestamp)."""
+    where = ''
+    params: list = []
+    if action:
+        where = 'WHERE action = ?'
+        params.append(action)
+    with read_db() as db:
+        rows = db.execute(
+            f'SELECT id, ts, action, actor_ip, status, detail FROM admin_audit {where} '
+            f'ORDER BY id DESC LIMIT ?', (*params, limit)
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get('detail'):
+            try:
+                d['detail'] = json.loads(d['detail'])
+            except Exception:
+                pass
+        out.append(d)
+    return {'entries': out, 'count': len(out)}
+
+
+# ─── Retention scheduler (in-app asyncio) ────────────────────────────────────
+
+_SCHED_KEY = 'retention_schedule'
+_SCHED_DEFAULTS = {
+    'enabled': False,
+    'interval_hours': 24,
+    'older_than_days': 90,
+    'last_run_at': None,
+    'last_result': None,
+}
+
+
+def _sched_load() -> dict:
+    with read_db() as db:
+        row = db.execute(
+            'SELECT value FROM app_config WHERE key = ?', (_SCHED_KEY,)
+        ).fetchone()
+    if not row:
+        return dict(_SCHED_DEFAULTS)
+    try:
+        v = json.loads(row['value'])
+        # Merge defaults for forward compat
+        return {**_SCHED_DEFAULTS, **v}
+    except Exception:
+        return dict(_SCHED_DEFAULTS)
+
+
+def _sched_save(cfg: dict) -> None:
+    with write_db() as db:
+        db.execute(
+            'INSERT INTO app_config (key, value, updated_at) VALUES (?, ?, ?) '
+            'ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at',
+            (_SCHED_KEY, json.dumps(cfg, ensure_ascii=False),
+             datetime.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')),
+        )
+
+
+class RetentionScheduleUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    interval_hours: Optional[int] = Field(None, ge=1, le=720)
+    older_than_days: Optional[int] = Field(None, ge=7, le=3650)
+
+
+@app.get("/api/admin/retention/schedule")
+def api_sched_get():
+    cfg = _sched_load()
+    cfg['next_run_at'] = _sched_next_run(cfg)
+    return cfg
+
+
+@app.put("/api/admin/retention/schedule")
+def api_sched_put(payload: RetentionScheduleUpdate, request: Request):
+    cur = _sched_load()
+    changed = {}
+    for field in ('enabled', 'interval_hours', 'older_than_days'):
+        v = getattr(payload, field)
+        if v is not None and cur.get(field) != v:
+            cur[field] = v
+            changed[field] = v
+    _sched_save(cur)
+    if changed:
+        _audit('retention_schedule_update', request, detail=changed)
+    cur['next_run_at'] = _sched_next_run(cur)
+    return cur
+
+
+def _sched_next_run(cfg: dict) -> Optional[str]:
+    if not cfg.get('enabled'):
+        return None
+    last = cfg.get('last_run_at')
+    interval_h = int(cfg.get('interval_hours') or 24)
+    now = datetime.now(_tz.utc)
+    if last:
+        try:
+            t = datetime.fromisoformat(last.replace('Z', '+00:00'))
+            nxt = t + timedelta(hours=interval_h)
+            if nxt < now:
+                nxt = now
+            return nxt.strftime('%Y-%m-%dT%H:%M:%SZ')
+        except Exception:
+            pass
+    return now.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+_sched_task: Optional[asyncio.Task] = None
+
+
+async def _retention_scheduler_loop():
+    """Background loop: checks every 60s whether retention should run."""
+    logger.info("Retention scheduler started")
+    try:
+        while True:
+            await asyncio.sleep(60)
+            try:
+                cfg = _sched_load()
+                if not cfg.get('enabled'):
+                    continue
+                interval_h = int(cfg.get('interval_hours') or 24)
+                now = datetime.now(_tz.utc)
+                last = cfg.get('last_run_at')
+                due = True
+                if last:
+                    try:
+                        t = datetime.fromisoformat(last.replace('Z', '+00:00'))
+                        due = (now - t) >= timedelta(hours=interval_h)
+                    except Exception:
+                        due = True
+                if not due:
+                    continue
+                older = int(cfg.get('older_than_days') or 90)
+                logger.info("Scheduler: running retention (older_than_days=%d)", older)
+                # Run retention in a thread to avoid blocking event loop (SQLite writes)
+                result = await asyncio.to_thread(_run_retention, older)
+                cfg['last_run_at'] = now.strftime('%Y-%m-%dT%H:%M:%SZ')
+                cfg['last_result'] = {
+                    'sessions': result['sessions'],
+                    'messages': result['messages'],
+                }
+                _sched_save(cfg)
+                _audit('retention_scheduled', None, detail=cfg['last_result'])
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Retention scheduler iteration failed")
+    except asyncio.CancelledError:
+        logger.info("Retention scheduler cancelled")
+
+
+# ─── Dashboard status (watcher + DB + WAL + schema + uptime) ─────────────────
+
+_APP_START_TS = time.time()
+
+
+@app.get("/api/admin/status")
+def api_admin_status():
+    # DB stats
+    try:
+        db_size = DB_PATH.stat().st_size
+    except OSError:
+        db_size = 0
+    wal_path = DB_PATH.with_suffix(DB_PATH.suffix + '-wal')
+    try:
+        wal_size = wal_path.stat().st_size if wal_path.exists() else 0
+    except OSError:
+        wal_size = 0
+
+    with read_db() as db:
+        schema_v = db.execute("PRAGMA user_version").fetchone()[0]
+        counts = {
+            'sessions': db.execute('SELECT COUNT(*) c FROM sessions').fetchone()['c'],
+            'messages': db.execute('SELECT COUNT(*) c FROM messages').fetchone()['c'],
+            'subagents': db.execute(
+                'SELECT COUNT(*) c FROM sessions WHERE is_subagent = 1'
+            ).fetchone()['c'],
+            'remote_nodes': db.execute('SELECT COUNT(*) c FROM remote_nodes').fetchone()['c'],
+            'audit_entries': db.execute('SELECT COUNT(*) c FROM admin_audit').fetchone()['c'],
+        }
+
+    # Watcher
+    w_running = bool(
+        watcher
+        and getattr(watcher, '_task', None) is not None
+        and not watcher._task.done()
+    )
+    w_queue = 0
+    if watcher and getattr(watcher, '_event_queue', None) is not None:
+        try:
+            w_queue = watcher._event_queue.qsize()
+        except Exception:
+            pass
+    w_files_tracked = 0
+    if watcher and hasattr(watcher, '_file_mtimes'):
+        try:
+            w_files_tracked = len(watcher._file_mtimes)
+        except Exception:
+            pass
+
+    uptime_sec = int(time.time() - _APP_START_TS)
+
+    return {
+        'uptime_seconds': uptime_sec,
+        'schema_version': schema_v,
+        'db': {
+            'path': str(DB_PATH),
+            'size_bytes': db_size,
+            'wal_size_bytes': wal_size,
+        },
+        'counts': counts,
+        'watcher': {
+            'running': w_running,
+            'queue_size': w_queue,
+            'files_tracked': w_files_tracked,
+        },
+        'auth_enabled': bool(_AUTH_PW),
+    }
 
 
 # ─── claude.ai export routes ─────────────────────────────────────────────────

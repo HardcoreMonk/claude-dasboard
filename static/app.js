@@ -211,7 +211,7 @@ function onViewChange(view) {
   if (view === 'projects') loadProjects();
   if (view === 'subagents') { loadSubagentHeatmap(); loadSubagentDetails(); loadSubagentSuccessMatrix(); }
   if (view === 'timeline' && typeof loadTimeline === 'function') loadTimeline();
-  if (view === 'export') { loadDbSize(); renderNodeList(); }
+  if (view === 'export') { loadDbSize(); renderNodeList(); loadAdminStatus(); loadSchedule(); loadAuditLog(); }
 }
 
 function parseHash() {
@@ -2284,6 +2284,179 @@ async function loadDbSize() {
     document.getElementById('dbSizeLabel').textContent = `${r.size_mb} MB`;
   } catch (e) { /* silent */ }
 }
+
+// ─── Dashboard status ───────────────────────────────────────────────────────
+function _fmtBytes(n) {
+  if (!n) return '0 B';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+function _fmtUptime(s) {
+  if (s < 60) return s + '초';
+  if (s < 3600) return Math.floor(s / 60) + '분 ' + (s % 60) + '초';
+  if (s < 86400) return Math.floor(s / 3600) + '시간 ' + Math.floor((s % 3600) / 60) + '분';
+  return Math.floor(s / 86400) + '일 ' + Math.floor((s % 86400) / 3600) + '시간';
+}
+
+async function loadAdminStatus() {
+  const body = document.getElementById('adminStatusBody');
+  if (!body) return;
+  try {
+    const d = await safeFetch('/api/admin/status');
+    body.textContent = '';
+    const grid = document.createElement('div');
+    grid.className = 'grid grid-cols-2 gap-2';
+    const card = (label, value, cls) => {
+      const c = document.createElement('div');
+      c.className = 'bg-white/[0.03] rounded-lg p-2';
+      const l = document.createElement('div');
+      l.className = 'text-[9px] text-white/30 uppercase tracking-widest';
+      l.textContent = label;
+      const v = document.createElement('div');
+      v.className = 'text-xs font-bold tabular-nums mt-0.5 ' + (cls || 'text-white/80');
+      v.textContent = value;
+      c.append(l, v); return c;
+    };
+    const c = d.counts || {};
+    const w = d.watcher || {};
+    grid.append(
+      card('가동 시간', _fmtUptime(d.uptime_seconds || 0), 'text-emerald-400/80'),
+      card('스키마', 'v' + (d.schema_version || 0), 'text-cyan-400/80'),
+      card('DB 크기', _fmtBytes(d.db?.size_bytes || 0)),
+      card('WAL 크기', _fmtBytes(d.db?.wal_size_bytes || 0), (d.db?.wal_size_bytes > 52428800 ? 'text-amber-400/80' : 'text-white/80')),
+      card('세션', fmtN(c.sessions || 0)),
+      card('메시지', fmtN(c.messages || 0)),
+      card('Subagent', fmtN(c.subagents || 0), 'text-blue-400/80'),
+      card('원격 노드', fmtN(c.remote_nodes || 0)),
+      card('Watcher', w.running ? '실행 중' : '정지', w.running ? 'text-emerald-400/80' : 'text-rose-400/80'),
+      card('추적 파일', fmtN(w.files_tracked || 0) + (w.queue_size ? ` (q:${w.queue_size})` : '')),
+    );
+    body.appendChild(grid);
+  } catch (e) {
+    body.textContent = '';
+    const err = document.createElement('div');
+    err.className = 'text-center text-red-400/60 text-xs py-3';
+    err.textContent = '상태 로드 실패';
+    body.appendChild(err);
+  }
+}
+function refreshAdminStatus() { loadAdminStatus(); }
+
+// ─── Retention schedule ────────────────────────────────────────────────────
+async function loadSchedule() {
+  try {
+    const d = await safeFetch('/api/admin/retention/schedule');
+    const cb = document.getElementById('schedEnabled');
+    const iv = document.getElementById('schedInterval');
+    const dy = document.getElementById('schedDays');
+    const lbl = document.getElementById('schedEnabledLabel');
+    const meta = document.getElementById('schedMeta');
+    if (cb) cb.checked = !!d.enabled;
+    if (iv) iv.value = d.interval_hours || 24;
+    if (dy) dy.value = d.older_than_days || 90;
+    if (lbl) { lbl.textContent = d.enabled ? '활성' : '비활성'; lbl.className = 'text-[10px] ' + (d.enabled ? 'text-emerald-400/80' : 'text-white/60'); }
+    if (meta) {
+      meta.textContent = '';
+      const mkLine = (k, v, cls) => {
+        const r = document.createElement('div');
+        const kk = document.createElement('span'); kk.className = 'text-white/25 mr-2'; kk.textContent = k;
+        const vv = document.createElement('span'); vv.className = cls || 'text-white/60 tabular-nums'; vv.textContent = v;
+        r.append(kk, vv); return r;
+      };
+      if (d.enabled && d.next_run_at) meta.appendChild(mkLine('다음 실행', d.next_run_at.replace('T', ' ').replace('Z', ' UTC'), 'text-accent/70'));
+      if (d.last_run_at) {
+        meta.appendChild(mkLine('마지막 실행', d.last_run_at.replace('T', ' ').replace('Z', ' UTC')));
+        if (d.last_result) {
+          meta.appendChild(mkLine('마지막 결과', `세션 ${fmtN(d.last_result.sessions || 0)} · 메시지 ${fmtN(d.last_result.messages || 0)} 삭제`));
+        }
+      } else {
+        meta.appendChild(mkLine('마지막 실행', '없음', 'text-white/30'));
+      }
+    }
+  } catch (e) {
+    reportError('loadSchedule', e);
+  }
+}
+
+async function saveSchedule() {
+  const payload = {
+    enabled: document.getElementById('schedEnabled')?.checked || false,
+    interval_hours: parseInt(document.getElementById('schedInterval')?.value || '24', 10),
+    older_than_days: parseInt(document.getElementById('schedDays')?.value || '90', 10),
+  };
+  try {
+    await safeFetch('/api/admin/retention/schedule', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    showToast('스케줄 저장됨', { type: 'success', duration: 2000 });
+    loadSchedule();
+  } catch (e) { reportError('saveSchedule', e); }
+}
+
+// ─── Audit log ─────────────────────────────────────────────────────────────
+async function loadAuditLog() {
+  const body = document.getElementById('auditLogBody');
+  if (!body) return;
+  const action = document.getElementById('auditAction')?.value || '';
+  const url = '/api/admin/audit?limit=100' + (action ? '&action=' + encodeURIComponent(action) : '');
+  try {
+    const d = await safeFetch(url);
+    const entries = d.entries || [];
+    body.textContent = '';
+    if (!entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'text-center text-white/15 text-xs py-4';
+      empty.textContent = '기록 없음';
+      body.appendChild(empty); return;
+    }
+    const table = document.createElement('table');
+    table.className = 'w-full text-[10px]';
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    htr.className = 'text-[9px] text-white/30 uppercase tracking-widest border-b border-white/[0.05]';
+    ['시각', '액션', 'IP', '상태', '상세'].forEach((t, i) => {
+      const th = document.createElement('th');
+      th.className = (i < 4 ? 'text-left' : 'text-left') + ' px-2 py-1.5 font-bold';
+      th.textContent = t;
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr); table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for (const e of entries) {
+      const tr = document.createElement('tr');
+      tr.className = 'border-b border-white/[0.03] hover:bg-white/[0.02] spring';
+      const mk = (txt, cls) => { const td = document.createElement('td'); td.className = 'px-2 py-1 ' + (cls || 'text-white/55'); td.textContent = txt; return td; };
+      tr.appendChild(mk((e.ts || '').replace('T', ' ').replace('Z', '').slice(0, 19), 'px-2 py-1 text-white/40 tabular-nums'));
+      const actionCls = e.action === 'retention' || e.action === 'retention_scheduled' ? 'text-amber-400/80 font-bold'
+                      : e.action === 'backup' ? 'text-emerald-400/80 font-bold'
+                      : e.action?.startsWith('node_') ? 'text-cyan-400/80 font-bold'
+                      : 'text-white/70 font-bold';
+      tr.appendChild(mk(e.action || '', 'px-2 py-1 ' + actionCls));
+      tr.appendChild(mk(e.actor_ip || '', 'px-2 py-1 text-white/30 tabular-nums'));
+      const statusCls = e.status === 'ok' ? 'text-emerald-400/70' : 'text-rose-400/70';
+      tr.appendChild(mk(e.status || '', 'px-2 py-1 ' + statusCls));
+      const detailTd = document.createElement('td');
+      detailTd.className = 'px-2 py-1 text-white/40 font-mono truncate max-w-[400px]';
+      detailTd.textContent = e.detail ? (typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail)) : '';
+      if (e.detail) detailTd.title = detailTd.textContent;
+      tr.appendChild(detailTd);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    body.appendChild(table);
+  } catch (e) {
+    body.textContent = '';
+    const err = document.createElement('div');
+    err.className = 'text-center text-red-400/60 text-xs py-3';
+    err.textContent = '로그 로드 실패';
+    body.appendChild(err);
+  }
+}
+function refreshAudit() { loadAuditLog(); }
 
 async function exportCSV() {
   const a = document.createElement('a');

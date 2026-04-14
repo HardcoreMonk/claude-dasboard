@@ -22,7 +22,7 @@ _read_local = threading.local()   # per-thread cached read connection
 _READ_CONN_TTL = 300              # seconds before recycling a cached read connection
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 13               # bump on every schema change
+SCHEMA_VERSION = 14               # bump on every schema change
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -779,6 +779,30 @@ def init_db() -> None:
                     )
                 ''')
                 current = _commit_migration(conn, 13)
+            if current < 14:
+                logger.info("Migrating schema v%d → 14 (admin_audit + app_config)", current)
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS admin_audit (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                        action TEXT NOT NULL,
+                        actor_ip TEXT,
+                        status TEXT NOT NULL DEFAULT 'ok',
+                        detail TEXT
+                    )
+                ''')
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_admin_audit_ts "
+                    "ON admin_audit(ts DESC)"
+                )
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS app_config (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                    )
+                ''')
+                current = _commit_migration(conn, 14)
             # One-time VACUUM to activate auto_vacuum=INCREMENTAL on legacy databases
             av = conn.execute('PRAGMA auto_vacuum').fetchone()[0]
             if av != 2:  # 2 = INCREMENTAL
