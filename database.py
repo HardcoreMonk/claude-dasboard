@@ -1075,11 +1075,23 @@ def list_codex_sessions(limit: int = 50) -> dict:
     return {'sessions': sessions, 'total': int(total or 0)}
 
 
-def get_codex_timeline_summary(limit: int = 200) -> dict:
+def get_codex_timeline_summary(
+    limit: int = 200,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict:
     """Return recent Codex events in a compact timeline-friendly shape."""
+    where = ''
+    params: list[object] = []
+    if date_from:
+        where += ' AND m.timestamp >= ?'
+        params.append(date_from)
+    if date_to:
+        where += ' AND m.timestamp <= ?'
+        params.append(date_to if len(date_to) > 10 else date_to + 'T23:59:59Z')
     with read_db() as conn:
         rows = conn.execute(
-            '''
+            f'''
             SELECT m.id AS message_id,
                    m.session_id,
                    m.role,
@@ -1091,20 +1103,23 @@ def get_codex_timeline_summary(limit: int = 200) -> dict:
             FROM codex_messages m
             JOIN codex_sessions s ON s.id = m.session_id
             JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE 1=1 {where}
             ORDER BY m.timestamp DESC, m.id DESC
             LIMIT ?
             ''',
-            (limit,),
+            (*params, limit),
         ).fetchall()
         totals = conn.execute(
-            '''
+            f'''
             SELECT COUNT(*) AS total,
                    COUNT(DISTINCT session_id) AS sessions
             FROM codex_messages
-            '''
+            WHERE 1=1 {where.replace('m.timestamp', 'timestamp')}
+            ''',
+            params,
         ).fetchone()
         session_rows = conn.execute(
-            '''
+            f'''
             SELECT m.session_id,
                    s.session_name AS session_title,
                    p.project_name,
@@ -1113,9 +1128,12 @@ def get_codex_timeline_summary(limit: int = 200) -> dict:
             FROM codex_messages m
             JOIN codex_sessions s ON s.id = m.session_id
             JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE 1=1 {where}
             GROUP BY m.session_id, s.session_name, p.project_name
             ORDER BY last_activity_at DESC, m.session_id DESC
-            '''
+            LIMIT ?
+            ''',
+            (*params, limit),
         ).fetchall()
 
     items: list[dict] = []
@@ -1220,11 +1238,10 @@ def get_codex_agents_summary(limit: int = 20) -> dict:
             FROM codex_messages
             WHERE role = 'agent'
             ORDER BY timestamp DESC, id DESC
-            LIMIT ?
             ''',
-            (limit,),
         ).fetchall()
 
+    visible_rows = rows[:limit]
     agents: list[dict] = []
     by_status: dict[str, int] = {}
     active_names: set[str] = set()
@@ -1240,17 +1257,19 @@ def get_codex_agents_summary(limit: int = 20) -> dict:
         if row['timestamp'] >= str(agent_summary['timestamp']):
             agent_summary['last_status'] = status
             agent_summary['timestamp'] = row['timestamp']
+    for row in visible_rows:
+        payload = _decode_codex_payload(row['content'])
         agents.append({
             'message_id': row['message_id'],
             'session_id': row['session_id'],
-            'agent_name': agent_name,
-            'status': status,
+            'agent_name': payload.get('agent_name', '') or 'agent',
+            'status': payload.get('status', '') or 'unknown',
             'timestamp': row['timestamp'],
             'body_text': row['content_preview'] or '',
         })
 
     return {
-        'total_runs': len(agents),
+        'total_runs': len(rows),
         'active_agents': len(active_names),
         'statuses': [
             {'status': status, 'count': count}

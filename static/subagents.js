@@ -96,14 +96,12 @@ function renderCodexAgentSurface(codexAgents) {
 // ─── Subagent detail panels (6 remaining sections) ────────────────────
 async function loadSubagentDetails() {
   try {
-    const [d, codexAgents] = await Promise.all([
-      safeFetch('/api/subagents/stats'),
-      safeFetch('/api/agents/summary'),
-    ]);
+    const codexAgents = await safeFetch('/api/agents/summary');
     if (_currentSubagentMode(codexAgents) === 'codex') {
       renderCodexAgentSurface(codexAgents);
       return;
     }
+    const d = await safeFetch('/api/subagents/stats');
     _renderByType(d);
     _renderByStopReason(d);
     _renderTopList('subagentTopCost', d.top_by_cost || [], 'cost');

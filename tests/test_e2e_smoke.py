@@ -293,6 +293,19 @@ def test_secondary_frontend_modules_reference_codex_summary_endpoints():
     assert '/api/sessions/' in sessions_js and '/replay' in sessions_js
 
 
+def test_timeline_and_subagent_modules_keep_codex_paths_self_consistent():
+    timeline_js = Path('static/timeline.js').read_text()
+    subagents_js = Path('static/subagents.js').read_text()
+
+    assert '/api/timeline/summary?limit=40&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}' in timeline_js
+    assert 'renderCodexTimelineMode(summary);' in timeline_js
+    assert '_renderCodexTimelineSecondary(summary, dateFrom, dateTo);' in timeline_js
+    assert '_clearCodexTimelineSecondary();' in timeline_js
+    assert "const codexAgents = await safeFetch('/api/agents/summary');" in subagents_js
+    assert "const d = await safeFetch('/api/subagents/stats');" in subagents_js
+    assert "Promise.all([\n      safeFetch('/api/subagents/stats'),\n      safeFetch('/api/agents/summary'),\n    ])" not in subagents_js
+
+
 def test_overview_api_contract_matches_frontend_expectations(e2e_client):
     """Every API call the overview view makes on initial load must return
     the exact fields the JS rendering code reads. This is stricter than

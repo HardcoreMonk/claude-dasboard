@@ -106,11 +106,65 @@ function renderCodexTimelineMode(summary) {
   legend.innerHTML = '<span class="text-purple-200/70">Codex mode active</span>';
 }
 
+function _setTimelinePanelMessage(containerId, message) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `<div class="text-center text-white/35 text-xs py-6">${esc(message)}</div>`;
+}
+
+function _setTimelineCanvasMessage(canvasId, noteId, message) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const parent = canvas.parentElement;
+  if (!parent) return;
+  if (canvasId === 'chartTrend') {
+    destroyChart('trend');
+  } else if (canvasId === 'chartHourlyStacked' && _hourlyStackedChart) {
+    _hourlyStackedChart.destroy();
+    _hourlyStackedChart = null;
+  }
+  canvas.classList.add('hidden');
+  let note = document.getElementById(noteId);
+  if (!note) {
+    note = document.createElement('div');
+    note.id = noteId;
+    note.className = 'text-center text-white/35 text-xs py-6';
+    parent.appendChild(note);
+  }
+  note.textContent = message;
+}
+
+function _clearTimelineCanvasMessage(canvasId, noteId) {
+  const canvas = document.getElementById(canvasId);
+  if (canvas) canvas.classList.remove('hidden');
+  document.getElementById(noteId)?.remove();
+}
+
+function _renderCodexTimelineSecondary(summary, dateFrom, dateTo) {
+  const label = `${dateFrom} → ${dateTo}`;
+  _setTimelinePanelMessage('tlHeatmapWrap', `Codex 모드에서는 선택 범위(${label})의 이벤트 요약만 제공합니다. 최근 ${fmtN(summary.total || 0)}개 이벤트를 보고 있습니다.`);
+  _setTimelineCanvasMessage('chartTrend', 'codexTrendNote', `Codex 모드에서는 주간 Claude 비용 비교 대신 ${fmtN(summary.sessions || 0)}개 세션의 이벤트 흐름을 사용합니다.`);
+  _setTimelineCanvasMessage('chartHourlyStacked', 'codexHourlyNote', `Codex 모드에서는 시간대 stacked chart 대신 세션 replay와 이벤트 스트림을 사용합니다.`);
+  const hourlyLegend = document.getElementById('tlHourlyLegend');
+  if (hourlyLegend) hourlyLegend.textContent = 'Codex mode active';
+  const deltaRange = document.getElementById('tlDeltaRange');
+  if (deltaRange) deltaRange.textContent = label;
+  const deltaSummary = document.getElementById('tlDeltaSummary');
+  if (deltaSummary) deltaSummary.textContent = `Codex ${fmtN(summary.sessions || 0)}세션 · ${fmtN(summary.total || 0)}이벤트`;
+  _setTimelinePanelMessage('tlDeltaBody', 'Codex 모드에서는 프로젝트 delta 대신 선택 세션의 replay와 컨텍스트 패널을 사용합니다.');
+}
+
+function _clearCodexTimelineSecondary() {
+  _clearTimelineCanvasMessage('chartTrend', 'codexTrendNote');
+  _clearTimelineCanvasMessage('chartHourlyStacked', 'codexHourlyNote');
+}
+
 async function _loadCodexTimelineSummary() {
   const legend = document.getElementById('timelineLegend');
   if (!legend) return;
   try {
-    const summary = await safeFetch('/api/timeline/summary?limit=12');
+    const { dateFrom, dateTo } = _tlDates();
+    const summary = await safeFetch(`/api/timeline/summary?limit=12&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`);
     const items = summary.items || [];
     if (!items.length) return;
     const strip = document.createElement('div');
@@ -210,7 +264,8 @@ function _modelFamily(model) {
 
 // ─── Main loader ─────────────────────────────────────────────────────────
 async function loadTimeline() {
-  const summary = await safeFetch('/api/timeline/summary?limit=40').catch((e) => {
+  const { dateFrom, dateTo } = _tlDates();
+  const summary = await safeFetch(`/api/timeline/summary?limit=40&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`).catch((e) => {
     reportError('loadCodexTimelineSummary', e);
     return { items: [], total: 0, sessions: 0, session_summaries: [] };
   });
@@ -220,17 +275,18 @@ async function loadTimeline() {
     ? (hasCodexData ? 'codex' : 'legacy')
     : codexTimelineMode;
   if (resolvedMode === 'codex' && hasCodexData) {
-    _tlLastData = { codex: summary };
+    _tlLastData = { codex: summary, dateFrom, dateTo };
     renderCodexTimelineMode(summary);
+    _renderCodexTimelineSecondary(summary, dateFrom, dateTo);
     reportSuccess('loadTimeline');
     return;
   }
+  _clearCodexTimelineSecondary();
   const legend = document.getElementById('timelineLegend');
   if (legend) {
     legend.querySelectorAll('[data-codex-timeline-summary]').forEach((el) => el.remove());
   }
   await _loadCodexTimelineSummary();
-  const { dateFrom, dateTo } = _tlDates();
   const showSubs = document.getElementById('tlShowSubagents')?.checked || false;
   const nodeVal = document.getElementById('tlNodeFilter')?.value || '';
   let url = `/api/timeline?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&include_subagents=${showSubs}`;

@@ -929,8 +929,16 @@ def api_codex_sessions(limit: int = Query(50, ge=1, le=200)):
 
 
 @app.get("/api/timeline/summary")
-def api_timeline_summary(limit: int = Query(200, ge=1, le=500)):
-    return get_codex_timeline_summary(limit=limit)
+def api_timeline_summary(
+    limit: int = Query(200, ge=1, le=500),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+):
+    if date_from and not re.match(r'^\d{4}-\d{2}-\d{2}', date_from):
+        return JSONResponse({'error': 'invalid date format', 'field': 'date_from'}, status_code=400)
+    if date_to and not re.match(r'^\d{4}-\d{2}-\d{2}', date_to):
+        return JSONResponse({'error': 'invalid date format', 'field': 'date_to'}, status_code=400)
+    return get_codex_timeline_summary(limit=limit, date_from=date_from, date_to=date_to)
 
 
 @app.get("/api/usage/summary")

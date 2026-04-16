@@ -404,6 +404,39 @@ def test_codex_timeline_summary_returns_recent_codex_events(api_client):
     assert body['items'][2]['label'] == 'rg'
 
 
+def test_codex_timeline_summary_honors_date_range_and_bounds_session_summaries(api_client):
+    import database
+
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-old',
+        session_name='Old Codex session',
+        role='assistant',
+        content='Old event outside selected range',
+        content_preview='Old event outside selected range',
+        timestamp='2026-04-10T09:00:00Z',
+        message_uuid='codex-old-1',
+    )
+
+    ranged = api_client.get('/api/timeline/summary?date_from=2026-04-16&date_to=2026-04-16&limit=10')
+    assert ranged.status_code == 200
+    ranged_body = ranged.json()
+
+    assert ranged_body['total'] == 5
+    assert ranged_body['sessions'] == 2
+    assert {row['session_id'] for row in ranged_body['session_summaries']} == {'codex-s1', 'codex-s2'}
+    assert {item['session_id'] for item in ranged_body['items']} == {'codex-s1', 'codex-s2'}
+
+    limited = api_client.get('/api/timeline/summary?date_from=2026-04-16&date_to=2026-04-16&limit=1')
+    assert limited.status_code == 200
+    limited_body = limited.json()
+
+    assert len(limited_body['items']) == 1
+    assert len(limited_body['session_summaries']) == 1
+    assert limited_body['session_summaries'][0]['session_id'] == 'codex-s2'
+
+
 def test_codex_usage_summary_returns_session_message_and_role_counts(api_client):
     r = api_client.get('/api/usage/summary')
     assert r.status_code == 200
@@ -449,6 +482,52 @@ def test_codex_agents_summary_returns_agent_status_totals(api_client):
     assert body['agents'][0]['status'] == 'completed'
     assert body['agents'][0]['session_id'] == 'codex-s1'
     assert body['by_agent'] == [{'agent_name': 'planner', 'count': 1, 'last_status': 'completed'}]
+
+
+def test_codex_agents_summary_aggregates_over_full_history_beyond_visible_limit(api_client):
+    import database
+
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s2',
+        session_name='Other Codex session',
+        role='agent',
+        content='{"agent_name":"runner","status":"failed"}',
+        content_preview='runner failed',
+        timestamp='2026-04-16T11:00:01Z',
+        message_uuid='codex-agent-2',
+    )
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s1',
+        session_name='Codex search session',
+        role='agent',
+        content='{"agent_name":"planner","status":"running"}',
+        content_preview='planner running',
+        timestamp='2026-04-16T11:00:02Z',
+        message_uuid='codex-agent-3',
+    )
+
+    r = api_client.get('/api/agents/summary?limit=1')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert len(body['agents']) == 1
+    assert body['total_runs'] == 3
+    assert body['active_agents'] == 2
+    assert body['statuses'] == [
+        {'status': 'completed', 'count': 1},
+        {'status': 'failed', 'count': 1},
+        {'status': 'running', 'count': 1},
+    ]
+    assert body['by_agent'] == [
+        {'agent_name': 'planner', 'count': 2, 'last_status': 'running'},
+        {'agent_name': 'runner', 'count': 1, 'last_status': 'failed'},
+    ]
+    assert body['agents'][0]['agent_name'] == 'planner'
+    assert body['agents'][0]['status'] == 'running'
 
 
 # ─── F7 / F8 / F9 — subagent aggregations ──────────────────────────────
