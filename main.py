@@ -67,7 +67,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / 'static'
-BACKUP_DIR = Path.home() / '.claude' / 'dashboard-backups'
+BACKUP_DIR = Path(
+    os.environ.get(
+        'DASHBOARD_BACKUP_DIR',
+        str(Path.home() / '.codex' / 'dashboard-backups'),
+    )
+)
 CREDENTIALS_PATH = Path.home() / '.claude' / '.credentials.json'
 _AUTH_PW = os.environ.get('DASHBOARD_PASSWORD')
 _SESSION_SECRET = os.environ.get('DASHBOARD_SECRET', secrets.token_hex(32))

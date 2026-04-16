@@ -6,6 +6,7 @@ This eliminates float accumulation drift entirely.
 """
 import json
 import logging
+import os
 import re
 import sqlite3
 import threading
@@ -15,7 +16,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path.home() / '.claude' / 'dashboard.db'
+DB_PATH = Path(
+    os.environ.get(
+        'DASHBOARD_DB_PATH',
+        str(Path.home() / '.codex' / 'dashboard.db'),
+    )
+)
 CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'
 
 _write_lock = threading.Lock()

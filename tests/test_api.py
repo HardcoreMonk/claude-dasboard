@@ -4,8 +4,25 @@ temporary SQLite DB with controlled fixture data.
 Unlike the unit tests, these exercise the full middleware + routing stack.
 """
 import sys
+from pathlib import Path
 
 import pytest
+
+
+def _reload_runtime_modules():
+    try:
+        from prometheus_client import REGISTRY
+        for collector in list(REGISTRY._collector_to_names.keys()):
+            try:
+                REGISTRY.unregister(collector)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    for name in list(sys.modules):
+        if name in ('database', 'parser', 'watcher', 'main'):
+            sys.modules.pop(name, None)
 
 
 @pytest.fixture()
@@ -156,6 +173,17 @@ def api_client(tmp_path, monkeypatch):
 
 
 # ─── Smoke ──────────────────────────────────────────────────────────────
+
+def test_codex_runtime_defaults_without_env_overrides(monkeypatch):
+    monkeypatch.delenv('DASHBOARD_DB_PATH', raising=False)
+    monkeypatch.delenv('DASHBOARD_BACKUP_DIR', raising=False)
+    _reload_runtime_modules()
+
+    import database
+    import main
+
+    assert database.DB_PATH == Path.home() / '.codex' / 'dashboard.db'
+    assert main.BACKUP_DIR == Path.home() / '.codex' / 'dashboard-backups'
 
 def test_health(api_client):
     r = api_client.get('/api/health')

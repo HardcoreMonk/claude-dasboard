@@ -10,8 +10,25 @@ IDs but strict about 5xx and malformed payloads.
 """
 import sqlite3
 import sys
+from pathlib import Path
 
 import pytest
+
+
+def _reload_runtime_modules():
+    try:
+        from prometheus_client import REGISTRY
+        for collector in list(REGISTRY._collector_to_names.keys()):
+            try:
+                REGISTRY.unregister(collector)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    for name in list(sys.modules):
+        if name in ('database', 'parser', 'watcher', 'main'):
+            sys.modules.pop(name, None)
 
 
 @pytest.fixture()
@@ -104,6 +121,20 @@ def _require(payload, path, keys):
 
 
 # ─── Health / metrics / stats ──────────────────────────────────────────────
+
+def test_contract_runtime_path_env_overrides_still_win(tmp_path, monkeypatch):
+    override_db = tmp_path / 'override.db'
+    override_backup = tmp_path / 'override-backups'
+    monkeypatch.setenv('DASHBOARD_DB_PATH', str(override_db))
+    monkeypatch.setenv('DASHBOARD_BACKUP_DIR', str(override_backup))
+    _reload_runtime_modules()
+
+    import database
+    import main
+
+    assert database.DB_PATH == Path(str(override_db))
+    assert main.BACKUP_DIR == Path(str(override_backup))
+
 
 def test_contract_health(contract_client):
     r = contract_client.get('/api/health')
