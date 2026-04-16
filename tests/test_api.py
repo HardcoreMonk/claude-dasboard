@@ -3,8 +3,6 @@ temporary SQLite DB with controlled fixture data.
 
 Unlike the unit tests, these exercise the full middleware + routing stack.
 """
-import importlib
-import os
 import sys
 
 import pytest
@@ -47,10 +45,11 @@ def api_client(tmp_path, monkeypatch):
     import parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_claude_projects)
 
+    import sqlite3
+
     import main  # noqa: F401 — imported for its side effect of app construction
 
     # Pre-seed some deterministic data so endpoints have something to return
-    import sqlite3
     database.init_db()
     conn = sqlite3.connect(str(db_file))
     conn.execute('''INSERT INTO sessions
@@ -174,6 +173,15 @@ def test_metrics_endpoint(api_client):
     # Critical custom series must exist
     assert 'dashboard_sessions_total' in txt
     assert 'dashboard_messages_total' in txt
+
+
+def test_admin_ingest_status_reports_codex_counters(api_client):
+    r = api_client.get('/api/admin/status')
+    assert r.status_code == 200
+    body = r.json()
+    assert body['source_kind'] == 'codex'
+    assert body['indexed_sessions'] == 2
+    assert body['indexed_messages'] == 5
 
 
 # ─── Stats / aggregations ───────────────────────────────────────────────

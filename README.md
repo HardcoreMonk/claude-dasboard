@@ -1,7 +1,7 @@
-# Claude Usage Dashboard
+# Codex Dashboard
 
-Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간 추적**하는 자체 호스팅 웹 대시보드.
-다중 서버의 Claude Code 데이터를 중앙 수집하고, claude.ai 웹 대화 export 도 통합 뷰어에서 검색할 수 있다.
+Codex CLI 세션을 우선으로 수집·검색·복기하는 자체 호스팅 웹 대시보드.
+기존 Claude Code 사용량 집계와 claude.ai 웹 대화 export 도 함께 유지하지만, 현재 UX 기준축은 Codex 세션 검색·리플레이·타임라인이다.
 
 ```
 ~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 62 routes  →  SPA 브라우저
@@ -12,7 +12,7 @@ Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간
 | 스택 | 상세 |
 |------|------|
 | 백엔드 | Python 3.12, FastAPI, uvicorn, watchdog |
-| 저장소 | SQLite WAL + FTS5, micro-dollar 정수 비용, v14 스키마 |
+| 저장소 | SQLite WAL + FTS5, micro-dollar 정수 비용, v15 스키마 |
 | 프런트 | esbuild 번들 (198KB) + Tailwind v3 빌드 (51KB) + Pretendard + Chart.js |
 | 테스트 | 174 pytest (10초), CI: ruff + bandit + pip-audit + esbuild |
 
@@ -52,6 +52,11 @@ npm run dev                                   # watch 모드 (개발)
 ```
 
 ## 주요 기능
+
+### Codex 우선 탐색
+- Codex 메시지 검색, 세션 리플레이, 타임라인/사용량/agent 요약을 별도 API 로 제공
+- 프로젝트 단위로 Codex 세션을 빠르게 탐색하고 메시지 문맥을 재구성
+- 기존 Claude Code 세션 집계와 분리된 인덱스로 저장해 회귀 없이 병행 운영
 
 ### 실시간 모니터링
 - WebSocket 실시간 갱신 (800ms 디바운스)
@@ -93,7 +98,7 @@ INGEST_KEY=<key> python3 collector.py --url http://dashboard:8765 --node-id serv
 - 세션/타임라인에서 노드별 필터링, Windows 경로 자동 파싱
 
 ### 관리자 (Admin)
-- **대시보드 상태**: 가동시간, 스키마 버전, DB/WAL 크기, 세션·메시지·subagent·원격노드 카운트, Watcher 상태·큐
+- **대시보드 상태**: 가동시간, 스키마 버전, DB/WAL 크기, 세션·메시지·subagent·원격노드 카운트, Codex ingest 상태 (`source_kind=codex`, `indexed_sessions`, `indexed_messages`), Watcher 상태·큐
 - **보존 스케줄**: 내장 asyncio 스케줄러 (enable/interval/days), 마지막·다음 실행 시각 표시
 - **감사 로그**: 모든 관리자 액션(backup/retention/node_*)을 IP·상태·상세 JSON과 함께 기록·필터 조회
 - **백업·복원·보존**: `sqlite3.backup()` 기반 일관 백업 (10개 로테이션), 보존 preview → confirm
@@ -138,7 +143,7 @@ dashboard.example.com {
 
 ```
 main.py              FastAPI 62 routes + WS + 쿠키 세션 인증 + in-app 스케줄러
-database.py          SQLite WAL, v0→v14 마이그레이션, write/read 분리
+database.py          SQLite WAL, v0→v15 마이그레이션, write/read 분리
 parser.py            JSONL 파싱, 비용 계산, cross-platform cwd
 watcher.py           watchdog + safety poll
 collector.py         원격 수집 에이전트 (stdlib only)

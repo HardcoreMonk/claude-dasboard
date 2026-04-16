@@ -9,15 +9,15 @@ import logging
 import os
 import re
 import secrets
-import shutil
 import sqlite3
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone as _tz
+from datetime import datetime, timedelta
+from datetime import timezone as _tz
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
@@ -29,18 +29,33 @@ except ImportError:
 
 try:
     from prometheus_client import (
-        Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST,
+        CONTENT_TYPE_LATEST,
+        Counter,
+        Gauge,
+        Histogram,
+        generate_latest,
     )
     _PROMETHEUS_OK = True
 except ImportError:
     _PROMETHEUS_OK = False
 
 from database import (
-    read_db, write_db, init_db, check_integrity, DB_PATH, _write_lock,
-    close_thread_connections, wal_checkpoint, search_codex_messages,
-    get_codex_message_context, get_codex_session_replay,
-    get_codex_timeline_summary, get_codex_usage_summary, get_codex_agents_summary,
+    DB_PATH,
+    _write_lock,
+    check_integrity,
+    close_thread_connections,
+    get_codex_agents_summary,
+    get_codex_ingest_status,
+    get_codex_message_context,
+    get_codex_session_replay,
+    get_codex_timeline_summary,
+    get_codex_usage_summary,
+    init_db,
     list_codex_sessions,
+    read_db,
+    search_codex_messages,
+    wal_checkpoint,
+    write_db,
 )
 from parser import process_record
 from watcher import ClaudeFileWatcher, WatcherMetrics
@@ -1438,7 +1453,7 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
     with read_db() as db:
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
-        rows = db.execute(f'''
+        rows = db.execute('''
             SELECT strftime('%Y-%m-%d', timestamp, ?) AS date,
                    SUM(cost_micro)*1.0/1000000 AS cost,
                    COUNT(*) AS msgs
@@ -2163,9 +2178,11 @@ def api_subagents_heatmap():
         p = r['project_name']
         t = r['agent_type']
         if p not in seen_p:
-            seen_p.add(p); projects.append(p)
+            seen_p.add(p)
+            projects.append(p)
         if t not in seen_t:
-            seen_t.add(t); types.append(t)
+            seen_t.add(t)
+            types.append(t)
         cells[f'{t}|{p}'] = {
             'count': r['count'],
             'cost': r['cost'],
@@ -2748,8 +2765,10 @@ def api_admin_status():
             pass
 
     uptime_sec = int(time.time() - _APP_START_TS)
+    codex_ingest = get_codex_ingest_status()
 
     return {
+        **codex_ingest,
         'uptime_seconds': uptime_sec,
         'schema_version': schema_v,
         'db': {

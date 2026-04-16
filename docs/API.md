@@ -1,6 +1,7 @@
 # REST API
 
 62 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features` 은 인증 우회.
+현재 대시보드는 Codex 세션 탐색을 우선으로 두고, 기존 Claude Code 집계와 claude.ai export 조회를 병행한다.
 
 ## 자동 생성 스펙 (FastAPI)
 
@@ -57,6 +58,20 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 | POST / DELETE | `/api/sessions/{id}/pin` | 핀 토글 |
 | POST | `/api/sessions/{id}/tags` | 태그 저장 (콤마 구분) |
 
+## Codex
+
+Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 조회하는 라우트다. 기존 `/api/sessions` 집계와 분리되어 메시지 검색, 리플레이, 타임라인 복기를 Codex 기준으로 제공한다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/messages/search?q=k` | Codex 메시지 전문 검색. `project`, `role`, `limit` 지원 |
+| GET | `/api/messages/{message_id}/context?window=N` | 특정 Codex 메시지 주변 문맥 조회 |
+| GET | `/api/sessions/{id}/replay` | Codex 세션 리플레이 페이로드 조회 |
+| GET | `/api/codex/sessions?limit=N` | 최신 Codex 세션 목록 |
+| GET | `/api/timeline/summary?limit=N&date_from=&date_to=` | 최근 Codex 이벤트 + 세션 요약 |
+| GET | `/api/usage/summary` | Codex 세션/메시지/역할 사용량 요약 |
+| GET | `/api/agents/summary?limit=N` | Codex agent 실행 요약 |
+
 ## Subagents
 
 | 메서드 | 경로 | 설명 |
@@ -104,7 +119,7 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 | POST | `/api/admin/backup` | DB 백업 (`_write_lock` + `sqlite3.backup()`, 10개 유지). 감사 `action=backup` |
 | DELETE | `/api/admin/retention` | 오래된 세션 삭제. `?older_than_days=N&confirm=true`. preview → confirm 2단계. 감사 `action=retention` |
 | GET | `/api/admin/db-size` | DB 파일 크기 (bytes / MB) |
-| GET | `/api/admin/status` | 가동시간, 스키마 버전, DB·WAL 크기, 세션·메시지·subagent·원격노드·audit 카운트, watcher 상태·큐·추적 파일 수 |
+| GET | `/api/admin/status` | 가동시간, 스키마 버전, DB·WAL 크기, 세션·메시지·subagent·원격노드·audit 카운트, Codex ingest 상태 (`source_kind=codex`, `indexed_sessions`, `indexed_messages`), watcher 상태·큐·추적 파일 수 |
 | GET | `/api/admin/audit?limit=100&action=` | 감사 로그 조회 (최근순, action 필터) |
 | GET | `/api/admin/retention/schedule` | 보존 스케줄 설정 조회 — `{enabled, interval_hours, older_than_days, last_run_at, last_result, next_run_at}` |
 | PUT | `/api/admin/retention/schedule` | 스케줄 갱신 (enabled/interval_hours/older_than_days). 감사 `action=retention_schedule_update`. 내장 asyncio 루프가 60초마다 확인하여 due 시 자동 실행 (`action=retention_scheduled`) |

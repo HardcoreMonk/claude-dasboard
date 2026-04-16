@@ -827,6 +827,7 @@ def search_codex_messages(
             m.parent_uuid,
             m.role,
             m.content AS body,
+            m.content_preview,
             m.content_preview AS body_text,
             m.timestamp AS created_at,
             m.model,
@@ -873,6 +874,7 @@ def search_codex_messages(
                 m.parent_uuid,
                 m.role,
                 m.content AS body,
+                m.content_preview,
                 m.content_preview AS body_text,
                 m.timestamp AS created_at,
                 m.model,
@@ -1284,6 +1286,22 @@ def get_codex_agents_summary(limit: int = 20) -> dict:
             for agent_name, summary in sorted(by_agent.items())
         ],
         'agents': agents,
+    }
+
+
+def get_codex_ingest_status() -> dict:
+    with read_db() as conn:
+        row = conn.execute(
+            '''
+            SELECT
+                (SELECT COUNT(*) FROM codex_sessions) AS indexed_sessions,
+                (SELECT COUNT(*) FROM codex_messages) AS indexed_messages
+            '''
+        ).fetchone()
+    return {
+        'source_kind': 'codex',
+        'indexed_sessions': int(row['indexed_sessions']),
+        'indexed_messages': int(row['indexed_messages']),
     }
 
 

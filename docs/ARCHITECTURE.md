@@ -1,6 +1,6 @@
 # 아키텍처 가이드
 
-Claude Dashboard 의 시스템 구조, 데이터 흐름, 컴포넌트 설계를 기술한다.
+Codex-first Dashboard 의 시스템 구조, 데이터 흐름, 컴포넌트 설계를 기술한다.
 API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
 
 ---
@@ -16,15 +16,17 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
            |
      [SQLite WAL 쓰기]          database.py
            |
+Codex JSONL/이벤트 적재           store_codex_message()
+           |
      [FastAPI 62 routes]        main.py
-       /       \
-   REST API   WebSocket
-       \       /
-     [SPA 프론트엔드]            static/*.js
+       /    |     \
+   REST API WS   Admin status
+       \    |     /
+      [SPA 프론트엔드]           static/*.js
 ```
 
-단일 프로세스 (uvicorn) 가 파일 감시, DB 관리, API 서빙, WebSocket 브로드캐스트를 모두 처리한다.
-외부 의존 서비스 없음 — SQLite 파일 하나로 완결.
+단일 프로세스 (uvicorn) 가 파일 감시, DB 관리, Codex/Claude 인덱스 조회, API 서빙, WebSocket 브로드캐스트를 모두 처리한다.
+외부 의존 서비스 없음 — SQLite 파일 하나로 완결된다.
 
 ---
 
@@ -49,7 +51,8 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 | 페이지 | `/features` | Feature Reference HTML 페이지 (인증 우회) |
 | 헬스 | `/api/health` | 서버 상태 + DB 메시지/세션 카운트 |
 | 메트릭 | `/metrics` | Prometheus text format (인증 우회) |
-| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 세션 CRUD, 메시지 조회, 검색 점프, subagent 체인 |
+| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 기존 Claude Code 세션 CRUD, 메시지 조회, 검색 점프, subagent 체인 |
+| Codex | `/api/messages/search`, `/api/messages/{message_id}/context`, `/api/sessions/{id}/replay`, `/api/codex/sessions`, `/api/timeline/summary`, `/api/usage/summary`, `/api/agents/summary` | Codex 메시지 검색, 문맥 복기, 세션 리플레이, 타임라인/사용량/agent 요약 |
 | 프로젝트 | `/api/projects`, `/top`, `/{name}/stats`, `/{name}/messages` | 프로젝트 집계, TOP 5, 상세 |
 | 사용량 | `/api/usage/hourly`, `/daily`, `/periods` | 시계열 토큰/비용 집계 |
 | 타임라인 | `/api/timeline`, `/timeline/heatmap`, `/timeline/hourly` | Gantt 데이터, 요일x시간 히트맵, 시간별 프로젝트×세션 집계 |
@@ -59,7 +62,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 | 플랜 | `/api/plan/detect`, `/plan/config`, `/plan/usage` | 요금제 감지, 예산 설정 |
 | claude.ai | `/api/claude-ai/conversations`, `/search`, `/stats` | claude.ai export 데이터 |
 | 원격 수집 | `/api/ingest`, `/api/nodes` | 다중 서버 JSONL 수집 (collector.py → POST /api/ingest) |
-| 관리 | `/api/admin/backup`, `/retention`, `/retention/schedule`, `/db-size`, `/status`, `/audit` | 백업, 보존 + 자동 스케줄러, 대시보드 상태, 감사 로그 |
+| 관리 | `/api/admin/backup`, `/retention`, `/retention/schedule`, `/db-size`, `/status`, `/audit` | 백업, 보존 + 자동 스케줄러, Codex ingest 상태를 포함한 대시보드 상태, 감사 로그 |
 | 내보내기 | `/api/export/csv` | 세션 CSV 다운로드 |
 | WebSocket | `/ws` | 실시간 메시지 브로드캐스트 |
 
@@ -75,7 +78,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 ### database.py — SQLite 데이터 계층
 
 ```
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 모드: WAL, busy_timeout=5000, auto_vacuum=INCREMENTAL
 ```
 
@@ -97,11 +100,26 @@ SCHEMA_VERSION = 14
 | `plan_config` | 요금제, 예산, 타임존 설정 |
 | `claude_ai_conversations` | claude.ai export 대화 (sessions 와 완전 격리) |
 | `claude_ai_messages` | claude.ai export 메시지 |
+| `codex_projects` | Codex 프로젝트 메타 |
+| `codex_sessions` | Codex 세션 메타 |
+| `codex_messages` | Codex 메시지 + 리플레이/검색 원본 |
 | `remote_nodes` | 원격 수집 노드 등록 (node_id, label, ingest_key) |
 | `admin_audit` | 관리자 액션 감사 로그 (ts/action/actor_ip/status/detail) |
 | `app_config` | in-app 설정 키-값 스토어 (현재 `retention_schedule`) |
 
-**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v14). 각 단계는 idempotent.
+**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v15). 각 단계는 idempotent.
+
+### Codex 수집 상태
+
+`/api/admin/status` 는 기존 DB 상태 외에 Codex 전용 ingest 상태도 함께 반환한다.
+
+| 필드 | 의미 |
+|---|---|
+| `source_kind` | 현재 관리자 수집 상태가 어떤 소스를 설명하는지 나타냄. 현재 값은 `codex` |
+| `indexed_sessions` | `codex_sessions` 기준 적재된 세션 수 |
+| `indexed_messages` | `codex_messages` 기준 적재된 메시지 수 |
+
+이 필드는 관리자 화면에서 "Codex 인덱스가 실제로 채워졌는지"를 즉시 확인하는 용도이며, 기존 `counts` 블록은 Claude Code/remote/admin 집계와의 하위 호환을 유지한다.
 
 ### parser.py — JSONL 파싱 엔진
 

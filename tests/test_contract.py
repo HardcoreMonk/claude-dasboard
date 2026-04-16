@@ -8,9 +8,8 @@ contract holds.
 This test file is intentionally tolerant of 404s for not-yet-seeded fixture
 IDs but strict about 5xx and malformed payloads.
 """
-import importlib
-import sys
 import sqlite3
+import sys
 
 import pytest
 
@@ -371,6 +370,16 @@ def test_contract_admin_db_size(contract_client):
     r = contract_client.get('/api/admin/db-size')
     assert r.status_code == 200
     _require(r.json(), '/api/admin/db-size', ['size_bytes', 'size_mb'])
+
+
+def test_contract_admin_status_includes_codex_ingest_fields(contract_client):
+    r = contract_client.get('/api/admin/status')
+    assert r.status_code == 200
+    _require(
+        r.json(),
+        '/api/admin/status',
+        ['source_kind', 'indexed_sessions', 'indexed_messages', 'counts', 'watcher'],
+    )
 
 
 def test_contract_admin_retention_preview(contract_client):
