@@ -1,65 +1,69 @@
-# Codex Conversation Dashboard Design
+# Codex 대화 대시보드 설계
 
-## Goal
+## 문서 기준
 
-Convert the existing Claude-focused dashboard into a Codex-only dashboard that ingests local Codex CLI logs and makes conversation search the primary workflow.
+이 저장소에서 작성하는 설계서, 계획서, 구현 관련 문서는 한국어를 기본으로 한다. 코드 식별자, 경로, 테이블명, 이벤트명처럼 번역 시 의미가 흐려지는 항목만 원문 표기를 유지한다.
 
-The product should let a user:
+## 목표
 
-- search across Codex conversations quickly at message granularity
-- inspect surrounding context immediately
-- expand from a search hit into the full session narrative
-- retain supporting views for timeline, usage/cost, and admin operations
+기존 Claude 중심 대시보드를 Codex 전용 대시보드로 전환한다. 입력 소스는 로컬 Codex CLI 로그이며, 제품의 1차 행동은 사용량 개요가 아니라 대화 검색이 되어야 한다.
 
-## Scope
+이 제품은 사용자가 다음을 할 수 있게 해야 한다.
 
-Included in this design:
+- Codex 대화를 메시지 단위로 빠르게 검색할 수 있다.
+- 검색 적중 결과의 앞뒤 문맥을 즉시 확인할 수 있다.
+- 검색 결과에서 전체 세션 흐름으로 자연스럽게 확장할 수 있다.
+- 보조 화면으로 타임라인, 사용량/비용, 관리자 기능을 계속 사용할 수 있다.
 
-- local log ingestion from Codex log directories and project session files
-- normalized storage model for conversations, tools, agents, timeline events, and usage
-- message-first full-text search with session expansion
-- search-first information architecture
-- preservation of timeline, cost, and admin capabilities as secondary views
+## 범위
 
-Explicitly out of scope for this phase:
+이번 설계에 포함되는 항목은 다음과 같다.
 
-- Claude/Codex dual-source compatibility
-- preserving Claude-specific schema semantics where they distort the Codex model
-- redesigning the product into a generic multi-provider analytics platform
+- Codex 전역 로그 디렉터리와 프로젝트별 세션 파일 수집
+- 대화, 툴, 에이전트, 타임라인, 사용량을 위한 정규화 저장 모델
+- 메시지 우선 전문검색과 세션 확장 흐름
+- 검색 우선 정보 구조
+- 타임라인, 비용, 관리자 기능의 유지와 재배치
 
-## Product Positioning
+이번 단계에서 명시적으로 제외하는 항목은 다음과 같다.
 
-This is no longer a Claude usage dashboard with renamed labels. It becomes a Codex conversation dashboard. The top-level story shifts from "overview metrics first" to "find the exact conversation fragment, then recover its context."
+- Claude와 Codex를 동시에 지원하는 이중 호환
+- Codex 모델을 왜곡하는 Claude 전용 스키마 의미 보존
+- 범용 멀티 프로바이더 분석 플랫폼으로의 확장
 
-Success means three behaviors feel connected:
+## 제품 포지셔닝
 
-- users can find the right message in seconds
-- users can reconstruct the flow of a Codex work session
-- users can compare work and usage across projects without leaving the same product
+이 제품은 더 이상 이름만 바꾼 Claude 사용량 대시보드가 아니다. `Codex 대화 대시보드`로 재정의한다. 제품의 첫 서사는 "개요 지표를 먼저 본다"가 아니라 "찾고 싶은 대화 조각을 먼저 찾고, 그 문맥을 복원한다"로 바뀐다.
 
-## Architecture
+성공 기준은 아래 세 행동이 자연스럽게 이어지는 것이다.
 
-The system is organized into four layers.
+- 사용자가 몇 초 안에 원하는 메시지를 찾는다.
+- 사용자가 Codex 작업 세션의 흐름을 복기할 수 있다.
+- 사용자가 같은 제품 안에서 프로젝트별 활동량과 사용량을 비교할 수 있다.
 
-### 1. Ingestion Layer
+## 아키텍처
 
-Watch two local input classes:
+시스템은 네 개의 계층으로 구성한다.
 
-- global Codex log files under `~/.codex/...`
-- project-level session files created by Codex
+### 1. 수집 계층
 
-The existing watcher pattern remains useful, but file discovery and parsing move from Claude JSONL assumptions to Codex event streams. The ingestion layer is responsible for:
+두 종류의 로컬 입력을 감시한다.
 
-- finding relevant files
-- tracking offsets/checkpoints
-- detecting new or updated events
-- feeding raw events to the normalization pipeline
+- `~/.codex/...` 아래의 전역 Codex 로그 파일
+- Codex가 프로젝트 단위로 생성하는 세션 파일
 
-### 2. Normalization Layer
+기존 watcher 패턴은 재사용할 수 있지만, 파일 탐색과 파싱 전제는 Claude JSONL에서 Codex 이벤트 스트림으로 바뀐다. 수집 계층의 책임은 다음과 같다.
 
-Raw Codex events are transformed into a stable internal model instead of being exposed directly to the UI. This decouples product behavior from future Codex log format changes.
+- 관련 파일을 찾는다.
+- 오프셋과 체크포인트를 추적한다.
+- 신규 이벤트와 갱신된 이벤트를 감지한다.
+- 원시 이벤트를 정규화 파이프라인으로 전달한다.
 
-Normalization emits these internal entities:
+### 2. 정규화 계층
+
+원시 Codex 이벤트를 그대로 UI에 노출하지 않고 안정적인 내부 모델로 변환한다. 이렇게 해야 향후 Codex 로그 포맷이 바뀌어도 제품 동작을 분리할 수 있다.
+
+정규화 결과로 다음 내부 엔티티를 만든다.
 
 - `project`
 - `session`
@@ -70,241 +74,241 @@ Normalization emits these internal entities:
 - `timeline_event`
 - `usage_rollup`
 
-### 3. Search and Aggregation Layer
+### 3. 검색 및 집계 계층
 
-Search is centered on normalized messages. Message bodies are indexed with FTS, while filterable metadata remains in ordinary relational columns.
+검색의 중심은 정규화된 `message`다. 메시지 본문은 FTS로 색인하고, 필터 가능한 메타데이터는 일반 관계형 컬럼으로 유지한다.
 
-This layer provides:
+이 계층은 다음 기능을 제공한다.
 
-- full-text message search
-- faceted filtering by project/date/role/agent/tool/session
-- context lookups for neighboring messages
-- derived timeline and usage aggregations
-- admin-facing ingestion and index health summaries
+- 메시지 전문검색
+- 프로젝트, 날짜, 역할, 에이전트, 툴, 세션 기준 필터
+- 인접 메시지 문맥 조회
+- 타임라인과 사용량 집계 파생
+- 관리자 화면용 수집 상태와 인덱스 상태 요약
 
-### 4. Presentation Layer
+### 4. 표현 계층
 
-The UI is restructured around search as the default entry point. Search becomes the landing page. Timeline, cost, and admin remain available, but they are no longer the first story the product tells.
+UI는 검색을 기본 진입점으로 재구성한다. 검색이 랜딩 페이지가 되고, 타임라인/비용/관리자는 유지되지만 제품이 처음 보여주는 이야기는 아니게 된다.
 
-## Data Model
+## 데이터 모델
 
-### Core Principle
+### 핵심 원칙
 
-The primary retrieval unit is `message`, not `session`. Sessions remain important as the container for reconstruction, but search results should land directly on the relevant message.
+주요 검색 단위는 `session`이 아니라 `message`다. 세션은 복기와 확장을 위한 상위 컨테이너이고, 검색 결과는 반드시 관련 메시지에 직접 착지해야 한다.
 
-### Entities
+### 엔티티
 
 #### `projects`
 
-Represents a Codex project root or canonical project identifier. Stores:
+Codex 프로젝트 루트 또는 정규화된 프로젝트 식별자를 나타낸다. 다음 정보를 저장한다.
 
 - project id
-- display name
-- normalized path
-- first seen / last seen timestamps
+- 표시 이름
+- 정규화된 경로
+- 최초 확인 시각과 마지막 확인 시각
 
 #### `sessions`
 
-Represents a Codex work session. Stores:
+Codex 작업 세션을 나타낸다. 다음 정보를 저장한다.
 
 - session id
 - project id
-- title or title candidate
-- started at / ended at / last activity at
-- summary fields for listing and sorting
+- 제목 또는 제목 후보
+- 시작 시각, 종료 시각, 마지막 활동 시각
+- 목록과 정렬을 위한 요약 필드
 
 #### `messages`
 
-Search anchor table. Stores:
+검색의 기준 테이블이다. 다음 정보를 저장한다.
 
 - message id
 - session id
 - project id
-- role such as `user`, `assistant`, `system`, `tool`, `agent`
-- plain text searchable body
-- sequence index within session
-- created timestamp
+- `user`, `assistant`, `system`, `tool`, `agent` 같은 역할
+- 검색 가능한 평문 본문
+- 세션 내 순서 인덱스
+- 생성 시각
 
 #### `message_context`
 
-Captures the execution context around a message. Stores:
+메시지가 나온 실행 문맥을 기록한다. 다음 정보를 저장한다.
 
 - message id
-- agent id if present
+- agent id
 - tool name
 - tool call id
 - parent message id
 - thread depth
-- context flags needed by the UI
+- UI가 필요로 하는 문맥 플래그
 
 #### `tool_events`
 
-Stores tool invocation and result records in structured form so the UI can show tool context around search hits and reconstruct execution order.
+툴 호출과 결과를 구조화해서 저장한다. 검색 결과 주변의 툴 문맥을 보여주고 실행 순서를 재구성하기 위한 목적이다.
 
 #### `agent_runs`
 
-Stores agent lifecycle information:
+에이전트 생명주기 정보를 저장한다.
 
 - agent id
-- parent agent or parent session link
-- start/end timestamps
-- model if available
-- status/outcome
+- 부모 에이전트 또는 부모 세션 링크
+- 시작/종료 시각
+- 모델 정보가 있으면 모델명
+- 상태와 종료 결과
 
 #### `timeline_events`
 
-Stores normalized temporal events for timeline rendering. Messages, tool calls, tool results, and agent lifecycle transitions all map into this shared event model.
+타임라인 렌더링용 정규화 이벤트다. 메시지, 툴 호출, 툴 결과, 에이전트 생명주기 전이를 공통 시간축 이벤트 모델로 다룬다.
 
 #### `usage_rollups`
 
-Stores or caches aggregated usage metrics such as token counts, cost, and request volume for overview widgets and time-bucketed analytics.
+토큰 수, 비용, 요청 수처럼 개요 카드와 시간 버킷 집계에 필요한 사용량 지표를 저장하거나 캐시한다.
 
-## Search Experience
+## 검색 경험
 
-### Retrieval Model
+### 조회 모델
 
-Default search returns message-level matches. Each result includes:
+기본 검색 결과는 메시지 단위로 반환한다. 각 결과에는 다음 정보가 포함된다.
 
-- highlighted text hit
-- session title or best title candidate
-- project name
-- timestamp
-- agent/tool badges
-- quick link into the full session
+- 하이라이트된 적중 본문
+- 세션 제목 또는 최적 제목 후보
+- 프로젝트 이름
+- 시각
+- agent/tool 배지
+- 전체 세션으로 진입하는 빠른 링크
 
-### Context Rules
+### 문맥 규칙
 
-Every result must surface enough context to avoid a blind click. The detail panel should show:
+검색 결과는 블라인드 클릭이 되면 안 된다. 상세 패널에는 최소한 다음이 보여야 한다.
 
-- surrounding messages
-- related agent or tool execution context
-- exact session and project metadata
-- mini timeline position for the selected hit
+- 앞뒤 메시지
+- 관련 agent/tool 실행 문맥
+- 정확한 세션 및 프로젝트 메타데이터
+- 선택한 적중 위치의 미니 타임라인 위치
 
-### Session Expansion
+### 세션 확장
 
-From any result, the user can expand into a session narrative view that reconstructs the full flow of messages, tool activity, and agent transitions in chronological order.
+어떤 검색 결과에서든 전체 세션 내러티브로 확장할 수 있어야 한다. 이 화면은 메시지 흐름, 툴 활동, 에이전트 전이를 시간순으로 재구성한다.
 
-## Information Architecture
+## 정보 구조
 
-### Search Landing Page
+### 검색 랜딩 페이지
 
-The landing page is a two-column search-first layout.
+랜딩 페이지는 2열 검색 우선 구조다.
 
-Left column:
+왼쪽 열:
 
-- global search bar
-- result list
-- filters for project/date/role/agent/tool
+- 전역 검색창
+- 결과 리스트
+- 프로젝트, 날짜, 역할, 에이전트, 툴 필터
 
-Right column:
+오른쪽 열:
 
-- context inspector
-- neighboring messages
-- session metadata
-- agent/tool context
-- mini timeline
+- 컨텍스트 인스펙터
+- 인접 메시지
+- 세션 메타데이터
+- agent/tool 문맥
+- 미니 타임라인
 
-This is effectively "Layout A with selected context-panel ideas from Layout C."
+이 구조는 `A안 기본 + C안의 일부 컨텍스트 패널 흡수` 방향으로 확정한다.
 
-### Session View
+### 세션 뷰
 
-The session view is a reconstruction screen, not just a raw transcript. It should present:
+세션 뷰는 단순 원문 transcript가 아니라 복기 화면이어야 한다. 다음을 보여준다.
 
-- time-ordered message flow
-- tool call/result boundaries
-- agent parent-child transitions
-- clear jumps back to search results
+- 시간순 메시지 흐름
+- 툴 호출과 결과 경계
+- 에이전트 부모-자식 전이
+- 검색 결과로 돌아가는 명확한 점프
 
-### Secondary Views
+### 보조 화면
 
-Retained but demoted from the landing experience:
+랜딩 경험에서는 후순위로 내리되 유지하는 화면은 다음과 같다.
 
-- `Timeline`: project/session exploration over time
-- `Usage/Cost`: token and cost analytics
-- `Admin`: ingestion status, index health, retention, backup, and operational controls
+- `Timeline`: 프로젝트/세션의 시간축 탐색
+- `Usage/Cost`: 토큰 및 비용 분석
+- `Admin`: 수집 상태, 인덱스 상태, 보존, 백업, 운영 제어
 
-## Data Flow
+## 데이터 흐름
 
-1. File watcher discovers or updates Codex log sources.
-2. Parser reads raw Codex events.
-3. Normalizer maps raw events into internal entities.
-4. Database persists normalized rows and updates FTS indexes.
-5. Search queries return message hits plus metadata joins.
-6. Context queries fetch surrounding messages and related tool/agent state.
-7. Timeline and usage views read from normalized/aggregated tables rather than raw logs.
+1. 파일 watcher가 Codex 로그 소스를 발견하거나 갱신을 감지한다.
+2. parser가 원시 Codex 이벤트를 읽는다.
+3. normalizer가 원시 이벤트를 내부 엔티티로 변환한다.
+4. database가 정규화된 행을 저장하고 FTS 인덱스를 갱신한다.
+5. 검색 쿼리가 메시지 적중 결과와 메타데이터 조인을 반환한다.
+6. 컨텍스트 쿼리가 인접 메시지와 관련 tool/agent 상태를 가져온다.
+7. 타임라인과 사용량 화면은 원시 로그가 아니라 정규화/집계 테이블을 읽는다.
 
-## Migration Strategy
+## 마이그레이션 전략
 
-The application should be treated as a Codex-only product after the migration. Existing Claude-specific assumptions should be removed rather than wrapped in compatibility layers unless a specific piece of infrastructure is still useful without semantic distortion.
+전환 이후 애플리케이션은 Codex 전용 제품으로 취급한다. Claude 전용 가정은 의미 왜곡 없이 재사용 가능한 기반이 아닌 한 호환 레이어로 감싸지 않고 제거한다.
 
-Recommended migration shape:
+권장 마이그레이션 순서는 다음과 같다.
 
-1. keep the app shell, auth model, watcher infrastructure, and general operational scaffolding
-2. replace Claude-specific parsing and normalization with Codex-aware ingestion
-3. introduce a Codex-native schema where current schema assumptions are too Claude-specific
-4. rework the frontend so search is the default route and primary interaction
-5. reconnect timeline, usage, and admin screens to the new normalized model
+1. 앱 셸, 인증 모델, watcher 인프라, 운영성 관련 기반은 유지한다.
+2. Claude 전용 파싱과 정규화를 Codex 전용 수집으로 교체한다.
+3. 기존 스키마 전제가 지나치게 Claude 중심이면 Codex 네이티브 스키마를 도입한다.
+4. 프런트엔드를 검색 기본 경로와 검색 중심 상호작용으로 재구성한다.
+5. 타임라인, 사용량, 관리자 화면을 새 정규화 모델에 다시 연결한다.
 
-## Error Handling
+## 오류 처리
 
-The system should degrade cleanly when Codex logs are incomplete or malformed.
+Codex 로그가 불완전하거나 일부가 손상돼도 시스템은 점진적으로 저하되어야 한다.
 
-Requirements:
+요구사항은 다음과 같다.
 
-- ingestion failures must be recorded without crashing the app
-- malformed raw events should be quarantined or skipped with diagnostics
-- partial session reconstruction should still produce usable message search results
-- UI detail panels must handle missing tool/agent context without blank-screen failures
-- admin screens should expose ingestion health, parse error counts, and index lag
+- 수집 실패가 앱 전체 장애로 번지면 안 된다.
+- 잘못된 원시 이벤트는 진단 정보와 함께 격리하거나 건너뛴다.
+- 세션이 일부만 복원돼도 메시지 검색은 usable 해야 한다.
+- UI 상세 패널은 tool/agent 문맥이 없다고 빈 화면으로 실패하면 안 된다.
+- 관리자 화면은 수집 상태, 파싱 오류 수, 인덱스 지연을 보여줘야 한다.
 
-## Testing Strategy
+## 테스트 전략
 
-Testing needs to prove both correctness and recoverability.
+테스트는 정확성과 복구 가능성을 모두 증명해야 한다.
 
-### Parser and Normalization
+### 파서 및 정규화
 
-- fixture-based tests for representative Codex raw event samples
-- edge-case coverage for missing fields, reordered events, partial sessions, and unknown event types
+- 대표적인 Codex 원시 이벤트 샘플 기반 fixture 테스트
+- 누락 필드, 순서 뒤바뀜, 부분 세션, 미확인 이벤트 타입에 대한 엣지 케이스 커버
 
-### Storage and Search
+### 저장소 및 검색
 
-- integration tests for FTS indexing at message granularity
-- context lookup tests for neighboring messages and agent/tool joins
-- migration tests for schema bootstrap and incremental updates
+- 메시지 단위 FTS 색인 통합 테스트
+- 인접 메시지와 agent/tool 조인 문맥 조회 테스트
+- 스키마 초기화와 증분 갱신 마이그레이션 테스트
 
-### UI Behavior
+### UI 동작
 
-- search landing page tests for message-first results
-- session expansion tests
-- timeline and usage smoke tests against normalized Codex fixtures
+- 메시지 우선 검색 결과 랜딩 페이지 테스트
+- 세션 확장 테스트
+- 정규화된 Codex fixture 기반 타임라인/사용량 스모크 테스트
 
-### Operational Behavior
+### 운영 동작
 
-- watcher resume/checkpoint tests
-- ingestion error visibility tests in admin views
-- backup/retention regression coverage if schema changes affect those flows
+- watcher 재개 및 체크포인트 테스트
+- 관리자 화면의 수집 오류 가시성 테스트
+- 스키마 변경이 보존/백업 플로우에 미치는 영향 회귀 테스트
 
-## Open Design Decisions Deferred to Planning
+## 구현 계획으로 넘길 미결정 항목
 
-The following items should be pinned in the implementation plan, not left ambiguous during coding:
+아래 항목은 코딩 중 즉흥 결정으로 남기지 않고 구현 계획에서 고정해야 한다.
 
-- exact Codex raw file discovery patterns under `~/.codex/...`
-- precise event taxonomy from real sample logs
-- title derivation rules for sessions
-- token/cost derivation logic from Codex records
-- whether migration reuses or replaces the current schema version chain
-- route-by-route frontend cutover sequence
+- `~/.codex/...` 아래 실제 파일 탐색 패턴
+- 실샘플 기준 Codex 이벤트 taxonomy
+- 세션 제목 도출 규칙
+- Codex 기록에서 토큰/비용을 계산하는 방식
+- 현재 스키마 버전 체인을 재사용할지 교체할지 여부
+- 프런트엔드 라우트별 전환 순서
 
-## Implementation Guidance
+## 구현 분해 가이드
 
-The implementation plan should be split into bounded workstreams:
+구현 계획은 다음 작업 흐름으로 나누는 것이 적절하다.
 
-- raw log discovery and sample capture
-- parser and normalization model
-- database schema and indexing
-- search-first frontend restructuring
-- timeline/usage/admin reconnection
-- test and migration hardening
+- 원시 로그 탐색과 샘플 확보
+- 파서와 정규화 모델 구현
+- 데이터베이스 스키마와 색인 구성
+- 검색 우선 프런트엔드 재구성
+- 타임라인/사용량/관리자 재연결
+- 테스트와 마이그레이션 강화
 
-That decomposition keeps search delivery on the critical path while preventing timeline/admin work from blocking parser and schema progress.
+이 분해 방식은 검색 경험을 크리티컬 패스로 두면서도 타임라인과 관리자 작업이 파서/스키마 진행을 막지 않게 해준다.
