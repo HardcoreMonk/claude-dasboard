@@ -1,0 +1,42 @@
+[Unit]
+Description=Codex Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+# Codex 전용 인스턴스: Claude 대시보드와 서비스/DB/백업 루트를 분리한다.
+User=hardcoremonk
+WorkingDirectory=/home/hardcoremonk/codex-zone/codex-dashboard
+ExecStart=/home/hardcoremonk/codex-zone/codex-dashboard/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8617 --loop asyncio --http h11 --log-level info
+Restart=always
+RestartSec=5
+Environment=PORT=8617
+Environment=DASHBOARD_DB_PATH=/home/hardcoremonk/.codex/dashboard.db
+Environment=DASHBOARD_BACKUP_DIR=/home/hardcoremonk/.codex/dashboard-backups
+# Optional: set DASHBOARD_PASSWORD=yourpassword for HTTP Basic Auth
+
+# Resource limits — tuned for a 500 MB-ish DB and 8 parallel scan workers.
+MemoryMax=512M
+MemoryHigh=384M
+CPUQuota=150%
+TasksMax=256
+LimitNOFILE=8192
+
+# Hardening — read-only filesystem except for the Codex DB dir and bytecode cache.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/hardcoremonk/.codex /home/hardcoremonk/codex-zone/codex-dashboard/__pycache__
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=codex-web-dashboard
+
+[Install]
+WantedBy=multi-user.target

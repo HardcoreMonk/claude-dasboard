@@ -131,6 +131,40 @@ def test_contract_start_script_defaults_to_codex_port():
     assert '--port "$PORT"' in contents
 
 
+def test_contract_codex_service_unit_exists_with_codex_identity():
+    service_file = Path(__file__).resolve().parents[1] / 'codex-web-dashboard.service'
+    contents = service_file.read_text()
+
+    assert 'Description=Codex Web Dashboard' in contents
+    assert 'Environment=PORT=8617' in contents or '--port 8617' in contents
+    assert 'SyslogIdentifier=codex-web-dashboard' in contents
+
+
+def test_contract_claude_service_identity_stays_separate():
+    service_file = Path(__file__).resolve().parents[1] / 'claude-dashboard.service'
+    contents = service_file.read_text()
+
+    assert 'Description=Claude Usage Dashboard' in contents
+    assert 'SyslogIdentifier=claude-dashboard' in contents
+    assert 'codex-web-dashboard' not in contents
+
+
+def test_contract_docs_describe_split_services_in_korean():
+    repo_root = Path(__file__).resolve().parents[1]
+    readme = (repo_root / 'README.md').read_text()
+    architecture = (repo_root / 'docs' / 'ARCHITECTURE.md').read_text()
+
+    expected_phrases = [
+        'Claude와 Codex는 별도 systemd 서비스로 운영',
+        '별도 DB 루트',
+        '별도 백업 루트',
+    ]
+
+    for phrase in expected_phrases:
+        assert phrase in readme, f"README.md missing phrase: {phrase}"
+        assert phrase in architecture, f"docs/ARCHITECTURE.md missing phrase: {phrase}"
+
+
 # ─── Health / metrics / stats ──────────────────────────────────────────────
 
 def test_contract_runtime_path_env_overrides_still_win(tmp_path, monkeypatch):

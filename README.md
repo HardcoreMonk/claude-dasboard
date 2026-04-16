@@ -38,10 +38,20 @@ PORT=8617                     # 서버 포트 기본값 (override 가능)
 
 ### systemd 서비스
 
+운영 기준은 Codex 인스턴스다. Claude와 Codex는 별도 systemd 서비스로 운영하며, 서로 다른 포트·별도 DB 루트·별도 백업 루트를 사용한다.
+
 ```bash
+# Codex Web Dashboard
+sudo cp codex-web-dashboard.service /etc/systemd/system/
+sudo systemctl enable --now codex-web-dashboard
+
+# Claude Usage Dashboard
 sudo cp claude-dashboard.service /etc/systemd/system/
 sudo systemctl enable --now claude-dashboard
 ```
+
+- `codex-web-dashboard.service` → `PORT=8617`, `DASHBOARD_DB_PATH=~/.codex/dashboard.db`, `DASHBOARD_BACKUP_DIR=~/.codex/dashboard-backups`
+- `claude-dashboard.service` → `PORT=8765`, `DASHBOARD_DB_PATH=~/.claude/dashboard.db`, `DASHBOARD_BACKUP_DIR=~/.claude/dashboard-backups`
 
 ### 테스트 & 빌드
 
@@ -197,6 +207,8 @@ sudo cp claude-dashboard-retention.{service,timer} /etc/systemd/system/
 sudo systemctl enable --now claude-dashboard-retention.timer
 # 매주 일요일 03:30, 365일 이전 데이터 삭제
 ```
+
+서비스를 분리 운영할 때도 백업/보존 루트는 섞지 않는다. Claude와 Codex는 별도 systemd 서비스로 운영하고, 별도 DB 루트와 별도 백업 루트를 유지해야 복원 절차와 보존 정책을 독립적으로 관리할 수 있다.
 
 ## 문서
 

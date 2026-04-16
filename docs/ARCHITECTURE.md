@@ -28,6 +28,14 @@ Codex JSONL/이벤트 적재           store_codex_message()
 단일 프로세스 (uvicorn) 가 파일 감시, DB 관리, Codex/Claude 인덱스 조회, API 서빙, WebSocket 브로드캐스트를 모두 처리한다.
 외부 의존 서비스 없음 — SQLite 파일 하나로 완결된다.
 
+운영 배포는 논리적으로 둘로 나눈다. Claude와 Codex는 별도 systemd 서비스로 운영하며, 포트뿐 아니라 별도 DB 루트와 별도 백업 루트를 유지한다. 권장 매핑은 `codex-web-dashboard.service` → `~/.codex/dashboard.db`, `~/.codex/dashboard-backups`, `PORT=8617` 이고 `claude-dashboard.service` → `~/.claude/dashboard.db`, `~/.claude/dashboard-backups`, `PORT=8765` 이다.
+
+### 서비스 분리 원칙
+
+- `codex-web-dashboard.service` 는 Codex Web Dashboard 식별자와 전용 포트 `8617` 을 사용한다.
+- `claude-dashboard.service` 는 Claude Usage Dashboard 식별자를 유지하고 Codex 식별자와 섞지 않는다.
+- 두 서비스는 동일 코드베이스를 실행할 수 있지만 운영 데이터는 합치지 않는다. 별도 DB 루트, 별도 백업 루트, 별도 systemd unit 을 유지해 장애 복구와 보존 정책을 분리한다.
+
 ---
 
 ## 백엔드

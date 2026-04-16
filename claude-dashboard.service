@@ -4,14 +4,15 @@ After=network.target
 
 [Service]
 Type=simple
-# User/paths are hardcoded to the install location — edit these two lines
-# when relocating or running as a different user.
+# Claude 전용 인스턴스: Codex 대시보드와 서비스/DB/백업 루트를 분리한다.
 User=hardcoremonk
-WorkingDirectory=/home/hardcoremonk/projects/claude-dashboard
-ExecStart=/home/hardcoremonk/projects/claude-dashboard/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11 --log-level info
+WorkingDirectory=/home/hardcoremonk/codex-zone/codex-dashboard
+ExecStart=/home/hardcoremonk/codex-zone/codex-dashboard/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11 --log-level info
 Restart=always
 RestartSec=5
 Environment=PORT=8765
+Environment=DASHBOARD_DB_PATH=/home/hardcoremonk/.claude/dashboard.db
+Environment=DASHBOARD_BACKUP_DIR=/home/hardcoremonk/.claude/dashboard-backups
 # Optional: set DASHBOARD_PASSWORD=yourpassword for HTTP Basic Auth
 
 # Resource limits — tuned for a 500 MB-ish DB and 8 parallel scan workers.
@@ -30,7 +31,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/hardcoremonk/.claude /home/hardcoremonk/projects/claude-dashboard/__pycache__
+ReadWritePaths=/home/hardcoremonk/.claude /home/hardcoremonk/codex-zone/codex-dashboard/__pycache__
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
