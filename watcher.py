@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
+from codex_discovery import codex_roots, discover_codex_logs
 from database import read_db, write_db
 from parser import CLAUDE_PROJECTS, parse_jsonl_file, process_record
 
@@ -70,6 +71,52 @@ POLL_INTERVAL_SLOW = 30.0   # safety-net polling while watchdog is active
 OBSERVER_HEALTH_INTERVAL = 60.0  # check observer liveness every 60s
 MAX_RETRIES = 3
 SCAN_BATCH = 4              # parallel file-parse workers during initial scan
+
+
+def _iter_watch_files(home: Path | None = None) -> list[Path]:
+    """Return every JSONL file the watcher should consider."""
+    home = home or Path.home()
+    files: list[Path] = []
+    seen: set[Path] = set()
+
+    if CLAUDE_PROJECTS.exists():
+        for path in sorted(CLAUDE_PROJECTS.rglob('*.jsonl')):
+            if path not in seen:
+                files.append(path)
+                seen.add(path)
+
+    for path in discover_codex_logs(home):
+        if path not in seen:
+            files.append(path)
+            seen.add(path)
+
+    return files
+
+
+def _iter_watch_roots(home: Path | None = None) -> list[Path]:
+    """Return directory roots the filesystem observer should watch."""
+    home = home or Path.home()
+    roots: list[Path] = []
+    seen: set[Path] = set()
+
+    if CLAUDE_PROJECTS.exists() and CLAUDE_PROJECTS not in seen:
+        roots.append(CLAUDE_PROJECTS)
+        seen.add(CLAUDE_PROJECTS)
+
+    for root in codex_roots(home):
+        if root not in seen:
+            roots.append(root)
+            seen.add(root)
+
+    return roots
+
+
+def _count_jsonl_lines(file_path: str) -> int:
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as handle:
+            return sum(1 for _ in handle)
+    except OSError:
+        return 0
 
 
 class _JsonlEventHandler(FileSystemEventHandler if _WATCHDOG_OK else object):
@@ -159,10 +206,11 @@ class ClaudeFileWatcher:
             loop = asyncio.get_running_loop()
             handler = _JsonlEventHandler(loop, self._event_queue)
             obs = Observer()
-            obs.schedule(handler, str(CLAUDE_PROJECTS), recursive=True)
+            for root in _iter_watch_roots():
+                obs.schedule(handler, str(root), recursive=True)
             obs.start()
             self._observer = obs
-            logger.info("watchdog started on %s (polling safety net every %.0fs)",
+            logger.info("watchdog started on %s (+ Codex roots) (polling safety net every %.0fs)",
                         CLAUDE_PROJECTS, POLL_INTERVAL_SLOW)
         except Exception as e:
             logger.warning("watchdog init failed (%s) — falling back to poll", e)
@@ -170,7 +218,7 @@ class ClaudeFileWatcher:
 
     async def _initial_scan(self):
         logger.info("Starting initial scan …")
-        files = sorted(CLAUDE_PROJECTS.rglob('*.jsonl'))
+        files = _iter_watch_files()
         total = len(files)
         logger.info("Found %d JSONL files to scan", total)
 
@@ -278,7 +326,7 @@ class ClaudeFileWatcher:
     def _detect_changes(self) -> list[str]:
         changed: list[str] = []
         seen: set[str] = set()
-        for f in CLAUDE_PROJECTS.rglob('*.jsonl'):
+        for f in _iter_watch_files():
             path = str(f)
             seen.add(path)
             try:
@@ -317,19 +365,21 @@ class ClaudeFileWatcher:
                 ).fetchone()
                 start_line = row['last_line'] if row else 0
 
-            parsed = list(parse_jsonl_file(file_path, start_line))
-            if not parsed:
-                with self._state_lock:
-                    self._retry_queue.pop(file_path, None)
-                return None
+            rewound = False
+            if start_line > 0:
+                current_line_count = _count_jsonl_lines(file_path)
+                if current_line_count < start_line:
+                    rewound = True
+                    start_line = 0
 
+            parsed = list(parse_jsonl_file(file_path, start_line))
             new_records: list[dict] = []
             with write_db() as db:
                 row = db.execute(
                     'SELECT last_line FROM file_watch_state WHERE file_path = ?',
                     (file_path,),
                 ).fetchone()
-                actual_start = row['last_line'] if row else 0
+                actual_start = 0 if rewound else (row['last_line'] if row else 0)
 
                 last_line = actual_start
                 for record in parsed:
@@ -340,7 +390,7 @@ class ClaudeFileWatcher:
                     if result:
                         new_records.append(result)
 
-                if last_line > actual_start:
+                if last_line > actual_start or (rewound and last_line == actual_start):
                     try:
                         mtime = os.path.getmtime(file_path)
                     except OSError:
@@ -353,6 +403,8 @@ class ClaudeFileWatcher:
 
             with self._state_lock:
                 self._retry_queue.pop(file_path, None)
+            if not parsed:
+                return None
             return {'type': 'batch_update', 'records': new_records} if new_records else None
 
         except Exception:

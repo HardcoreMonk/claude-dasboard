@@ -1,8 +1,8 @@
 """Unit tests for watcher.py — state lock, metric injection, retry accounting."""
+from pathlib import Path
 import threading
 
-import pytest
-
+import database
 import watcher
 
 
@@ -126,3 +126,100 @@ def test_constructor_defaults_to_noop_metrics():
     assert w._metrics.scan_files is None
     assert w._metrics.new_messages is None
     assert w._metrics.retries is None
+
+
+def test_codex_watch_roots_include_claude_and_codex(tmp_path, monkeypatch):
+    claude_root = tmp_path / '.claude' / 'projects'
+    claude_root.mkdir(parents=True)
+    claude_log = claude_root / 'session.jsonl'
+    claude_log.write_text('{"type":"assistant"}\n', encoding='utf-8')
+    codex_log = tmp_path / '.codex' / 'projects' / 'demo' / 'session.jsonl'
+    codex_log.parent.mkdir(parents=True)
+    codex_log.write_text('{"type":"message"}\n', encoding='utf-8')
+
+    monkeypatch.setattr(watcher, 'CLAUDE_PROJECTS', claude_root)
+
+    roots = watcher._iter_watch_files(tmp_path)
+
+    assert claude_log in roots
+    assert codex_log in roots
+
+
+def test_start_observer_schedules_codex_roots(tmp_path, monkeypatch):
+    home = tmp_path
+    claude_root = home / '.claude' / 'projects'
+    claude_root.mkdir(parents=True)
+    codex_projects = home / '.codex' / 'projects'
+    codex_projects.mkdir(parents=True)
+    codex_sessions = home / '.codex' / 'sessions'
+    codex_sessions.mkdir(parents=True)
+
+    scheduled: list[tuple[object, bool]] = []
+
+    class _FakeObserver:
+        def schedule(self, handler, path, recursive=True):
+            scheduled.append((Path(path), recursive))
+        def start(self):
+            pass
+        def stop(self):
+            pass
+        def join(self, timeout=None):
+            pass
+
+    monkeypatch.setattr(watcher, '_WATCHDOG_OK', True)
+    monkeypatch.setattr(watcher, 'Observer', _FakeObserver)
+    monkeypatch.setattr(watcher, 'CLAUDE_PROJECTS', claude_root)
+    monkeypatch.setattr(watcher.Path, 'home', lambda: home)
+    monkeypatch.setattr(watcher.asyncio, 'get_running_loop', lambda: object())
+
+    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w._event_queue = object()
+    w._start_observer()
+
+    assert (claude_root, True) in scheduled
+    assert (codex_projects, True) in scheduled
+    assert (codex_sessions, True) in scheduled
+
+
+def test_process_file_recovers_after_truncation(tmp_path, monkeypatch):
+    db_path = tmp_path / 'dashboard.db'
+    monkeypatch.setattr(database, 'DB_PATH', db_path)
+    database.init_db()
+
+    file_path = tmp_path / 'session.jsonl'
+    file_path.write_text(
+        '\n'.join([
+            '{"type":"assistant","sessionId":"s1","uuid":"u1","timestamp":"2026-04-16T10:00:00Z","cwd":"/home/user/projects/demo","message":{"model":"claude-opus-4-6","usage":{"input_tokens":1},"content":[{"type":"text","text":"first"}]}}',
+            '{"type":"assistant","sessionId":"s1","uuid":"u2","timestamp":"2026-04-16T10:01:00Z","cwd":"/home/user/projects/demo","message":{"model":"claude-opus-4-6","usage":{"input_tokens":1},"content":[{"type":"text","text":"second"}]}}',
+        ]) + '\n',
+        encoding='utf-8',
+    )
+
+    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+
+    first = w._process_file(str(file_path))
+    assert first is not None
+    assert len(first['records']) == 2
+
+    file_path.write_text(
+        '{"type":"assistant","sessionId":"s1","uuid":"u3","timestamp":"2026-04-16T10:02:00Z","cwd":"/home/user/projects/demo","message":{"model":"claude-opus-4-6","usage":{"input_tokens":1},"content":[{"type":"text","text":"rewritten"}]}}\n',
+        encoding='utf-8',
+    )
+
+    second = w._process_file(str(file_path))
+    assert second is not None
+    assert len(second['records']) == 1
+    assert 'rewritten' in second['records'][0]['preview']
+
+    with database.read_db() as db:
+        state = db.execute(
+            'SELECT last_line FROM file_watch_state WHERE file_path = ?',
+            (str(file_path),),
+        ).fetchone()
+        count = db.execute(
+            'SELECT COUNT(*) AS n FROM messages WHERE session_id = ?',
+            ('s1',),
+        ).fetchone()
+
+    assert state['last_line'] == 1
+    assert count['n'] == 3

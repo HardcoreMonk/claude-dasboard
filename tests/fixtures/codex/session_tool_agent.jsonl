@@ -1,0 +1,2 @@
+{"type":"tool","timestamp":"2026-04-16T10:01:00Z","sessionId":"codex-s1","project_path":"/home/user/projects/demo-project","name":"Bash","input":"ls -la"}
+{"type":"agent","timestamp":"2026-04-16T10:02:00Z","sessionId":"codex-s1","project_path":"/home/user/projects/demo-project","agent_name":"planner","status":"started"}
