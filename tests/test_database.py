@@ -160,6 +160,130 @@ def test_fts_trigger_on_update(temp_db):
     ).fetchone()[0] == 1
 
 
+# ─── Codex schema / search ──────────────────────────────────────────────
+
+def test_init_db_creates_codex_schema_objects(temp_db):
+    import database
+    database.init_db()
+
+    conn = sqlite3.connect(str(temp_db))
+    objects = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE name IN ('codex_projects', 'codex_sessions', 'codex_messages', 'codex_messages_fts')"
+        )
+    }
+
+    assert objects == {
+        'codex_projects',
+        'codex_sessions',
+        'codex_messages',
+        'codex_messages_fts',
+    }
+
+
+def test_codex_fts_search_returns_message_with_context(temp_db):
+    import database
+    database.init_db()
+
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='sess-1',
+        session_name='demo session',
+        role='user',
+        content='searchable quantum widget',
+        content_preview='searchable quantum widget',
+        timestamp='2026-04-16T00:00:01Z',
+    )
+
+    rows = database.search_codex_messages('quantum')
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row['project_path'] == '/tmp/codex-demo'
+    assert row['project_name'] == 'codex-demo'
+    assert row['session_id'] == 'sess-1'
+    assert row['role'] == 'user'
+    assert row['content_preview'] == 'searchable quantum widget'
+
+
+def test_codex_message_insert_is_duplicate_safe(temp_db):
+    import database
+    database.init_db()
+
+    payload = dict(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='sess-dup',
+        session_name='duplicate session',
+        role='user',
+        content='duplicate-safe content',
+        content_preview='duplicate-safe content',
+        timestamp='2026-04-16T00:00:02Z',
+        message_uuid='msg-dup-1',
+    )
+
+    database.store_codex_message(**payload)
+    database.store_codex_message(**payload)
+
+    conn = sqlite3.connect(str(temp_db))
+    rows = conn.execute(
+        "SELECT COUNT(*) FROM codex_messages WHERE message_uuid='msg-dup-1'"
+    ).fetchone()[0]
+    assert rows == 1
+
+
+def test_codex_session_counters_increment_on_message_insert(temp_db):
+    import database
+    database.init_db()
+
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='sess-counts',
+        session_name='counted session',
+        role='user',
+        content='first user message',
+        content_preview='first user message',
+        timestamp='2026-04-16T00:00:03Z',
+        message_uuid='msg-count-1',
+    )
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='sess-counts',
+        session_name='counted session',
+        role='assistant',
+        content='assistant reply',
+        content_preview='assistant reply',
+        timestamp='2026-04-16T00:00:04Z',
+        message_uuid='msg-count-2',
+    )
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='sess-counts',
+        session_name='counted session',
+        role='user',
+        content='first user message',
+        content_preview='first user message',
+        timestamp='2026-04-16T00:00:03Z',
+        message_uuid='msg-count-1',
+    )
+
+    conn = sqlite3.connect(str(temp_db))
+    row = conn.execute(
+        "SELECT message_count, user_message_count FROM codex_sessions WHERE id='sess-counts'"
+    ).fetchone()
+    assert row == (2, 1)
+    total = conn.execute(
+        "SELECT COUNT(*) FROM codex_messages WHERE session_id='sess-counts'"
+    ).fetchone()[0]
+    assert total == 2
+
+
 # ─── Thread-local read pool ─────────────────────────────────────────────
 
 def test_read_db_reuses_connection_per_thread(temp_db):

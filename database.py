@@ -22,7 +22,7 @@ _read_local = threading.local()   # per-thread cached read connection
 _READ_CONN_TTL = 300              # seconds before recycling a cached read connection
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 14               # bump on every schema change
+SCHEMA_VERSION = 15               # bump on every schema change
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -272,6 +272,71 @@ CREATE TRIGGER IF NOT EXISTS cai_msg_fts_au AFTER UPDATE OF content_preview ON c
 END;
 '''
 
+# v15: Codex-native project/session/message store with message-first FTS.
+_MIGRATE_V15_CODEX = '''
+CREATE TABLE IF NOT EXISTS codex_projects (
+    project_path TEXT PRIMARY KEY,
+    project_name TEXT NOT NULL,
+    created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS codex_sessions (
+    id TEXT PRIMARY KEY,
+    project_path TEXT NOT NULL REFERENCES codex_projects(project_path) ON DELETE CASCADE,
+    session_name TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    model TEXT,
+    cwd TEXT,
+    pinned INTEGER DEFAULT 0,
+    message_count INTEGER DEFAULT 0,
+    user_message_count INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_codex_sessions_project_path ON codex_sessions(project_path);
+CREATE INDEX IF NOT EXISTS idx_codex_sessions_updated_at ON codex_sessions(updated_at);
+
+CREATE TABLE IF NOT EXISTS codex_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+    message_uuid TEXT UNIQUE,
+    parent_uuid TEXT,
+    role TEXT,
+    content TEXT,
+    content_preview TEXT,
+    timestamp TEXT,
+    model TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_codex_messages_session_id ON codex_messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_codex_messages_timestamp ON codex_messages(timestamp);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS codex_messages_fts USING fts5(
+    content_preview,
+    content='codex_messages',
+    content_rowid='id',
+    tokenize='unicode61 remove_diacritics 0'
+);
+
+CREATE TRIGGER IF NOT EXISTS codex_messages_fts_ai AFTER INSERT ON codex_messages BEGIN
+    INSERT INTO codex_messages_fts(rowid, content_preview)
+    VALUES (new.id, COALESCE(new.content_preview, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS codex_messages_fts_ad AFTER DELETE ON codex_messages BEGIN
+    INSERT INTO codex_messages_fts(codex_messages_fts, rowid, content_preview)
+    VALUES ('delete', old.id, COALESCE(old.content_preview, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS codex_messages_fts_au AFTER UPDATE OF content_preview ON codex_messages BEGIN
+    INSERT INTO codex_messages_fts(codex_messages_fts, rowid, content_preview)
+    VALUES ('delete', old.id, COALESCE(old.content_preview, ''));
+    INSERT INTO codex_messages_fts(rowid, content_preview)
+    VALUES (new.id, COALESCE(new.content_preview, ''));
+END;
+'''
+
 
 def _get_user_version(conn: sqlite3.Connection) -> int:
     row = conn.execute("PRAGMA user_version").fetchone()
@@ -302,6 +367,13 @@ def _backfill_fts(conn: sqlite3.Connection) -> None:
     logger.info("Rebuilding FTS index (%d rows) …", total)
     conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
     logger.info("FTS rebuild complete")
+
+
+def _backfill_codex_fts(conn: sqlite3.Connection) -> None:
+    total = conn.execute("SELECT COUNT(*) FROM codex_messages").fetchone()[0]
+    logger.info("Rebuilding Codex FTS index (%d rows) …", total)
+    conn.execute("INSERT INTO codex_messages_fts(codex_messages_fts) VALUES('rebuild')")
+    logger.info("Codex FTS rebuild complete")
 
 
 def _heal_project_identity(conn: sqlite3.Connection) -> int:
@@ -649,6 +721,118 @@ def _migrate_v5_recompute_session_totals(conn: sqlite3.Connection) -> int:
     return cur.rowcount
 
 
+def _ensure_codex_project(conn: sqlite3.Connection, project_path: str, project_name: str) -> None:
+    now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    conn.execute(
+        '''
+        INSERT INTO codex_projects (project_path, project_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(project_path) DO UPDATE SET
+            project_name = excluded.project_name,
+            updated_at = excluded.updated_at
+        ''',
+        (project_path, project_name, now, now),
+    )
+
+
+def _ensure_codex_session(
+    conn: sqlite3.Connection,
+    session_id: str,
+    project_path: str,
+    session_name: str = '',
+    created_at: str = '',
+    updated_at: str = '',
+    cwd: str = '',
+    model: str | None = None,
+) -> None:
+    conn.execute(
+        '''
+        INSERT INTO codex_sessions
+            (id, project_path, session_name, created_at, updated_at, cwd, model)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            project_path = excluded.project_path,
+            session_name = COALESCE(NULLIF(excluded.session_name, ''), codex_sessions.session_name),
+            created_at = COALESCE(NULLIF(excluded.created_at, ''), codex_sessions.created_at),
+            updated_at = COALESCE(NULLIF(excluded.updated_at, ''), codex_sessions.updated_at),
+            cwd = COALESCE(NULLIF(excluded.cwd, ''), codex_sessions.cwd),
+            model = COALESCE(NULLIF(excluded.model, ''), codex_sessions.model)
+        ''',
+        (session_id, project_path, session_name, created_at, updated_at, cwd, model or ''),
+    )
+
+
+def store_codex_message(
+    *,
+    project_path: str,
+    project_name: str,
+    session_id: str,
+    session_name: str = '',
+    role: str,
+    content: str = '',
+    content_preview: str = '',
+    timestamp: str = '',
+    message_uuid: str | None = None,
+    parent_uuid: str = '',
+    model: str = '',
+    cwd: str = '',
+) -> int:
+    """Persist a Codex message plus its project/session context."""
+    preview = content_preview or content[:240]
+    with write_db() as conn:
+        _ensure_codex_project(conn, project_path, project_name or Path(project_path).name or project_path)
+        _ensure_codex_session(conn, session_id, project_path, session_name, timestamp, timestamp, cwd, model)
+        cur = conn.execute(
+            '''
+            INSERT OR IGNORE INTO codex_messages
+                (session_id, message_uuid, parent_uuid, role, content, content_preview, timestamp, model)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (session_id, message_uuid, parent_uuid, role, content, preview, timestamp, model),
+        )
+        if cur.rowcount > 0:
+            conn.execute(
+                '''
+                UPDATE codex_sessions
+                   SET message_count = COALESCE(message_count, 0) + 1,
+                       user_message_count = COALESCE(user_message_count, 0) + ?
+                 WHERE id = ?
+                ''',
+                (1 if role == 'user' else 0, session_id),
+            )
+        return int(cur.lastrowid)
+
+
+def search_codex_messages(query: str, limit: int = 20) -> list[sqlite3.Row]:
+    """Search Codex messages and return rows joined with session/project context."""
+    sql = '''
+        SELECT
+            m.id,
+            m.session_id,
+            m.message_uuid,
+            m.parent_uuid,
+            m.role,
+            m.content,
+            m.content_preview,
+            m.timestamp,
+            m.model,
+            s.session_name,
+            s.created_at AS session_created_at,
+            s.updated_at AS session_updated_at,
+            p.project_path,
+            p.project_name
+        FROM codex_messages_fts f
+        JOIN codex_messages m ON m.id = f.rowid
+        JOIN codex_sessions s ON s.id = m.session_id
+        JOIN codex_projects p ON p.project_path = s.project_path
+        WHERE codex_messages_fts MATCH ?
+        ORDER BY bm25(codex_messages_fts), m.timestamp DESC, m.id DESC
+        LIMIT ?
+    '''
+    with read_db() as conn:
+        return list(conn.execute(sql, (query, limit)).fetchall())
+
+
 def check_integrity() -> bool:
     try:
         conn = _new_connection()
@@ -803,6 +987,14 @@ def init_db() -> None:
                     )
                 ''')
                 current = _commit_migration(conn, 14)
+            if current < 15:
+                logger.info("Migrating schema v%d → 15 (Codex schema + FTS)", current)
+                conn.executescript(_MIGRATE_V15_CODEX)
+                try:
+                    _backfill_codex_fts(conn)
+                except sqlite3.OperationalError as e:
+                    logger.warning("v15 Codex FTS skipped: %s", e)
+                current = _commit_migration(conn, 15)
             # One-time VACUUM to activate auto_vacuum=INCREMENTAL on legacy databases
             av = conn.execute('PRAGMA auto_vacuum').fetchone()[0]
             if av != 2:  # 2 = INCREMENTAL
