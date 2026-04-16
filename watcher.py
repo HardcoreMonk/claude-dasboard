@@ -16,18 +16,18 @@ import json
 import logging
 import os
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from codex_discovery import codex_roots, discover_codex_logs
 from codex_parser import iter_codex_records, normalize_codex_record
 from database import read_db, store_codex_message, write_db
-from parser import CLAUDE_PROJECTS, parse_jsonl_file, process_record
+from parser import parse_jsonl_file, process_record
 
 try:
-    from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
     _WATCHDOG_OK = True
 except ImportError:
     _WATCHDOG_OK = False
@@ -147,12 +147,6 @@ def _iter_watch_files(home: Path | None = None) -> list[Path]:
     files: list[Path] = []
     seen: set[Path] = set()
 
-    if CLAUDE_PROJECTS.exists():
-        for path in sorted(CLAUDE_PROJECTS.rglob('*.jsonl')):
-            if path not in seen:
-                files.append(path)
-                seen.add(path)
-
     for path in discover_codex_logs(home):
         if path not in seen:
             files.append(path)
@@ -166,10 +160,6 @@ def _iter_watch_roots(home: Path | None = None) -> list[Path]:
     home = home or Path.home()
     roots: list[Path] = []
     seen: set[Path] = set()
-
-    if CLAUDE_PROJECTS.exists() and CLAUDE_PROJECTS not in seen:
-        roots.append(CLAUDE_PROJECTS)
-        seen.add(CLAUDE_PROJECTS)
 
     for root in codex_roots(home):
         if root not in seen:
@@ -279,7 +269,7 @@ class ClaudeFileWatcher:
             obs.start()
             self._observer = obs
             logger.info("watchdog started on %s (+ Codex roots) (polling safety net every %.0fs)",
-                        CLAUDE_PROJECTS, POLL_INTERVAL_SLOW)
+                        codex_roots(Path.home()), POLL_INTERVAL_SLOW)
         except Exception as e:
             logger.warning("watchdog init failed (%s) — falling back to poll", e)
             self._observer = None
@@ -451,11 +441,42 @@ class ClaudeFileWatcher:
 
                 new_records: list[dict] = []
                 last_line = actual_start
+                allow_context_fill = (
+                    Path(file_path).name == 'history.jsonl'
+                    or 'sessions' in Path(file_path).parts
+                )
+                context = {
+                    'session_id': '',
+                    'project_path': '',
+                    'project_name': '',
+                    'timestamp': '',
+                }
                 for raw_record in parsed:
                     if raw_record['_line_number'] < actual_start:
                         continue
                     last_line = raw_record['_line_number'] + 1
                     normalized = normalize_codex_record(raw_record)
+                    if normalized.session_id:
+                        context['session_id'] = normalized.session_id
+                    if normalized.project_path:
+                        context['project_path'] = normalized.project_path
+                        context['project_name'] = normalized.project_name
+                    if normalized.timestamp:
+                        context['timestamp'] = normalized.timestamp
+                    if allow_context_fill and (
+                        context['session_id']
+                        and (
+                            context['project_path']
+                            or Path(file_path).name == 'history.jsonl'
+                        )
+                    ):
+                        normalized = replace(
+                            normalized,
+                            session_id=normalized.session_id or context['session_id'],
+                            project_path=normalized.project_path or context['project_path'],
+                            project_name=normalized.project_name or context['project_name'],
+                            timestamp=normalized.timestamp or context['timestamp'],
+                        )
                     role = _codex_role(normalized)
                     project_path, project_name = _codex_project_info(normalized, file_path)
                     if not _is_valid_codex_record(normalized, project_path, project_name):

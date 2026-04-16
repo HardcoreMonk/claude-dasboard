@@ -1,7 +1,7 @@
 # REST API
 
 62 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features` 은 인증 우회.
-현재 대시보드는 Codex 세션 탐색을 우선으로 두고, 기존 Claude Code 집계와 claude.ai export 조회를 병행한다.
+현재 대시보드는 Codex 세션 탐색 전용으로 동작한다. legacy Claude/claude.ai 라우트는 데이터 보존과 호환을 위해 남아 있지만, 기본 UI 는 사용하지 않는다.
 
 ## 자동 생성 스펙 (FastAPI)
 
@@ -83,8 +83,10 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/messages/search?q=k` | Codex 메시지 전문 검색. `project`, `role`, `limit` 지원 |
-| GET | `/api/messages/{message_id}/context?window=N` | 특정 Codex 메시지 주변 문맥 조회 |
+| GET | `/api/search/messages?q=k` | Codex 메시지 전문 검색. `project`, `role`, `limit` 지원 |
+| GET | `/api/search/messages/{message_id}/context?window=N` | 특정 Codex 메시지 주변 문맥 조회 |
+| GET | `/api/codex/projects/{name}/stats?path=` | Codex 프로젝트 상세 요약/세션/모델/일별 집계 |
+| GET | `/api/codex/projects/{name}/messages?path=&limit=&offset=&order=` | Codex 프로젝트 전체 메시지 스트림 |
 | GET | `/api/sessions/{id}/replay` | Codex 세션 리플레이 페이로드 조회 |
 | GET | `/api/codex/sessions?limit=N` | 최신 Codex 세션 목록 |
 | GET | `/api/timeline/summary?limit=N&date_from=&date_to=` | 최근 Codex 이벤트 + 세션 요약 |
@@ -156,7 +158,7 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 
 ## claude.ai export
 
-`import_claude_ai.py` 로 적재된 웹 대화 아카이브 전용 라우트. 토큰/비용 없음 — content 검색 전용. 기존 `/api/sessions`, `/api/stats` 등 집계 엔드포인트는 이 데이터를 포함하지 않는다.
+`import_claude_ai.py` 로 적재된 웹 대화 아카이브 전용 라우트다. 토큰/비용 없음 — content 검색 전용. 현재 Codex 대시보드 UI 는 이 경로를 사용하지 않는다.
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|

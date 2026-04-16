@@ -8,7 +8,7 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
 ## 시스템 개요
 
 ```
-~/.claude/projects/**/*.jsonl   (Claude Code 가 실시간 기록)
+~/.codex/sessions/**/rollout-*.jsonl   (Codex 가 실시간 기록)
            |
      [watchdog + 30s poll]      watcher.py
            |
@@ -18,7 +18,7 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
            |
 Codex JSONL/이벤트 적재           store_codex_message()
            |
-     [FastAPI 62 routes]        main.py
+     [FastAPI routes]           main.py
        /    |     \
    REST API WS   Admin status
        \    |     /
@@ -50,7 +50,7 @@ Codex JSONL/이벤트 적재           store_codex_message()
 ### uvicorn (ASGI 서버)
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
+uvicorn main:app --host 0.0.0.0 --port 8617 --loop asyncio --http h11
 ```
 
 - **asyncio loop + h11** 조합만 허용 (CLAUDE.md 불변식)
@@ -58,7 +58,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 
 ### main.py — FastAPI 애플리케이션
 
-**62 HTTP routes + 1 WebSocket** 을 호스팅.
+HTTP routes + 1 WebSocket 을 호스팅.
 
 | 그룹 | 라우트 | 역할 |
 |---|---|---|
@@ -66,8 +66,8 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 | 페이지 | `/features` | Feature Reference HTML 페이지 (인증 우회) |
 | 헬스 | `/api/health` | 서버 상태 + DB 메시지/세션 카운트 |
 | 메트릭 | `/metrics` | Prometheus text format (인증 우회) |
-| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 기존 Claude Code 세션 CRUD, 메시지 조회, 검색 점프, subagent 체인 |
-| Codex | `/api/messages/search`, `/api/messages/{message_id}/context`, `/api/sessions/{id}/replay`, `/api/codex/sessions`, `/api/timeline/summary`, `/api/usage/summary`, `/api/agents/summary` | Codex 메시지 검색, 문맥 복기, 세션 리플레이, 타임라인/사용량/agent 요약 |
+| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 레거시 세션 CRUD 및 관리용 호환 경로 |
+| Codex | `/api/search/messages`, `/api/search/messages/{message_id}/context`, `/api/sessions/{id}/replay`, `/api/codex/sessions`, `/api/codex/sessions/{id}/messages`, `/api/codex/projects/{name}/stats`, `/api/codex/projects/{name}/messages`, `/api/timeline/summary`, `/api/usage/summary`, `/api/agents/summary` | Codex 메시지 검색, 문맥 복기, 세션 리플레이, 프로젝트 상세, 타임라인/사용량/agent 요약 |
 | 프로젝트 | `/api/projects`, `/top`, `/{name}/stats`, `/{name}/messages` | 프로젝트 집계, TOP 5, 상세 |
 | 사용량 | `/api/usage/hourly`, `/daily`, `/periods` | 시계열 토큰/비용 집계 |
 | 타임라인 | `/api/timeline`, `/timeline/heatmap`, `/timeline/hourly` | Gantt 데이터, 요일x시간 히트맵, 시간별 프로젝트×세션 집계 |
@@ -237,7 +237,7 @@ const state = {
   usageRange, theme,               // UI 프리퍼런스
   advFilters, bulkSelected,        // 고급 필터, 벌크 선택
   idleProjects: {},                // 프로젝트 4단계 상태
-  convSource: 'claude-code',       // claude-code | claude-ai 토글
+  convSource: 'codex',             // Codex 전용
 };
 
 const sortState = {                // 뷰별 정렬 (localStorage 영속)
@@ -299,8 +299,8 @@ watcher 변경 감지                    connectWS()
 ### 세션 식별
 
 ```
-~/.claude/projects/{encoded-cwd}/{sessionId}.jsonl     → 일반 세션
-~/.claude/projects/{encoded-cwd}/subagents/agent-{hash}.jsonl → subagent
+~/.codex/sessions/YYYY/MM/DD/<session>/rollout-*.jsonl
+~/.codex/history.jsonl
 ```
 
 - **일반 세션:** 레코드의 `sessionId` 필드 사용
@@ -427,7 +427,7 @@ python import_claude_ai.py --zip ~/export.zip
 
 - `conversations.json` 파싱 → `claude_ai_conversations` / `claude_ai_messages` 테이블
 - **격리:** 기존 `sessions`/`messages` 와 절대 JOIN/UNION 하지 않음 (비용 오염 방지)
-- 프론트: 소스 토글 (`claude-code` ↔ `claude-ai`)
+- 프론트: Codex 전용 대화 목록/상세
 
 ### 원격 노드 수집
 
@@ -439,7 +439,7 @@ collector.py                      POST /api/ingest
   → POST /api/ingest                → DB 저장 + WS broadcast
 ```
 
-- `collector.py`: stdlib-only 독립 스크립트. 원격 서버의 `~/.claude/projects/` 를 감시하며 변경된 JSONL 레코드를 대시보드 서버로 전송.
+- `collector.py`: stdlib-only 독립 스크립트. 원격 서버의 Codex 로그를 감시하며 변경된 JSONL 레코드를 대시보드 서버로 전송.
 - `GET /api/collector.py`: 대시보드 서버에서 collector 스크립트 다운로드 (원격 서버 설치 편의).
 - `POST /api/nodes`: 노드 등록 시 일회성 `ingest_key` 발급. `POST /api/nodes/{id}/rotate-key` 로 재발급.
 - `sessions.source_node` 컬럼으로 로컬/원격 세션 구분. `?node=` 필터로 노드별 조회.

@@ -43,3 +43,6 @@ test-results/
 
 # Database (runtime generated)
 dashboard.db
+.gstack/
+.superpowers/
+docs/superpowers/plans/

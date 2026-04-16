@@ -14,7 +14,7 @@
 // ─── Stats (hero cost totals + secondary chips) ────────────────────────
 async function loadStats() {
   try {
-    const d = await safeFetch('/api/stats');
+    const d = await safeFetch('/api/codex/stats');
     state.stats = d;
     renderStats(d);
     loadCodexUsageSummary();
@@ -108,7 +108,7 @@ async function loadCodexUsageSummary() {
 // ─── Period usage (day / week / month) ────────────────────────────────
 async function loadPeriods() {
   try {
-    const d = await safeFetch('/api/usage/periods');
+    const d = await safeFetch('/api/codex/usage/periods');
     renderPeriod('Day', d.day);
     renderPeriod('Week', d.week);
     renderPeriod('Month', d.month);
@@ -135,7 +135,7 @@ function renderPeriod(key, p) {
 // ─── Cost forecasting + burn-rate ─────────────────────────────────────
 async function loadForecast() {
   try {
-    const d = await safeFetch('/api/forecast?days=14');
+    const d = await safeFetch('/api/codex/forecast?days=14');
     // IMPORTANT: use the global set() from app.js (which also removes the
     // .skeleton class on write). A local setEl helper that only touches
     // textContent leaves the shimmer animation running OVER the real text —
@@ -228,7 +228,7 @@ function drillToSessionsWeek() {
 // delivered as last_message.summary_line. The frontend just renders it.
 async function loadTopProjects() {
   try {
-    const data = await safeFetch('/api/projects/top?limit=5&with_last_message=true');
+    const data = await safeFetch('/api/codex/projects/top?limit=5&with_last_message=true');
     const projects = data.projects || [];
     const c = document.getElementById('topProjectsList');
     if (!projects.length) {

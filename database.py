@@ -12,6 +12,7 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -815,6 +816,33 @@ def store_codex_message(
         return int(cur.lastrowid)
 
 
+def purge_legacy_dashboard_data() -> dict[str, int]:
+    """Drop legacy Claude-backed rows from the runtime database.
+
+    Codex dashboard no longer uses the old sessions/messages or claude.ai
+    imports as a UI data source. Keep schema objects for compatibility, but
+    clear the rows so the runtime surfaces cannot drift back to Claude data.
+    """
+    with write_db() as conn:
+        counts = {
+            'sessions': int(conn.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]),
+            'messages': int(conn.execute('SELECT COUNT(*) FROM messages').fetchone()[0]),
+            'claude_ai_conversations': int(conn.execute('SELECT COUNT(*) FROM claude_ai_conversations').fetchone()[0]),
+            'claude_ai_messages': int(conn.execute('SELECT COUNT(*) FROM claude_ai_messages').fetchone()[0]),
+        }
+        conn.execute('DELETE FROM messages')
+        conn.execute('DELETE FROM sessions')
+        conn.execute('DELETE FROM claude_ai_messages')
+        conn.execute('DELETE FROM claude_ai_conversations')
+        conn.execute(
+            "DELETE FROM file_watch_state WHERE file_path LIKE ?",
+            ('%/.claude/%',),
+        )
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+        conn.execute("INSERT INTO claude_ai_messages_fts(claude_ai_messages_fts) VALUES('rebuild')")
+        return counts
+
+
 def search_codex_messages(
     query: str,
     limit: int = 20,
@@ -1235,6 +1263,306 @@ def get_codex_usage_summary() -> dict:
             for row in top_sessions
         ],
     }
+
+
+_CODEX_SESSIONS_SORT_MAP = {
+    'updated_at': 's.updated_at',
+    'created_at': 's.created_at',
+    'messages': 's.message_count',
+    'project': 'p.project_name',
+    'model': 's.model',
+}
+
+
+def list_codex_sessions_table(
+    *,
+    page: int = 1,
+    per_page: int = 25,
+    search: str = '',
+    sort: str = 'updated_at',
+    order: str = 'desc',
+) -> dict:
+    sort_col = _CODEX_SESSIONS_SORT_MAP.get(sort, 's.updated_at')
+    order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
+    offset = (page - 1) * per_page
+    where = ''
+    params: list[object] = []
+    if search:
+        where = '''
+        WHERE (
+            p.project_name LIKE ? ESCAPE '\\'
+            OR s.cwd LIKE ? ESCAPE '\\'
+            OR s.session_name LIKE ? ESCAPE '\\'
+            OR s.id LIKE ? ESCAPE '\\'
+        )
+        '''
+        term = f'%{search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")}%'
+        params.extend([term, term, term, term])
+
+    with read_db() as conn:
+        total = conn.execute(
+            f'''
+            SELECT COUNT(*)
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            {where}
+            ''',
+            params,
+        ).fetchone()[0]
+        rows = conn.execute(
+            f'''
+            SELECT
+                s.id,
+                p.project_name,
+                s.project_path,
+                COALESCE(s.cwd, s.project_path) AS cwd,
+                COALESCE(NULLIF(s.model, ''), '(unknown)') AS model,
+                s.created_at,
+                s.updated_at,
+                0 AS total_input_tokens,
+                0 AS total_output_tokens,
+                0 AS total_cache_creation_tokens,
+                0 AS total_cache_read_tokens,
+                0.0 AS total_cost_usd,
+                s.message_count,
+                s.user_message_count,
+                COALESCE(s.pinned, 0) AS pinned,
+                0 AS is_subagent,
+                NULL AS parent_session_id,
+                '' AS agent_type,
+                '' AS agent_description,
+                '' AS version,
+                '' AS final_stop_reason,
+                '' AS tags,
+                0 AS turn_duration_ms,
+                'local' AS source_node,
+                0 AS duration_seconds,
+                0 AS subagent_count,
+                0.0 AS subagent_cost,
+                COALESCE(NULLIF(s.session_name, ''), s.id) AS session_title
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            {where}
+            ORDER BY {sort_col} {order_sql}, s.id DESC
+            LIMIT ? OFFSET ?
+            ''',
+            (*params, per_page, offset),
+        ).fetchall()
+
+    return {
+        'sessions': [dict(r) for r in rows],
+        'total': int(total or 0),
+        'page': page,
+        'per_page': per_page,
+        'pages': max(1, -(-int(total or 0) // per_page)),
+        'sort': sort,
+        'order': order_sql.lower(),
+    }
+
+
+def get_codex_session_detail_row(session_id: str) -> dict | None:
+    with read_db() as conn:
+        row = conn.execute(
+            '''
+            SELECT
+                s.id,
+                p.project_name,
+                s.project_path,
+                COALESCE(s.cwd, s.project_path) AS cwd,
+                COALESCE(NULLIF(s.model, ''), '(unknown)') AS model,
+                s.created_at,
+                s.updated_at,
+                0 AS total_input_tokens,
+                0 AS total_output_tokens,
+                0 AS total_cache_creation_tokens,
+                0 AS total_cache_read_tokens,
+                0.0 AS total_cost_usd,
+                s.message_count,
+                s.user_message_count,
+                COALESCE(s.pinned, 0) AS pinned,
+                0 AS is_subagent,
+                NULL AS parent_session_id,
+                '' AS agent_type,
+                '' AS agent_description,
+                '' AS version,
+                '' AS final_stop_reason,
+                '' AS tags,
+                0 AS turn_duration_ms,
+                'local' AS source_node,
+                0 AS duration_seconds,
+                0 AS subagent_count,
+                0.0 AS subagent_cost,
+                COALESCE(NULLIF(s.session_name, ''), s.id) AS session_title
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE s.id = ?
+            ''',
+            (session_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_codex_session_messages_page(session_id: str, limit: int = 500, offset: int = 0) -> dict:
+    with read_db() as conn:
+        rows = conn.execute(
+            '''
+            SELECT
+                id,
+                message_uuid,
+                parent_uuid,
+                role,
+                content_preview,
+                content,
+                0 AS input_tokens,
+                0 AS output_tokens,
+                0 AS cache_creation_tokens,
+                0 AS cache_read_tokens,
+                0.0 AS cost_usd,
+                COALESCE(NULLIF(model, ''), '(unknown)') AS model,
+                timestamp,
+                '' AS git_branch,
+                0 AS is_sidechain,
+                '' AS stop_reason
+            FROM codex_messages
+            WHERE session_id = ?
+            ORDER BY timestamp ASC, id ASC
+            LIMIT ? OFFSET ?
+            ''',
+            (session_id, limit, offset),
+        ).fetchall()
+        total = conn.execute(
+            'SELECT COUNT(*) FROM codex_messages WHERE session_id = ?',
+            (session_id,),
+        ).fetchone()[0]
+    return {'messages': [dict(r) for r in rows], 'total': int(total or 0), 'limit': limit, 'offset': offset}
+
+
+def get_codex_models(sort: str = 'messages', order: str = 'desc', page: int = 1, per_page: int = 500) -> dict:
+    sort_map = {
+        'model': 'model',
+        'messages': 'message_count',
+    }
+    sort_col = sort_map.get(sort, 'message_count')
+    order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
+    offset = (page - 1) * per_page
+    with read_db() as conn:
+        rows = conn.execute(
+            f'''
+            SELECT
+                COALESCE(NULLIF(model, ''), '(unknown)') AS model,
+                COUNT(*) AS message_count,
+                0 AS input_tokens,
+                0 AS output_tokens,
+                0 AS cache_creation_tokens,
+                0 AS cache_read_tokens,
+                0.0 AS cost_usd
+            FROM codex_messages
+            WHERE role = 'assistant'
+            GROUP BY COALESCE(NULLIF(model, ''), '(unknown)')
+            ORDER BY {sort_col} {order_sql}, model ASC
+            LIMIT ? OFFSET ?
+            ''',
+            (per_page, offset),
+        ).fetchall()
+    return {'models': [dict(r) for r in rows], 'sort': sort, 'order': order_sql.lower(), 'page': page, 'per_page': per_page}
+
+
+def get_codex_projects(sort: str = 'last_active', order: str = 'desc', page: int = 1, per_page: int = 500) -> dict:
+    sort_map = {
+        'name': 'p.project_name',
+        'sessions': 'session_count',
+        'tokens': 'total_tokens',
+        'cost': 'total_cost',
+        'last_active': 'last_active',
+    }
+    sort_col = sort_map.get(sort, 'last_active')
+    order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
+    offset = (page - 1) * per_page
+    with read_db() as conn:
+        rows = conn.execute(
+            f'''
+            SELECT
+                p.project_name,
+                p.project_path,
+                COUNT(DISTINCT s.id) AS session_count,
+                0 AS subagent_count,
+                0.0 AS total_cost,
+                0 AS total_tokens,
+                MAX(s.updated_at) AS last_active,
+                '' AS tags
+            FROM codex_projects p
+            JOIN codex_sessions s ON s.project_path = p.project_path
+            GROUP BY p.project_path, p.project_name
+            ORDER BY {sort_col} {order_sql}, p.project_name ASC
+            LIMIT ? OFFSET ?
+            ''',
+            (per_page, offset),
+        ).fetchall()
+    return {'projects': [dict(r) for r in rows], 'sort': sort, 'order': order_sql.lower(), 'page': page, 'per_page': per_page}
+
+
+def get_codex_projects_top(limit: int = 5, with_last_message: bool = False, active_window_minutes: int = 30) -> dict:
+    active_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=active_window_minutes)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    with read_db() as conn:
+        rows = conn.execute(
+            '''
+            SELECT
+                p.project_name,
+                p.project_path,
+                COUNT(DISTINCT s.id) AS session_count,
+                0 AS subagent_count,
+                0.0 AS total_cost,
+                0 AS input_tokens,
+                0 AS output_tokens,
+                0 AS cache_read_tokens,
+                0 AS total_tokens,
+                MAX(s.updated_at) AS last_active
+            FROM codex_projects p
+            JOIN codex_sessions s ON s.project_path = p.project_path
+            GROUP BY p.project_path, p.project_name
+            ORDER BY last_active DESC, p.project_name ASC
+            LIMIT ?
+            ''',
+            (limit,),
+        ).fetchall()
+        projects = [dict(r) for r in rows]
+        for row in projects:
+            row['is_active'] = bool(row.get('last_active') and row['last_active'] >= active_cutoff)
+        if with_last_message and projects:
+            paths = [row['project_path'] for row in projects]
+            ph = ','.join(['?'] * len(paths))
+            previews = conn.execute(
+                f'''
+                WITH ranked AS (
+                    SELECT
+                        m.content_preview,
+                        m.timestamp,
+                        m.model,
+                        m.session_id,
+                        s.project_path,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY s.project_path
+                            ORDER BY m.timestamp DESC, m.id DESC
+                        ) AS rn
+                    FROM codex_messages m
+                    JOIN codex_sessions s ON s.id = m.session_id
+                    WHERE s.project_path IN ({ph})
+                )
+                SELECT * FROM ranked WHERE rn = 1
+                ''',
+                paths,
+            ).fetchall()
+            preview_map = {row['project_path']: dict(row) for row in previews}
+            for project in projects:
+                row = preview_map.get(project['project_path'])
+                project['last_message'] = None if not row else {
+                    'preview': row['content_preview'] or '',
+                    'summary_line': row['content_preview'] or '',
+                    'timestamp': row['timestamp'],
+                    'model': row['model'],
+                    'session_id': row['session_id'],
+                }
+    return {'projects': projects}
 
 
 def get_codex_agents_summary(limit: int = 20) -> dict:

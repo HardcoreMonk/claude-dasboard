@@ -52,7 +52,7 @@ const state = {
   newDataCounts: { sessions: 0, projects: 0 },
   bulkSelected: new Set(),  // session IDs selected for bulk ops
   lastUpdated: {},
-  convSource: _prefs.convSource || 'claude-code',  // 'claude-code' | 'claude-ai'
+  convSource: 'codex',
   nodes: [],  // [{node_id, label, session_count, message_count, last_seen}]
 };
 
@@ -258,6 +258,19 @@ function initSearchView() {
   input.value = state.search.query;
   input.addEventListener('input', (e) => {
     queueSearch(e.target.value);
+  });
+  input.addEventListener('change', (e) => {
+    queueSearch(e.target.value);
+  });
+  input.addEventListener('search', (e) => {
+    clearTimeout(_searchInputTimer);
+    performSearch(e.target.value);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    clearTimeout(_searchInputTimer);
+    performSearch(e.target.value);
   });
 }
 
@@ -1415,11 +1428,10 @@ function renderConvSortBar(){
   }).join('');
 }
 function switchConvSource(src) {
-  if (src !== 'claude-code' && src !== 'claude-ai') return;
-  state.convSource = src;
-  savePrefs({ convSource: src });
+  if (src !== 'codex') return;
+  state.convSource = 'codex';
   document.querySelectorAll('.conv-source-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.convSource === src);
+    b.classList.toggle('active', b.dataset.convSource === 'codex');
   });
   const hdr = document.getElementById('convViewerHeader');
   hdr.textContent = '';
@@ -1436,18 +1448,15 @@ function switchConvSource(src) {
 }
 
 async function loadConvList(){
-  // Sync toggle active class on each entry (e.g. first view open)
   document.querySelectorAll('.conv-source-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.convSource === state.convSource);
+    b.classList.toggle('active', b.dataset.convSource === 'codex');
   });
-  if (state.convSource === 'claude-ai') return loadClaudeAiList();
-  // Restore label for claude-code mode
   const lbl = document.getElementById('convListLabel');
-  if (lbl) lbl.textContent = '세션 목록';
+  if (lbl) lbl.textContent = 'Codex 세션';
   try{
     renderConvSortBar();
     const ss=sortState.conversations;
-    const d=await safeFetch(`/api/sessions?per_page=50&sort=${ss.key}&order=${ss.order}`);
+    const d=await safeFetch(`/api/codex/sessions/table?per_page=50&sort=${ss.key}&order=${ss.order}`);
     const b=document.getElementById('convListBody');b.innerHTML='';
     (d.sessions||[]).forEach(s=>{
       const div=document.createElement('div');
@@ -1962,7 +1971,7 @@ async function openConversation(sid,session,listItem){
   const c=document.getElementById('convMessages');
   c.innerHTML=`<div class="text-center text-white/25 text-xs py-10 dots">로딩 중</div>`;
   let data,msgs;
-  try{data=await safeFetch(`/api/sessions/${sid}/messages?limit=200`);msgs=data.messages||[];}
+  try{data=await safeFetch(`/api/codex/sessions/${sid}/messages?limit=200`);msgs=data.messages||[];}
   catch(err){c.innerHTML=`<div class="text-center text-white/25 text-xs py-10">로딩 실패</div>`;return;}
   c.innerHTML='';
   if(!msgs.length){c.innerHTML=`<div class="text-center text-white/25 text-xs py-10">메시지 없음</div>`;return;}
@@ -2034,7 +2043,7 @@ async function openConversation(sid,session,listItem){
       _convLoading=true;
       btn.disabled=true;btn.textContent='로딩 중…';
       try{
-        const next=await safeFetch(`/api/sessions/${sid}/messages?limit=200&offset=${msgs.length}`);
+        const next=await safeFetch(`/api/codex/sessions/${sid}/messages?limit=200&offset=${msgs.length}`);
         const more=next.messages||[];
         if(!more.length){loadMoreWrap.remove();return;}
         loadMoreWrap.remove();
@@ -2372,7 +2381,7 @@ async function loadModels(){
   try{
     renderModelsSortBar();
     const ss=sortState.models;
-    const data=await safeFetch(`/api/models?sort=${ss.key}&order=${ss.order}`);
+    const data=await safeFetch(`/api/codex/models?sort=${ss.key}&order=${ss.order}`);
     const rows=data.models||[];
     const grid=document.getElementById('modelsGrid');grid.innerHTML='';
     if(!rows.length){grid.innerHTML='<div class="col-span-full text-center text-white/25 text-xs py-16">데이터 없음</div>';return;}
@@ -2418,7 +2427,7 @@ async function loadProjects(){
   tb.innerHTML='<tr><td colspan="8" class="text-center py-8 text-white/15 text-xs dots">로딩 중</td></tr>';
   try{
     const ss=sortState.projects;
-    const data=await safeFetch(`/api/projects?sort=${ss.key}&order=${ss.order}`);
+    const data=await safeFetch(`/api/codex/projects?sort=${ss.key}&order=${ss.order}`);
     renderProjectsThead();
     tb.innerHTML='';
     if(!data.projects?.length){tb.innerHTML='<tr><td colspan="8" class="text-center py-12 text-white/25 text-xs">데이터 없음</td></tr>';return;}
@@ -2561,13 +2570,15 @@ async function loadAdminStatus() {
     };
     const c = d.counts || {};
     const w = d.watcher || {};
+    const indexedSessions = d.indexed_sessions ?? c.sessions ?? 0;
+    const indexedMessages = d.indexed_messages ?? c.messages ?? 0;
     grid.append(
       card('가동 시간', _fmtUptime(d.uptime_seconds || 0), 'text-emerald-400/80'),
       card('스키마', 'v' + (d.schema_version || 0), 'text-cyan-400/80'),
       card('DB 크기', _fmtBytes(d.db?.size_bytes || 0)),
       card('WAL 크기', _fmtBytes(d.db?.wal_size_bytes || 0), (d.db?.wal_size_bytes > 52428800 ? 'text-amber-400/80' : 'text-white/80')),
-      card('세션', fmtN(c.sessions || 0)),
-      card('메시지', fmtN(c.messages || 0)),
+      card('Codex 세션', fmtN(indexedSessions), 'text-purple-300/80'),
+      card('Codex 메시지', fmtN(indexedMessages), 'text-purple-300/80'),
       card('Subagent', fmtN(c.subagents || 0), 'text-blue-400/80'),
       card('원격 노드', fmtN(c.remote_nodes || 0)),
       card('Watcher', w.running ? '실행 중' : '정지', w.running ? 'text-emerald-400/80' : 'text-rose-400/80'),
@@ -3095,7 +3106,7 @@ async function showProjectDetail(name, path) {
   document.getElementById('projTabContent').innerHTML = '<div class="text-center text-white/25 text-xs py-12 dots">로딩 중</div>';
   try {
     projectData = await safeFetch(
-      `/api/projects/${encodeURIComponent(name)}/stats${_projQs(path)}`);
+      `/api/codex/projects/${encodeURIComponent(name)}/stats${_projQs(path)}`);
     renderProjectOverview();
   } catch (e) {
     document.getElementById('projTabContent').innerHTML =
@@ -3363,7 +3374,7 @@ async function openConvFromProject(sid) {
   const cn = document.querySelector('[data-view="conversations"]');
   if (cn && !cn.classList.contains('active')) cn.click();
   try {
-    const s = await safeFetch(`/api/sessions/${sid}`);
+    const s = await safeFetch(`/api/codex/sessions/${sid}`);
     openConversation(sid, s);
   } catch (e) { console.error('openConvFromProject:', e); }
 }
@@ -3385,7 +3396,7 @@ async function loadProjectMessages(reset = true) {
   const pathQs = path ? `&path=${encodeURIComponent(path)}` : '';
   try {
     const data = await safeFetch(
-      `/api/projects/${encodeURIComponent(name)}/messages` +
+      `/api/codex/projects/${encodeURIComponent(name)}/messages` +
       `?limit=${PROJ_MSG_PAGE}&offset=${projectConvOffset}&order=${projectConvOrder}${pathQs}`);
     if (reset || !projectConvData) {
       projectConvData = data;

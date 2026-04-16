@@ -15,7 +15,7 @@ function clearPlanTimer() {
 
 async function loadPlanUsage() {
   try {
-    const resp = await fetch('/api/plan/usage');
+    const resp = await fetch('/api/codex/plan/usage');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     planData = await resp.json();
     renderPlanBlock('Daily', planData.daily);

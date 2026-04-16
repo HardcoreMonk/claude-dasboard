@@ -47,11 +47,18 @@ from database import (
     get_codex_agents_summary,
     get_codex_ingest_status,
     get_codex_message_context,
+    get_codex_models,
+    get_codex_projects,
+    get_codex_projects_top,
+    get_codex_session_detail_row,
+    get_codex_session_messages_page,
     get_codex_session_replay,
     get_codex_timeline_summary,
     get_codex_usage_summary,
     init_db,
     list_codex_sessions,
+    list_codex_sessions_table,
+    purge_legacy_dashboard_data,
     read_db,
     search_codex_messages,
     wal_checkpoint,
@@ -239,6 +246,10 @@ def _make_watcher_metrics() -> "WatcherMetrics":
 async def lifespan(app: FastAPI):
     global watcher, _sched_task
     init_db()
+    if 'PYTEST_CURRENT_TEST' not in os.environ:
+        purged = purge_legacy_dashboard_data()
+        if any(purged.values()):
+            logger.info("Purged legacy Claude dashboard data: %s", purged)
     if DB_PATH.exists() and not check_integrity():
         logger.error("DATABASE INTEGRITY CHECK FAILED — consider restoring from backup")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -454,8 +465,8 @@ async def features_page():
 @app.get("/api/health")
 def api_health():
     with read_db() as db:
-        n_msg = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        n_sess = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        n_msg = db.execute("SELECT COUNT(*) FROM codex_messages").fetchone()[0]
+        n_sess = db.execute("SELECT COUNT(*) FROM codex_sessions").fetchone()[0]
     return {"ok": True, "messages": n_msg, "sessions": n_sess}
 
 
@@ -964,6 +975,462 @@ def api_timeline_summary(
 @app.get("/api/usage/summary")
 def api_usage_summary():
     return get_codex_usage_summary()
+
+
+def _codex_stats_payload() -> dict:
+    with read_db() as db:
+        today_utc = _today_start_utc(db)
+        row = db.execute(
+            '''
+            SELECT COUNT(DISTINCT session_id) AS total_sessions,
+                   0 AS input_tokens,
+                   0 AS output_tokens,
+                   0 AS cache_creation_tokens,
+                   0 AS cache_read_tokens,
+                   0.0 AS cost_usd,
+                   COUNT(*) AS messages
+            FROM codex_messages
+            '''
+        ).fetchone()
+        today = db.execute(
+            '''
+            SELECT
+                0 AS input_tokens,
+                0 AS output_tokens,
+                0 AS cache_creation_tokens,
+                0 AS cache_read_tokens,
+                0.0 AS cost_usd,
+                COUNT(*) AS messages,
+                COUNT(DISTINCT session_id) AS sessions
+            FROM codex_messages
+            WHERE timestamp >= ?
+            ''',
+            (today_utc,),
+        ).fetchone()
+    models = get_codex_models(sort='messages', order='desc', page=1, per_page=50)['models']
+    return {
+        'all_time': dict(row) if row else {},
+        'today': dict(today) if today else {},
+        'models': models,
+        'model_cache': [],
+        'stop_reasons': [],
+    }
+
+
+def _codex_usage_periods_payload() -> dict:
+    with read_db() as db:
+        off = _user_tz(db)
+        now = datetime.now(off)
+
+        def _period(start: datetime, end: datetime) -> dict:
+            start_utc = start.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            end_utc = end.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            row = db.execute(
+                '''
+                SELECT COUNT(*) AS msgs
+                FROM codex_messages
+                WHERE timestamp >= ? AND timestamp < ?
+                ''',
+                (start_utc, end_utc),
+            ).fetchone()
+            return {'cost': 0.0, 'input_tok': 0, 'output_tok': 0, 'cache_create': 0, 'cache_read': 0, 'msgs': int(row['msgs'] or 0)}
+
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = day_start - timedelta(days=day_start.weekday())
+        month_start = day_start.replace(day=1)
+        day_cur = _period(day_start, day_start + timedelta(days=1))
+        day_prev = _period(day_start - timedelta(days=1), day_start)
+        week_cur = _period(week_start, week_start + timedelta(days=7))
+        week_prev = _period(week_start - timedelta(days=7), week_start)
+        month_prev_end = month_start
+        month_prev_start = (month_start - timedelta(days=1)).replace(day=1)
+        month_cur = _period(month_start, now + timedelta(seconds=1))
+        month_prev = _period(month_prev_start, month_prev_end)
+
+    def _blk(cur, prev, label):
+        p = prev['cost']
+        c = cur['cost']
+        delta = ((c - p) / p * 100) if p > 0 else (100 if c > 0 else 0)
+        return {
+            'label': label,
+            'cost': round(c, 4),
+            'input_tokens': cur['input_tok'],
+            'output_tokens': cur['output_tok'],
+            'cache_creation_tokens': cur['cache_create'],
+            'cache_read_tokens': cur['cache_read'],
+            'messages': cur['msgs'],
+            'prev_cost': round(p, 4),
+            'delta_pct': round(delta, 1),
+        }
+
+    return {
+        'day': _blk(day_cur, day_prev, '오늘'),
+        'week': _blk(week_cur, week_prev, '이번 주'),
+        'month': _blk(month_cur, month_prev, '이번 달'),
+    }
+
+
+def _codex_forecast_payload(days: int = 14) -> dict:
+    with read_db() as db:
+        tz = _user_tz(db)
+        now = datetime.now(tz)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        since_utc = month_start.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        mtd = db.execute(
+            'SELECT COUNT(*) AS messages FROM codex_messages WHERE timestamp >= ?',
+            (since_utc,),
+        ).fetchone()
+        days_elapsed = max((now.date() - month_start.date()).days + 1, 1)
+        avg_msgs = (mtd['messages'] or 0) / days_elapsed
+        next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        days_left = max((next_month.date() - now.date()).days, 0)
+    return {
+        'projected_eom_cost': 0.0,
+        'mtd_cost': 0.0,
+        'days_left_in_month': days_left,
+        'avg_cost_per_day': 0.0,
+        'avg_msgs_per_day': round(avg_msgs, 1),
+        'daily_budget_burnout_seconds': None,
+        'weekly_budget_burnout_seconds': None,
+        'daily_limit': 0,
+        'daily_used': 0,
+        'weekly_limit': 0,
+        'weekly_used': 0,
+        'days': days,
+    }
+
+
+@app.get("/api/codex/stats")
+def api_codex_stats():
+    return _codex_stats_payload()
+
+
+@app.get("/api/codex/models")
+def api_codex_models(
+    sort: str = Query('messages'),
+    order: str = Query('desc'),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(500, ge=1, le=500),
+):
+    return get_codex_models(sort=sort, order=order, page=page, per_page=per_page)
+
+
+@app.get("/api/codex/projects")
+def api_codex_projects(
+    sort: str = Query('last_active'),
+    order: str = Query('desc'),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(500, ge=1, le=500),
+):
+    return get_codex_projects(sort=sort, order=order, page=page, per_page=per_page)
+
+
+@app.get("/api/codex/projects/top")
+def api_codex_projects_top(
+    limit: int = Query(5, ge=1, le=50),
+    with_last_message: bool = Query(False),
+    active_window_minutes: int = Query(30, ge=1, le=1440),
+):
+    return get_codex_projects_top(
+        limit=limit,
+        with_last_message=with_last_message,
+        active_window_minutes=active_window_minutes,
+    )
+
+
+def _codex_project_sql(project_name: str, path: Optional[str]) -> tuple[str, list[str]]:
+    if path:
+        return 'p.project_path = ?', [path]
+    return 'p.project_name = ?', [project_name]
+
+
+@app.get("/api/codex/projects/{project_name}/stats")
+def api_codex_project_stats(project_name: str, path: Optional[str] = Query(None)):
+    where, params = _codex_project_sql(project_name, path)
+    with read_db() as db:
+        summary = db.execute(
+            f'''
+            SELECT
+                COUNT(DISTINCT s.id) AS sessions,
+                COALESCE(SUM(s.message_count), 0) AS messages,
+                COALESCE(SUM(s.user_message_count), 0) AS user_messages,
+                0.0 AS cost,
+                0 AS input_tokens,
+                0 AS output_tokens,
+                0 AS cache_read_tokens,
+                MIN(s.created_at) AS first_active,
+                MAX(s.updated_at) AS last_active,
+                MIN(p.project_path) AS canonical_path
+            FROM codex_projects p
+            JOIN codex_sessions s ON s.project_path = p.project_path
+            WHERE {where}
+            ''',
+            params,
+        ).fetchone()
+        if not summary or summary['sessions'] == 0:
+            return JSONResponse({'error': 'Not found'}, status_code=404)
+        models = db.execute(
+            f'''
+            SELECT
+                COALESCE(NULLIF(m.model, ''), '(unknown)') AS model,
+                COUNT(DISTINCT m.session_id) AS cnt,
+                0.0 AS cost
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE {where} AND m.role = 'assistant'
+            GROUP BY COALESCE(NULLIF(m.model, ''), '(unknown)')
+            ORDER BY cnt DESC, model ASC
+            ''',
+            params,
+        ).fetchall()
+        daily = db.execute(
+            f'''
+            SELECT
+                strftime('%Y-%m-%d', m.timestamp) AS date,
+                0.0 AS cost,
+                COUNT(*) AS messages
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE {where} AND m.role = 'assistant'
+            GROUP BY date
+            ORDER BY date DESC
+            LIMIT 30
+            ''',
+            params,
+        ).fetchall()
+        sessions = db.execute(
+            f'''
+            SELECT
+                s.id,
+                s.model,
+                s.created_at,
+                s.updated_at,
+                0.0 AS cost_usd,
+                s.message_count,
+                s.user_message_count,
+                0 AS total_input_tokens,
+                0 AS total_output_tokens,
+                0 AS total_cache_read_tokens,
+                s.pinned,
+                '' AS tags
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE {where}
+            ORDER BY s.updated_at DESC, s.id DESC
+            ''',
+            params,
+        ).fetchall()
+    return {
+        'summary': dict(summary),
+        'models': [dict(row) for row in models],
+        'daily': [dict(row) for row in daily],
+        'sessions': [dict(row) for row in sessions],
+    }
+
+
+@app.get("/api/codex/projects/{project_name}/messages")
+def api_codex_project_messages(
+    project_name: str,
+    path: Optional[str] = Query(None),
+    limit: int = Query(300, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    order: str = Query('asc'),
+):
+    order_sql = 'DESC' if str(order).lower() == 'desc' else 'ASC'
+    where, params = _codex_project_sql(project_name, path)
+    with read_db() as db:
+        total = db.execute(
+            f'''
+            SELECT COUNT(*)
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE {where}
+            ''',
+            params,
+        ).fetchone()[0]
+        rows = db.execute(
+            f'''
+            SELECT
+                m.id,
+                m.message_uuid,
+                m.session_id,
+                m.role,
+                m.content_preview,
+                m.content,
+                0 AS input_tokens,
+                0 AS output_tokens,
+                0 AS cache_creation_tokens,
+                0 AS cache_read_tokens,
+                0.0 AS cost_usd,
+                m.model,
+                m.timestamp,
+                '' AS git_branch
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE {where}
+            ORDER BY m.timestamp {order_sql}, m.id {order_sql}
+            LIMIT ? OFFSET ?
+            ''',
+            [*params, limit, offset],
+        ).fetchall()
+    return {
+        'messages': [dict(row) for row in rows],
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'order': order_sql.lower(),
+    }
+
+
+@app.get("/api/codex/sessions/table")
+def api_codex_sessions_table(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(25, ge=1, le=100),
+    search: Optional[str] = None,
+    sort: str = Query('updated_at'),
+    order: str = Query('desc'),
+):
+    return list_codex_sessions_table(
+        page=page,
+        per_page=per_page,
+        search=search or '',
+        sort=sort,
+        order=order,
+    )
+
+
+@app.get("/api/codex/sessions/{session_id}")
+def api_codex_session_detail(session_id: str):
+    row = get_codex_session_detail_row(session_id)
+    if not row:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return row
+
+
+@app.get("/api/codex/sessions/{session_id}/messages")
+def api_codex_session_messages(
+    session_id: str,
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+):
+    if not get_codex_session_detail_row(session_id):
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return get_codex_session_messages_page(session_id, limit=limit, offset=offset)
+
+
+@app.get("/api/codex/usage/periods")
+def api_codex_usage_periods():
+    return _codex_usage_periods_payload()
+
+
+@app.get("/api/codex/usage/hourly")
+def api_codex_usage_hourly(hours: int = Query(24, ge=1, le=168)):
+    with read_db() as db:
+        rows = db.execute(
+            '''
+            SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) AS hour,
+                   0 AS input_tokens,
+                   COUNT(*) AS output_tokens,
+                   0 AS cache_creation_tokens,
+                   0 AS cache_read_tokens,
+                   0.0 AS cost_usd,
+                   COUNT(*) AS message_count
+            FROM codex_messages
+            WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+            GROUP BY hour
+            ORDER BY hour
+            ''',
+            (f'-{hours} hours',),
+        ).fetchall()
+    return {'data': [dict(r) for r in rows]}
+
+
+@app.get("/api/codex/usage/daily")
+def api_codex_usage_daily(days: int = Query(30, ge=1, le=365)):
+    with read_db() as db:
+        rows = db.execute(
+            '''
+            SELECT strftime('%Y-%m-%d', timestamp) AS date,
+                   0 AS input_tokens,
+                   COUNT(*) AS output_tokens,
+                   0 AS cache_creation_tokens,
+                   0 AS cache_read_tokens,
+                   0.0 AS cost_usd,
+                   COUNT(*) AS message_count
+            FROM codex_messages
+            WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+            GROUP BY date
+            ORDER BY date
+            ''',
+            (f'-{days} days',),
+        ).fetchall()
+    return {'data': [dict(r) for r in rows]}
+
+
+@app.get("/api/codex/forecast")
+def api_codex_forecast(days: int = Query(14, ge=1, le=90)):
+    return _codex_forecast_payload(days=days)
+
+
+@app.get("/api/codex/plan/usage")
+def api_codex_plan_usage():
+    with read_db() as db:
+        cfg = _plan_cfg(db)
+        r_hour = cfg['reset_hour']
+        r_wd = cfg['reset_weekday']
+        tz = _user_tz(db)
+        now = datetime.now(tz)
+
+        ds = now.replace(hour=r_hour, minute=0, second=0, microsecond=0)
+        if now < ds:
+            ds -= timedelta(days=1)
+        de = ds + timedelta(days=1)
+
+        days_since = (now.weekday() - r_wd) % 7
+        ws = (now - timedelta(days=days_since)).replace(hour=r_hour, minute=0, second=0, microsecond=0)
+        if now < ws:
+            ws -= timedelta(weeks=1)
+        we = ws + timedelta(weeks=1)
+
+        ds_utc = ds.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        ws_utc = ws.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        def _q(since):
+            return db.execute(
+                '''
+                SELECT COUNT(*) AS messages
+                FROM codex_messages
+                WHERE timestamp >= ?
+                ''',
+                (since,),
+            ).fetchone()
+
+        dr, wr = _q(ds_utc), _q(ws_utc)
+        dl, wl = cfg['daily_cost_limit'], cfg['weekly_cost_limit']
+
+        def _blk(row, lim, start, end):
+            return {
+                'used_cost': 0.0,
+                'limit_cost': lim,
+                'used_tokens': 0,
+                'cache_tokens': 0,
+                'messages': int(row['messages'] or 0),
+                'percentage': 0,
+                'remaining_seconds': int(max(0, (end - now).total_seconds())),
+                'reset_at': end.isoformat(),
+                'period_start': start.isoformat(),
+            }
+
+    return {
+        'daily': _blk(dr, dl, ds, de),
+        'weekly': _blk(wr, wl, ws, we),
+        'config': {k: v for k, v in cfg.items() if k != 'id'},
+        'plan': detect_plan(),
+    }
 
 
 @app.get("/api/agents/summary")

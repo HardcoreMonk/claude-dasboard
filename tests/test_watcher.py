@@ -1,11 +1,10 @@
 """Unit tests for watcher.py — state lock, metric injection, retry accounting."""
-from pathlib import Path
 import sqlite3
 import threading
+from pathlib import Path
 
 import database
 import watcher
-
 
 # ─── WatcherMetrics dependency injection ─────────────────────────────────
 
@@ -103,8 +102,10 @@ def test_retry_queue_concurrent_mutation_safe():
                     w._retry_queue.pop(f'f{i}', None)
 
     threads = [threading.Thread(target=bump) for _ in range(8)]
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
     # If we got here without an exception, the lock did its job.
 
 
@@ -129,7 +130,7 @@ def test_constructor_defaults_to_noop_metrics():
     assert w._metrics.retries is None
 
 
-def test_codex_watch_roots_include_claude_and_codex(tmp_path, monkeypatch):
+def test_codex_watch_files_include_codex_only(tmp_path, monkeypatch):
     claude_root = tmp_path / '.claude' / 'projects'
     claude_root.mkdir(parents=True)
     claude_log = claude_root / 'session.jsonl'
@@ -138,18 +139,14 @@ def test_codex_watch_roots_include_claude_and_codex(tmp_path, monkeypatch):
     codex_log.parent.mkdir(parents=True)
     codex_log.write_text('{"type":"message"}\n', encoding='utf-8')
 
-    monkeypatch.setattr(watcher, 'CLAUDE_PROJECTS', claude_root)
+    files = watcher._iter_watch_files(tmp_path)
 
-    roots = watcher._iter_watch_files(tmp_path)
-
-    assert claude_log in roots
-    assert codex_log in roots
+    assert claude_log not in files
+    assert codex_log in files
 
 
 def test_start_observer_schedules_codex_roots(tmp_path, monkeypatch):
     home = tmp_path
-    claude_root = home / '.claude' / 'projects'
-    claude_root.mkdir(parents=True)
     codex_projects = home / '.codex' / 'projects'
     codex_projects.mkdir(parents=True)
     codex_sessions = home / '.codex' / 'sessions'
@@ -169,7 +166,6 @@ def test_start_observer_schedules_codex_roots(tmp_path, monkeypatch):
 
     monkeypatch.setattr(watcher, '_WATCHDOG_OK', True)
     monkeypatch.setattr(watcher, 'Observer', _FakeObserver)
-    monkeypatch.setattr(watcher, 'CLAUDE_PROJECTS', claude_root)
     monkeypatch.setattr(watcher.Path, 'home', lambda: home)
     monkeypatch.setattr(watcher.asyncio, 'get_running_loop', lambda: object())
 
@@ -177,7 +173,6 @@ def test_start_observer_schedules_codex_roots(tmp_path, monkeypatch):
     w._event_queue = object()
     w._start_observer()
 
-    assert (claude_root, True) in scheduled
     assert (codex_projects, True) in scheduled
     assert (codex_sessions, True) in scheduled
 
@@ -270,6 +265,106 @@ def test_process_file_routes_codex_logs_to_codex_storage(tmp_path, monkeypatch):
     assert legacy_count['n'] == 0
     assert session_row['message_count'] == 3
     assert session_row['user_message_count'] == 1
+
+
+def test_process_file_uses_rollout_session_meta_for_project_tool_and_agent(tmp_path, monkeypatch):
+    db_path = tmp_path / 'dashboard.db'
+    monkeypatch.setattr(database, 'DB_PATH', db_path)
+    database.init_db()
+
+    rollout_log = (
+        tmp_path
+        / '.codex'
+        / 'sessions'
+        / '2026'
+        / '04'
+        / '17'
+        / 'rollout-2026-04-17T02-22-22-019d9750-b622-71f0-ae0a-889467c995f9.jsonl'
+    )
+    rollout_log.parent.mkdir(parents=True)
+    rollout_log.write_text(
+        '\n'.join([
+            '{"timestamp":"2026-04-16T17:22:23.867Z","type":"session_meta","payload":{"id":"019d9750-b622-71f0-ae0a-889467c995f9","timestamp":"2026-04-16T17:22:22.393Z","cwd":"/home/user/projects/codex-dashboard","agent_nickname":"Singer","agent_role":"worker"}}',
+            '{"timestamp":"2026-04-16T17:22:24.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\\"cmd\\":\\"pytest -q\\"}"}}',
+            '{"timestamp":"2026-04-16T17:22:25.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"테스트를 실행하겠습니다."}]}}',
+        ]) + '\n',
+        encoding='utf-8',
+    )
+
+    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+
+    batch = w._process_file(str(rollout_log))
+
+    assert batch is not None
+    assert [record['role'] for record in batch['records']] == ['agent', 'tool', 'assistant']
+    assert all(record['project_name'] == 'codex-dashboard' for record in batch['records'])
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        '''
+        SELECT role, content_preview
+        FROM codex_messages
+        WHERE session_id = ?
+        ORDER BY id
+        ''',
+        ('019d9750-b622-71f0-ae0a-889467c995f9',),
+    ).fetchall()
+    session_row = conn.execute(
+        'SELECT project_path FROM codex_sessions WHERE id = ?',
+        ('019d9750-b622-71f0-ae0a-889467c995f9',),
+    ).fetchone()
+    conn.close()
+
+    assert [row['role'] for row in rows] == ['agent', 'tool', 'assistant']
+    assert 'exec_command' in rows[1]['content_preview']
+    assert '테스트를 실행하겠습니다.' in rows[2]['content_preview']
+    assert session_row['project_path'] == '/home/user/projects/codex-dashboard'
+
+
+def test_process_file_routes_codex_history_log_to_codex_storage(tmp_path, monkeypatch):
+    db_path = tmp_path / 'dashboard.db'
+    monkeypatch.setattr(database, 'DB_PATH', db_path)
+    database.init_db()
+
+    history_log = tmp_path / '.codex' / 'history.jsonl'
+    history_log.parent.mkdir(parents=True)
+    history_log.write_text(
+        '\n'.join([
+            '{"session_id":"codex-h1","ts":1776253250,"text":"history search term"}',
+            '{"session_id":"codex-h1","ts":1776253260,"text":"second history line"}',
+        ]) + '\n',
+        encoding='utf-8',
+    )
+
+    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    batch = w._process_file(str(history_log))
+
+    assert batch is not None
+    assert len(batch['records']) == 2
+    assert batch['records'][0]['role'] == 'assistant'
+    assert 'history search term' in batch['records'][0]['preview']
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    codex_count = conn.execute(
+        'SELECT COUNT(*) AS n FROM codex_messages WHERE session_id = ?',
+        ('codex-h1',),
+    ).fetchone()
+    session_row = conn.execute(
+        '''
+        SELECT p.project_name, s.message_count
+        FROM codex_sessions s
+        JOIN codex_projects p ON p.project_path = s.project_path
+        WHERE s.id = ?
+        ''',
+        ('codex-h1',),
+    ).fetchone()
+    conn.close()
+
+    assert codex_count['n'] == 2
+    assert session_row['project_name'] == '.codex'
+    assert session_row['message_count'] == 2
 
 
 def test_process_file_skips_incomplete_codex_records(tmp_path, monkeypatch):

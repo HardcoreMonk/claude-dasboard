@@ -175,6 +175,17 @@ def test_contract_docs_describe_split_services_in_korean():
         assert phrase in architecture, f"docs/ARCHITECTURE.md missing phrase: {phrase}"
 
 
+def test_contract_subagent_surface_uses_codex_only_override():
+    repo_root = Path(__file__).resolve().parents[1]
+    index_html = (repo_root / 'static' / 'index.html').read_text()
+    codex_override = (repo_root / 'static' / 'subagents-codex.js').read_text()
+
+    assert '/static/subagents-codex.js' in index_html
+    assert '/api/subagents/stats' not in codex_override
+    assert '/api/subagents/heatmap' not in codex_override
+    assert '/api/agents/summary' in codex_override
+
+
 # ─── Health / metrics / stats ──────────────────────────────────────────────
 
 def test_contract_runtime_path_env_overrides_still_win(tmp_path, monkeypatch):

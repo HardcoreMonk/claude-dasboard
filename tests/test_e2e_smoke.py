@@ -19,8 +19,8 @@ Then replace this file with a Playwright sync_playwright() test that
 navigates to the page and interacts with the DOM.
 """
 import re
-import sys
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -36,8 +36,10 @@ def e2e_client(tmp_path, monkeypatch):
     try:
         from prometheus_client import REGISTRY
         for c in list(REGISTRY._collector_to_names.keys()):
-            try: REGISTRY.unregister(c)
-            except Exception: pass
+            try:
+                REGISTRY.unregister(c)
+            except Exception:
+                pass
     except Exception:
         pass
     for name in list(sys.modules):
@@ -172,6 +174,16 @@ def test_search_landing_renders_primary_search_ui(e2e_client):
     assert 'id="search-context-panel"' in html
 
 
+def test_shell_removes_claude_conversation_and_admin_copy(e2e_client):
+    html = e2e_client.get('/').text
+
+    assert 'Codex 세션' in html
+    assert 'Claude Code' not in html
+    assert 'claude.ai' not in html
+    assert '다른 서버의 Codex 세션 데이터를 수집합니다' in html
+    assert '다른 서버의 Claude 세션 데이터를 수집합니다' not in html
+
+
 def test_codex_branding_is_visible_in_shell_and_login(e2e_client):
     shell_html = e2e_client.get('/').text
     login_html = e2e_client.get('/login').text
@@ -252,6 +264,11 @@ def test_search_flow_round_trip_matches_frontend_contract(e2e_client):
         all_js,
         re.S,
     )
+    search_enter_binding = re.search(
+        r'input\.addEventListener\(\'keydown\',\s*\(e\)\s*=>\s*\{.*?e\.key !== \'Enter\'.*?performSearch\(e\.target\.value\);.*?\}\);',
+        all_js,
+        re.S,
+    )
     select_context = re.search(
         r'async function selectSearchMessage\(messageId\)\s*\{.*?safeFetch\(`/api/search/messages/\$\{encodeURIComponent\(nextId\)\}/context`\).*?state\.search\.context = context;.*?renderSearchContext\(\);.*?\}',
         all_js,
@@ -261,6 +278,7 @@ def test_search_flow_round_trip_matches_frontend_contract(e2e_client):
     assert default_view, 'default search view function missing'
     assert parse_hash_fallback, 'hash routing does not default to search'
     assert perform_search, 'search UI no longer wires query -> results -> first-hit selection'
+    assert search_enter_binding, 'search input no longer triggers performSearch on Enter'
     assert select_context, 'search UI no longer wires selected hit -> context fetch/render'
     assert 'queryRequestSeq' in all_js
     assert 'contextRequestSeq' in all_js

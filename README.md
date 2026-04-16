@@ -1,12 +1,12 @@
 # Codex Dashboard
 
-Codex CLI 세션을 우선으로 수집·검색·복기하는 자체 호스팅 웹 대시보드.
-기존 Claude Code 사용량 집계와 claude.ai 웹 대화 export 도 함께 유지하지만, 현재 UX 기준축은 Codex 세션 검색·리플레이·타임라인이다.
+Codex CLI 세션을 수집·검색·복기하는 자체 호스팅 웹 대시보드.
+현재 UX와 기본 데이터 경로는 Codex 전용이며, legacy Claude/claude.ai 경로는 운영 호환용으로만 남아 있다.
 
 ```
-~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 62 routes  →  SPA 브라우저
-                                                                  ↑
-                                [원격 서버] collector.py  →  POST /api/ingest
+~/.codex/sessions/**/rollout-*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI  →  SPA 브라우저
+                                                                       ↑
+                                       [원격 서버] collector.py  →  POST /api/ingest
 ```
 
 | 스택 | 상세 |
@@ -77,7 +77,7 @@ npm run dev                                   # watch 모드 (개발)
 ### Codex 우선 탐색
 - Codex 메시지 검색, 세션 리플레이, 타임라인/사용량/agent 요약을 별도 API 로 제공
 - 프로젝트 단위로 Codex 세션을 빠르게 탐색하고 메시지 문맥을 재구성
-- 기존 Claude Code 세션 집계와 분리된 인덱스로 저장해 회귀 없이 병행 운영
+- Codex 네이티브 인덱스로 저장해 검색·프로젝트·리플레이 화면을 직접 구동
 
 ### 실시간 모니터링
 - WebSocket 실시간 갱신 (800ms 디바운스)
@@ -107,7 +107,7 @@ npm run dev                                   # watch 모드 (개발)
 - 어제→오늘 델타 카드 (신규/중단 프로젝트), 이름 해시 기반 프로젝트별 고유 색상
 
 ### 다중 서버 수집
-- 원격 서버의 `~/.claude/projects/` 를 중앙 대시보드로 push
+- 원격 서버의 Codex 로그를 중앙 대시보드로 push
 - 관리 UI 에서 노드 등록 → ingest key 발급 → collector 다운로드
 
 ```bash
@@ -127,7 +127,7 @@ INGEST_KEY=<key> python3 collector.py --url http://dashboard:8617 --node-id serv
 ### 그 외
 - **Subagent 분석**: 유형별/종료사유/비용TOP10/소요TOP10/히트맵/매트릭스 (7개 섹션)
 - **예산 관리**: 플랜 자동 감지, 일/주간 예산, 프로그레스 바, 카운트다운
-- **claude.ai import**: 웹 export zip 인포트, 격리 테이블, 소스 토글
+- **호환 API 유지**: legacy Claude/claude.ai 데이터는 별도 API 와 테이블로만 유지
 - **다크/라이트 테마**: WCAG AA 4.5:1, 반응형 (640/480/360px)
 - **커맨드 팔레트**: Cmd+K, 키보드 단축키 (g+o/b/s/c)
 
@@ -163,7 +163,7 @@ dashboard.example.com {
 ## 프로젝트 구조
 
 ```
-main.py              FastAPI 62 routes + WS + 쿠키 세션 인증 + in-app 스케줄러
+main.py              FastAPI + WS + 쿠키 세션 인증 + in-app 스케줄러
 database.py          SQLite WAL, v0→v15 마이그레이션, write/read 분리
 parser.py            JSONL 파싱, 비용 계산, cross-platform cwd
 watcher.py           watchdog + safety poll
@@ -240,7 +240,7 @@ sudo systemctl enable --now claude-dashboard-retention.timer
 - Python 3.12+
 - Node.js 20+ (빌드용 — `npm run build`)
 - uvicorn `--loop asyncio --http h11` (필수)
-- 디스크: `~/.claude/projects/` 읽기, `~/.claude/dashboard.db` 쓰기
+- 디스크: `~/.codex/sessions/` 읽기, `~/.codex/dashboard.db` 쓰기
 - 선택: `prometheus_client`, `watchdog` (없으면 자동 fallback)
 
 ## 라이선스

@@ -93,7 +93,7 @@ function refreshChartsForTheme(){
 
 async function loadUsageChart(){
   const h=state.usageRange==='24h'?24:state.usageRange==='7d'?168:720;
-  const ep=h<=168?`/api/usage/hourly?hours=${h}`:`/api/usage/daily?days=30`;
+  const ep=h<=168?`/api/codex/usage/hourly?hours=${h}`:`/api/codex/usage/daily?days=30`;
   const data=await safeFetch(ep);const rows=data.data||[];
   const labels=rows.map(r=>r.hour||r.date||''),inp=rows.map(r=>r.input_tokens||0),out=rows.map(r=>r.output_tokens||0),cr=rows.map(r=>r.cache_read_tokens||0);
   setChart('usage', new Chart(document.getElementById('chartUsage'),{type:'line',data:{labels,datasets:[
@@ -103,23 +103,23 @@ async function loadUsageChart(){
   ]},options:{...CHART_D,plugins:{legend:{display:true,position:'top',align:'end',labels:legendLabels()},tooltip:tooltipOpts({callbacks:{label:c=>`${c.dataset.label}: ${fmtTok(c.raw)}`}})},scales:{x:{grid:grd(),ticks:{...tck(),maxTicksLimit:8,maxRotation:0}},y:{grid:grd(),ticks:{...tck(),callback:v=>fmtTok(v)}}}}}));
 }
 async function loadModelChart(){
-  const data=await safeFetch('/api/models');const rows=data.models||[];
+  const data=await safeFetch('/api/codex/models');const rows=data.models||[];
   const labels=rows.map(r=>shortModel(r.model)),vals=rows.map(r=>parseFloat((r.cost_usd||0).toFixed(4)));
   const pal=[CC.emerald,CC.blue,CC.amber,CC.rose,CC.cyan,CC.purple];
   setChart('models', new Chart(document.getElementById('chartModels'),{type:'doughnut',data:{labels,datasets:[{data:vals,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'65%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:6})},tooltip:tooltipOpts({callbacks:{label:c=>` ${c.label}: $${c.raw.toFixed(2)}`}})}}}));
 }
 async function loadDailyCostChart(){
-  const data=await safeFetch('/api/usage/daily?days=30');const rows=data.data||[];
+  const data=await safeFetch('/api/codex/usage/daily?days=30');const rows=data.data||[];
   const labels=rows.map(r=>r.date?r.date.slice(5):''),costs=rows.map(r=>parseFloat((r.cost_usd||0).toFixed(4)));
   setChart('dailyCost', new Chart(document.getElementById('chartDailyCost'),{type:'bar',data:{labels,datasets:[{label:'비용',data:costs,backgroundColor:'rgba(52,211,153,.25)',borderColor:CC.emerald,borderWidth:1,borderRadius:3}]},options:{...CHART_D,plugins:{tooltip:tooltipOpts({callbacks:{label:c=>` $${c.raw.toFixed(4)}`}})},scales:{x:{grid:grd(),ticks:{...tck(),maxTicksLimit:10}},y:{grid:grd(),ticks:{...tck(),callback:v=>'$'+v}}}}}));
 }
 async function loadCacheChart(){
-  const data=await safeFetch('/api/stats');const a=data.all_time||{};
+  const data=await safeFetch('/api/codex/stats');const a=data.all_time||{};
   const d=[a.input_tokens||0,a.cache_creation_tokens||0,a.cache_read_tokens||0,a.output_tokens||0];
   setChart('cache', new Chart(document.getElementById('chartCache'),{type:'doughnut',data:{labels:['입력','캐시 생성','캐시 읽기','출력'],datasets:[{data:d,backgroundColor:[CC.blue+'66',CC.purple+'66',CC.cyan+'66',CC.emerald+'66'],borderColor:[CC.blue,CC.purple,CC.cyan,CC.emerald],borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'60%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:5})},tooltip:tooltipOpts({callbacks:{label:c=>` ${c.label}: ${fmtTok(c.raw)}`}})}}}));
 }
 async function loadStopReasonChart(){
-  const data=await safeFetch('/api/stats');const rows=data.stop_reasons||[];
+  const data=await safeFetch('/api/codex/stats');const rows=data.stop_reasons||[];
   if(!rows.length)return;
   const SR_LABELS={'end_turn':'정상 종료','tool_use':'도구 호출','max_tokens':'토큰 초과','(unknown)':'미분류'};
   const labels=rows.map(r=>SR_LABELS[r.stop_reason]||r.stop_reason);
@@ -128,7 +128,7 @@ async function loadStopReasonChart(){
   setChart('stopReason', new Chart(document.getElementById('chartStopReason'),{type:'doughnut',data:{labels,datasets:[{data:counts,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'60%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:5})},tooltip:tooltipOpts({callbacks:{label:c=>{const total=c.dataset.data.reduce((a,b)=>a+b,0);const pct=total>0?(c.raw/total*100).toFixed(1):'0';return ` ${c.label}: ${fmtN(c.raw)} (${pct}%)`;}}})}}}));
 }
 async function loadModelCacheChart(){
-  const data=await safeFetch('/api/stats');const rows=data.model_cache||[];
+  const data=await safeFetch('/api/codex/stats');const rows=data.model_cache||[];
   if(!rows.length)return;
   const labels=rows.map(r=>shortModel(r.model));
   const hitRates=rows.map(r=>{const total=(r.input_tokens||0)+(r.cache_read_tokens||0);return total>0?((r.cache_read_tokens||0)/total*100):0;});

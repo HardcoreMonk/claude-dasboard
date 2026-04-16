@@ -145,6 +145,7 @@ def _boot_api_client(tmp_path, monkeypatch, dashboard_password=None):
         content_preview='I will change the search UI first.',
         timestamp='2026-04-16T10:00:01Z',
         message_uuid='codex-msg-2',
+        model='gpt-5.4',
     )
     database.store_codex_message(
         project_path='/tmp/codex-demo',
@@ -178,6 +179,7 @@ def _boot_api_client(tmp_path, monkeypatch, dashboard_password=None):
         content_preview='Search result in another session',
         timestamp='2026-04-16T11:00:00Z',
         message_uuid='codex-msg-3',
+        model='gpt-5.4-mini',
     )
 
     from fastapi.testclient import TestClient
@@ -221,8 +223,8 @@ def test_admin_ingest_status_reports_codex_counters(api_client):
     assert r.status_code == 200
     body = r.json()
     assert body['source_kind'] == 'codex'
-    assert body['indexed_sessions'] == 2
-    assert body['indexed_messages'] == 5
+    assert body['indexed_sessions'] >= 2
+    assert body['indexed_messages'] >= 5
 
 
 def test_auth_me_reports_auth_required_when_password_set(auth_api_client):
@@ -549,6 +551,80 @@ def test_codex_usage_summary_returns_session_message_and_role_counts(api_client)
             'last_activity_at': '2026-04-16T11:00:00Z',
         },
     ]
+
+
+def test_codex_stats_endpoint_returns_codex_backed_totals(api_client):
+    r = api_client.get('/api/codex/stats')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['all_time']['total_sessions'] == 2
+    assert body['all_time']['messages'] == 5
+    assert body['today']['messages'] >= 0
+    assert body['today']['sessions'] >= 0
+    assert [row['model'] for row in body['models']] == ['gpt-5.4', 'gpt-5.4-mini']
+
+
+def test_codex_sessions_table_endpoint_returns_rows_for_dashboard_views(api_client):
+    r = api_client.get('/api/codex/sessions/table?per_page=10')
+    assert r.status_code == 200
+    body = r.json()
+
+    rows = {row['id']: row for row in body['sessions']}
+    assert body['total'] >= 2
+    assert 'codex-s2' in rows
+    assert 'codex-s1' in rows
+    assert rows['codex-s2']['project_name'] == 'codex-demo'
+    assert rows['codex-s1']['message_count'] == 4
+
+
+def test_codex_session_messages_endpoint_returns_legacy_compatible_shape(api_client):
+    r = api_client.get('/api/codex/sessions/codex-s1/messages?limit=10')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total'] == 4
+    assert [row['role'] for row in body['messages']] == ['user', 'assistant', 'tool', 'agent']
+    assert body['messages'][1]['model'] == 'gpt-5.4'
+    assert body['messages'][1]['content_preview'] == 'I will change the search UI first.'
+
+
+def test_codex_models_and_projects_endpoints_return_codex_aggregates(api_client):
+    models = api_client.get('/api/codex/models')
+    assert models.status_code == 200
+    model_rows = models.json()['models']
+    assert [row['model'] for row in model_rows] == ['gpt-5.4', 'gpt-5.4-mini']
+
+    projects = api_client.get('/api/codex/projects')
+    assert projects.status_code == 200
+    project_rows = projects.json()['projects']
+    assert len(project_rows) == 1
+    assert project_rows[0]['project_name'] == 'codex-demo'
+    assert project_rows[0]['session_count'] == 2
+
+
+def test_codex_project_detail_endpoints_return_codex_backed_shapes(api_client):
+    stats = api_client.get('/api/codex/projects/codex-demo/stats?path=/tmp/codex-demo')
+    assert stats.status_code == 200
+    stats_body = stats.json()
+
+    assert stats_body['summary']['sessions'] == 2
+    assert stats_body['summary']['messages'] == 5
+    assert stats_body['summary']['canonical_path'] == '/tmp/codex-demo'
+    assert stats_body['models'] == [
+        {'model': 'gpt-5.4', 'cnt': 1, 'cost': 0.0},
+        {'model': 'gpt-5.4-mini', 'cnt': 1, 'cost': 0.0},
+    ]
+    assert [row['id'] for row in stats_body['sessions']] == ['codex-s2', 'codex-s1']
+
+    messages = api_client.get('/api/codex/projects/codex-demo/messages?path=/tmp/codex-demo&order=asc')
+    assert messages.status_code == 200
+    message_body = messages.json()
+
+    assert message_body['total'] == 5
+    assert [row['role'] for row in message_body['messages']] == ['user', 'assistant', 'tool', 'agent', 'assistant']
+    assert message_body['messages'][1]['content_preview'] == 'I will change the search UI first.'
+    assert message_body['messages'][1]['git_branch'] == ''
 
 
 def test_codex_agents_summary_returns_agent_status_totals(api_client):

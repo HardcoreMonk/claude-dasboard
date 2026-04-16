@@ -304,7 +304,7 @@ async function loadSessions(page=getPage()){
     if(af.cost_min)p.set('cost_min',af.cost_min);
     if(af.cost_max)p.set('cost_max',af.cost_max);
     if(af.node)p.set('node',af.node);
-    const d=await safeFetch('/api/sessions?'+p);
+    const d=await safeFetch('/api/codex/sessions/table?'+p);
     state.totalPages=d.pages||1; // TODO: accessor
     renderSessionsThead();
     renderSessions(d);

@@ -691,10 +691,8 @@
       </div>
       <div id="convSearchResults" role="region" aria-live="polite" class="hidden border-b border-white/[0.05] max-h-48 overflow-y-auto"></div>
       <div class="px-3 py-1.5 border-b border-white/[0.04] flex items-center gap-1">
-        <button data-conv-source="claude-code" data-action="switchConvSource" data-arg="claude-code"
-                class="conv-source-btn active flex-1 px-2 py-0.5 rounded-full text-[9px] font-bold spring">Claude Code</button>
-        <button data-conv-source="claude-ai" data-action="switchConvSource" data-arg="claude-ai"
-                class="conv-source-btn flex-1 px-2 py-0.5 rounded-full text-[9px] font-bold spring">claude.ai</button>
+        <button data-conv-source="codex" data-action="switchConvSource" data-arg="codex"
+                class="conv-source-btn active flex-1 px-2 py-0.5 rounded-full text-[9px] font-bold spring">Codex 세션</button>
       </div>
       <div class="px-3 py-1.5 border-b border-white/[0.04] flex items-center justify-between gap-2">
         <span id="convListLabel" class="text-[9px] font-bold text-white/35 uppercase tracking-widest">세션 목록</span>
@@ -798,7 +796,7 @@
       <div class="flex items-center justify-between mb-3">
         <div>
           <div class="text-xs font-bold text-white/40">원격 노드</div>
-          <div class="text-[10px] text-white/20 mt-0.5">다른 서버의 Claude 세션 데이터를 수집합니다</div>
+          <div class="text-[10px] text-white/20 mt-0.5">다른 서버의 Codex 세션 데이터를 수집합니다</div>
         </div>
         <button data-action="openNodeRegister" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">+ 노드 추가</button>
       </div>
@@ -1158,5 +1156,6 @@
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
 <script src="/static/bundle.v79.js" defer></script>
+<script src="/static/subagents-codex.js" defer></script>
 </body>
 </html>
