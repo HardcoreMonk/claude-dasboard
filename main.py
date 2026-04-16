@@ -37,7 +37,8 @@ except ImportError:
 
 from database import (
     read_db, write_db, init_db, check_integrity, DB_PATH, _write_lock,
-    close_thread_connections, wal_checkpoint,
+    close_thread_connections, wal_checkpoint, search_codex_messages,
+    get_codex_message_context, get_codex_session_replay,
 )
 from parser import process_record
 from watcher import ClaudeFileWatcher, WatcherMetrics
@@ -818,6 +819,28 @@ def api_session_search_messages(
     return {'results': [dict(r) for r in rows], 'query': q, 'fts': False}
 
 
+@app.get("/api/search/messages")
+def api_search_messages(
+    q: str = Query(..., min_length=1, max_length=200),
+    project: str = Query('', max_length=500),
+    role: str = Query('', max_length=50),
+    limit: int = Query(50, ge=1, le=200),
+):
+    items = [
+        dict(row)
+        for row in search_codex_messages(q, limit=limit, project=project, role=role)
+    ]
+    return {'items': items, 'query': q}
+
+
+@app.get("/api/search/messages/{message_id}/context")
+def api_search_message_context(message_id: int):
+    context = get_codex_message_context(message_id)
+    if context is None:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return context
+
+
 @app.get("/api/sessions/{session_id}/message-position")
 def api_message_position(session_id: str, message_id: int = Query(...)):
     """Return the 0-based row offset of a message within its session.
@@ -888,6 +911,14 @@ def api_session_messages(
             (session_id,),
         ).fetchone()[0]
     return {'messages': [dict(r) for r in rows], 'total': total, 'limit': limit, 'offset': offset}
+
+
+@app.get("/api/sessions/{session_id}/replay")
+def api_session_replay(session_id: str):
+    replay = get_codex_session_replay(session_id)
+    if replay is None:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return replay
 
 
 # ─── Usage time-series (timezone-aware) ───────────────────────────────────────

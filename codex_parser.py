@@ -99,6 +99,7 @@ def normalize_codex_record(raw: dict[str, Any]) -> NormalizedCodexRecord:
     if event_type == 'message':
         payload = {
             'message': raw.get('message') if isinstance(raw.get('message'), dict) else {},
+            'role': _first_str(raw, 'role', 'sender'),
             'content': _message_text(raw),
         }
         searchable_parts = [payload['content']]

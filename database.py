@@ -6,6 +6,7 @@ This eliminates float accumulation drift entirely.
 """
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -23,6 +24,11 @@ _READ_CONN_TTL = 300              # seconds before recycling a cached read conne
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
 SCHEMA_VERSION = 15               # bump on every schema change
+_CODEX_FTS_TOKEN_RE = re.compile(r'[\w가-힣]+', re.UNICODE)
+
+
+def _esc_like(value: str) -> str:
+    return value.replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -803,34 +809,226 @@ def store_codex_message(
         return int(cur.lastrowid)
 
 
-def search_codex_messages(query: str, limit: int = 20) -> list[sqlite3.Row]:
-    """Search Codex messages and return rows joined with session/project context."""
-    sql = '''
+def search_codex_messages(
+    query: str,
+    limit: int = 20,
+    project: str = '',
+    role: str = '',
+) -> list[sqlite3.Row]:
+    """Search Codex messages joined with session/project context."""
+    if not query.strip():
+        return []
+
+    select_sql = '''
         SELECT
-            m.id,
+            m.id AS message_id,
             m.session_id,
             m.message_uuid,
             m.parent_uuid,
             m.role,
-            m.content,
-            m.content_preview,
-            m.timestamp,
+            m.content AS body,
+            m.content_preview AS body_text,
+            m.timestamp AS created_at,
             m.model,
-            s.session_name,
+            s.session_name AS session_title,
             s.created_at AS session_created_at,
             s.updated_at AS session_updated_at,
             p.project_path,
             p.project_name
-        FROM codex_messages_fts f
-        JOIN codex_messages m ON m.id = f.rowid
+        FROM codex_messages m
         JOIN codex_sessions s ON s.id = m.session_id
         JOIN codex_projects p ON p.project_path = s.project_path
-        WHERE codex_messages_fts MATCH ?
-        ORDER BY bm25(codex_messages_fts), m.timestamp DESC, m.id DESC
-        LIMIT ?
     '''
+
+    filters: list[str] = []
+    base_params: list[object] = []
+    if project:
+        filters.append('(p.project_name = ? OR p.project_path = ?)')
+        base_params.extend([project, project])
+    if role:
+        filters.append('m.role = ?')
+        base_params.append(role)
+
+    tokens = [t for t in _CODEX_FTS_TOKEN_RE.findall(query) if len(t) >= 2]
+    fts_query = ' '.join(f'"{token}"' for token in tokens)
+
+    def _like_search(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+        like_sql = select_sql
+        like_filters = list(filters)
+        like_filters.append("(m.content_preview LIKE ? ESCAPE '\\' OR m.content LIKE ? ESCAPE '\\')")
+        like_sql += ' WHERE ' + ' AND '.join(like_filters)
+        like_sql += ' ORDER BY m.timestamp DESC, m.id DESC LIMIT ?'
+        like_value = f"%{_esc_like(query)}%"
+        params = [*base_params, like_value, like_value, limit]
+        return list(conn.execute(like_sql, params).fetchall())
+
     with read_db() as conn:
-        return list(conn.execute(sql, (query, limit)).fetchall())
+        if not fts_query:
+            return _like_search(conn)
+        sql = '''
+            SELECT
+                m.id AS message_id,
+                m.session_id,
+                m.message_uuid,
+                m.parent_uuid,
+                m.role,
+                m.content AS body,
+                m.content_preview AS body_text,
+                m.timestamp AS created_at,
+                m.model,
+                s.session_name AS session_title,
+                s.created_at AS session_created_at,
+                s.updated_at AS session_updated_at,
+                p.project_path,
+                p.project_name
+            FROM codex_messages_fts f
+            JOIN codex_messages m ON m.id = f.rowid
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE codex_messages_fts MATCH ?
+        '''
+        params: list[object] = [fts_query, *base_params]
+        if filters:
+            sql += ' AND ' + ' AND '.join(filters)
+        sql += ' ORDER BY bm25(codex_messages_fts), m.timestamp DESC, m.id DESC LIMIT ?'
+        params.append(limit)
+        try:
+            return list(conn.execute(sql, params).fetchall())
+        except sqlite3.OperationalError:
+            return _like_search(conn)
+
+
+def get_codex_message_context(message_id: int, window: int = 2) -> dict | None:
+    """Return neighboring Codex messages around one message."""
+    with read_db() as conn:
+        current = conn.execute(
+            '''
+            SELECT id AS message_id, session_id, role,
+                   content_preview AS body_text, timestamp AS created_at
+            FROM codex_messages
+            WHERE id = ?
+            ''',
+            (message_id,),
+        ).fetchone()
+        if not current:
+            return None
+
+        before = conn.execute(
+            '''
+            SELECT * FROM (
+                SELECT id AS message_id, session_id, role,
+                       content_preview AS body_text, timestamp AS created_at
+                FROM codex_messages
+                WHERE session_id = ?
+                  AND (timestamp < ? OR (timestamp = ? AND id < ?))
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+            )
+            ORDER BY created_at ASC, message_id ASC
+            ''',
+            (
+                current['session_id'],
+                current['created_at'],
+                current['created_at'],
+                current['message_id'],
+                window,
+            ),
+        ).fetchall()
+        after = conn.execute(
+            '''
+            SELECT id AS message_id, session_id, role,
+                   content_preview AS body_text, timestamp AS created_at
+            FROM codex_messages
+            WHERE session_id = ?
+              AND (timestamp > ? OR (timestamp = ? AND id > ?))
+            ORDER BY timestamp ASC, id ASC
+            LIMIT ?
+            ''',
+            (
+                current['session_id'],
+                current['created_at'],
+                current['created_at'],
+                current['message_id'],
+                window,
+            ),
+        ).fetchall()
+
+    return {
+        'session_id': current['session_id'],
+        'current': dict(current),
+        'before': [dict(row) for row in before],
+        'after': [dict(row) for row in after],
+    }
+
+
+def _decode_codex_payload(content: str) -> dict:
+    if not content:
+        return {}
+    try:
+        value = json.loads(content)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def get_codex_session_replay(session_id: str) -> dict | None:
+    """Return ordered replay events for a Codex session."""
+    with read_db() as conn:
+        session = conn.execute(
+            '''
+            SELECT s.id AS session_id, s.session_name AS session_title,
+                   s.created_at, s.updated_at, p.project_name, p.project_path
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE s.id = ?
+            ''',
+            (session_id,),
+        ).fetchone()
+        if not session:
+            return None
+
+        rows = conn.execute(
+            '''
+            SELECT id AS message_id, role, content, content_preview, timestamp, model
+            FROM codex_messages
+            WHERE session_id = ?
+            ORDER BY timestamp ASC, message_id ASC
+            ''',
+            (session_id,),
+        ).fetchall()
+
+    events: list[dict] = []
+    for row in rows:
+        payload = _decode_codex_payload(row['content'])
+        event = {
+            'message_id': row['message_id'],
+            'timestamp': row['timestamp'],
+            'model': row['model'],
+        }
+        if row['role'] == 'tool':
+            event.update({
+                'kind': 'tool_call',
+                'tool_name': payload.get('name', ''),
+                'body_text': row['content_preview'],
+            })
+        elif row['role'] == 'agent':
+            event.update({
+                'kind': 'agent_run',
+                'agent_name': payload.get('agent_name', ''),
+                'status': payload.get('status', ''),
+                'body_text': row['content_preview'],
+            })
+        else:
+            event.update({
+                'kind': 'message',
+                'role': row['role'],
+                'body_text': row['content_preview'],
+            })
+        events.append(event)
+
+    payload = dict(session)
+    payload['events'] = events
+    return payload
 
 
 def check_integrity() -> bool:

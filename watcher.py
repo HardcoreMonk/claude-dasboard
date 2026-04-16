@@ -11,6 +11,8 @@ File I/O + JSON parsing happens WITHOUT the write lock. Only the DB insert
 phase acquires write_db(), minimising lock contention.
 """
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import threading
@@ -19,7 +21,8 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from codex_discovery import codex_roots, discover_codex_logs
-from database import read_db, write_db
+from codex_parser import iter_codex_records, normalize_codex_record
+from database import read_db, store_codex_message, write_db
 from parser import CLAUDE_PROJECTS, parse_jsonl_file, process_record
 
 try:
@@ -71,6 +74,71 @@ POLL_INTERVAL_SLOW = 30.0   # safety-net polling while watchdog is active
 OBSERVER_HEALTH_INTERVAL = 60.0  # check observer liveness every 60s
 MAX_RETRIES = 3
 SCAN_BATCH = 4              # parallel file-parse workers during initial scan
+
+
+def _is_codex_log(file_path: str) -> bool:
+    return '.codex' in Path(file_path).parts
+
+
+def _codex_role(record) -> str:
+    if record.event_type == 'message':
+        role = record.payload.get('message', {}).get('role') or record.payload.get('role')
+        if role:
+            return str(role)
+        return 'assistant'
+    return record.event_type
+
+
+def _codex_content(record) -> str:
+    if record.event_type == 'message':
+        return record.payload.get('content', '')
+    return json.dumps(record.payload, ensure_ascii=False, sort_keys=True)
+
+
+def _codex_preview(record) -> str:
+    if record.event_type == 'message':
+        return record.payload.get('content', '')
+    if record.event_type == 'tool':
+        return ' '.join(part for part in [record.payload.get('name', ''), str(record.payload.get('input', ''))] if part)
+    if record.event_type == 'agent':
+        return ' '.join(part for part in [record.payload.get('agent_name', ''), record.payload.get('status', '')] if part)
+    return record.searchable_text
+
+
+def _codex_project_info(record, file_path: str) -> tuple[str, str]:
+    if record.project_path:
+        return record.project_path, record.project_name or Path(record.project_path).name
+
+    path = Path(file_path)
+    if '.codex' in path.parts and path.parent.name == 'sessions':
+        return str(path.with_suffix('')), path.stem
+
+    return str(path.parent), path.parent.name
+
+
+def _codex_message_uuid(record, role: str, preview: str) -> str:
+    raw = record.payload.get('message', {}) if isinstance(record.payload.get('message'), dict) else {}
+    explicit = raw.get('id') or raw.get('uuid') or record.payload.get('id') or record.payload.get('uuid')
+    if explicit:
+        return str(explicit)
+    key = '|'.join([
+        record.session_id,
+        str(record.source_path or ''),
+        str(record.line_number if record.line_number is not None else ''),
+        record.timestamp,
+        role,
+        preview,
+    ])
+    return hashlib.sha1(key.encode('utf-8')).hexdigest()
+
+
+def _is_valid_codex_record(record, project_path: str, project_name: str) -> bool:
+    return bool(
+        record.session_id
+        and record.timestamp
+        and project_path
+        and project_name
+    )
 
 
 def _iter_watch_files(home: Path | None = None) -> list[Path]:
@@ -371,6 +439,66 @@ class ClaudeFileWatcher:
                 if current_line_count < start_line:
                     rewound = True
                     start_line = 0
+
+            if _is_codex_log(file_path):
+                parsed = list(iter_codex_records(Path(file_path)))
+                with read_db() as rdb:
+                    row = rdb.execute(
+                        'SELECT last_line FROM file_watch_state WHERE file_path = ?',
+                        (file_path,),
+                    ).fetchone()
+                    actual_start = 0 if rewound else (row['last_line'] if row else 0)
+
+                new_records: list[dict] = []
+                last_line = actual_start
+                for raw_record in parsed:
+                    if raw_record['_line_number'] < actual_start:
+                        continue
+                    last_line = raw_record['_line_number'] + 1
+                    normalized = normalize_codex_record(raw_record)
+                    role = _codex_role(normalized)
+                    project_path, project_name = _codex_project_info(normalized, file_path)
+                    if not _is_valid_codex_record(normalized, project_path, project_name):
+                        continue
+                    preview = _codex_preview(normalized)
+                    store_codex_message(
+                        project_path=project_path,
+                        project_name=project_name,
+                        session_id=normalized.session_id,
+                        session_name=normalized.session_id,
+                        role=role,
+                        content=_codex_content(normalized),
+                        content_preview=preview[:240],
+                        timestamp=normalized.timestamp,
+                        message_uuid=_codex_message_uuid(normalized, role, preview),
+                    )
+                    new_records.append({
+                        'type': 'new_message',
+                        'session_id': normalized.session_id,
+                        'project_name': project_name,
+                        'project_path': project_path,
+                        'timestamp': normalized.timestamp,
+                        'role': role,
+                        'preview': preview[:300],
+                    })
+
+                if last_line > actual_start or (rewound and last_line == actual_start):
+                    try:
+                        mtime = os.path.getmtime(file_path)
+                    except OSError:
+                        mtime = 0.0
+                    with write_db() as db:
+                        db.execute(
+                            'INSERT OR REPLACE INTO file_watch_state'
+                            ' (file_path, last_line, last_modified) VALUES (?, ?, ?)',
+                            (file_path, last_line, mtime),
+                        )
+
+                with self._state_lock:
+                    self._retry_queue.pop(file_path, None)
+                if not parsed:
+                    return None
+                return {'type': 'batch_update', 'records': new_records} if new_records else None
 
             parsed = list(parse_jsonl_file(file_path, start_line))
             new_records: list[dict] = []

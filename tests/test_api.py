@@ -95,6 +95,62 @@ def api_client(tmp_path, monkeypatch):
         pass
     conn.close()
 
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s1',
+        session_name='Codex search session',
+        role='user',
+        content='Need to rework the search structure',
+        content_preview='Need to rework the search structure',
+        timestamp='2026-04-16T10:00:00Z',
+        message_uuid='codex-msg-1',
+    )
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s1',
+        session_name='Codex search session',
+        role='assistant',
+        content='I will change the search UI first.',
+        content_preview='I will change the search UI first.',
+        timestamp='2026-04-16T10:00:01Z',
+        message_uuid='codex-msg-2',
+    )
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s1',
+        session_name='Codex search session',
+        role='tool',
+        content='{"name":"rg","input":"search UI"}',
+        content_preview='rg search UI',
+        timestamp='2026-04-16T10:00:02Z',
+        message_uuid='codex-tool-1',
+    )
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s1',
+        session_name='Codex search session',
+        role='agent',
+        content='{"agent_name":"planner","status":"completed"}',
+        content_preview='planner completed',
+        timestamp='2026-04-16T10:00:03Z',
+        message_uuid='codex-agent-1',
+    )
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s2',
+        session_name='Other Codex session',
+        role='assistant',
+        content='Search result in another session',
+        content_preview='Search result in another session',
+        timestamp='2026-04-16T11:00:00Z',
+        message_uuid='codex-msg-3',
+    )
+
     from fastapi.testclient import TestClient
     with TestClient(main.app) as client:
         yield client
@@ -222,6 +278,69 @@ def test_project_stats_by_path(api_client):
 def test_project_stats_unknown_path_404(api_client):
     r = api_client.get('/api/projects/demo/stats?path=/tmp/nope')
     assert r.status_code == 404
+
+
+def test_codex_search_messages_returns_message_hits(api_client):
+    r = api_client.get('/api/search/messages?q=search&role=assistant')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['items']
+    first = body['items'][0]
+    assert first['message_id'] == 5
+    assert first['session_id'] == 'codex-s2'
+    assert first['role'] == 'assistant'
+    assert first['body_text'] == 'Search result in another session'
+    assert first['project_name'] == 'codex-demo'
+    assert first['session_title'] == 'Other Codex session'
+
+
+def test_codex_search_messages_falls_back_when_fts_has_no_tokens(api_client):
+    r = api_client.get('/api/search/messages?q=I&role=assistant')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['items']
+    assert any(
+        item['body_text'] == 'I will change the search UI first.'
+        for item in body['items']
+    )
+
+
+def test_codex_message_context_returns_neighboring_messages(api_client):
+    r = api_client.get('/api/search/messages/2/context')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['session_id'] == 'codex-s1'
+    assert [row['body_text'] for row in body['before']] == [
+        'Need to rework the search structure',
+    ]
+    assert body['current']['message_id'] == 2
+    assert body['current']['body_text'] == 'I will change the search UI first.'
+    assert [row['body_text'] for row in body['after']] == [
+        'rg search UI',
+        'planner completed',
+    ]
+
+
+def test_codex_session_replay_returns_replay_payload(api_client):
+    r = api_client.get('/api/sessions/codex-s1/replay')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['session_id'] == 'codex-s1'
+    assert body['session_title'] == 'Codex search session'
+    assert [event['kind'] for event in body['events']] == [
+        'message',
+        'message',
+        'tool_call',
+        'agent_run',
+    ]
+    assert body['events'][0]['role'] == 'user'
+    assert body['events'][1]['role'] == 'assistant'
+    assert body['events'][2]['tool_name'] == 'rg'
+    assert body['events'][3]['agent_name'] == 'planner'
 
 
 # ─── F7 / F8 / F9 — subagent aggregations ──────────────────────────────

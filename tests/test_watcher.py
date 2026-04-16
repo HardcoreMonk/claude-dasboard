@@ -1,5 +1,6 @@
 """Unit tests for watcher.py — state lock, metric injection, retry accounting."""
 from pathlib import Path
+import sqlite3
 import threading
 
 import database
@@ -223,3 +224,125 @@ def test_process_file_recovers_after_truncation(tmp_path, monkeypatch):
 
     assert state['last_line'] == 1
     assert count['n'] == 3
+
+
+def test_process_file_routes_codex_logs_to_codex_storage(tmp_path, monkeypatch):
+    db_path = tmp_path / 'dashboard.db'
+    monkeypatch.setattr(database, 'DB_PATH', db_path)
+    database.init_db()
+
+    codex_log = tmp_path / '.codex' / 'projects' / 'demo' / 'session.jsonl'
+    codex_log.parent.mkdir(parents=True)
+    codex_log.write_text(
+        '\n'.join([
+            '{"type":"message","sessionId":"codex-s1","timestamp":"2026-04-16T10:00:00Z","project_path":"/tmp/codex-demo","role":"user","content":"search structure"}',
+            '{"type":"tool","sessionId":"codex-s1","timestamp":"2026-04-16T10:00:01Z","project_path":"/tmp/codex-demo","name":"rg","input":"search structure"}',
+            '{"type":"agent","sessionId":"codex-s1","timestamp":"2026-04-16T10:00:02Z","project_path":"/tmp/codex-demo","agent_name":"planner","status":"completed"}',
+        ]) + '\n',
+        encoding='utf-8',
+    )
+
+    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+
+    batch = w._process_file(str(codex_log))
+
+    assert batch is not None
+    assert [record['role'] for record in batch['records']] == ['user', 'tool', 'agent']
+    assert batch['records'][0]['session_id'] == 'codex-s1'
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    codex_count = conn.execute(
+        'SELECT COUNT(*) AS n FROM codex_messages WHERE session_id = ?',
+        ('codex-s1',),
+    ).fetchone()
+    legacy_count = conn.execute(
+        'SELECT COUNT(*) AS n FROM messages WHERE session_id = ?',
+        ('codex-s1',),
+    ).fetchone()
+    session_row = conn.execute(
+        'SELECT message_count, user_message_count FROM codex_sessions WHERE id = ?',
+        ('codex-s1',),
+    ).fetchone()
+    conn.close()
+
+    assert codex_count['n'] == 3
+    assert legacy_count['n'] == 0
+    assert session_row['message_count'] == 3
+    assert session_row['user_message_count'] == 1
+
+
+def test_process_file_skips_incomplete_codex_records(tmp_path, monkeypatch):
+    db_path = tmp_path / 'dashboard.db'
+    monkeypatch.setattr(database, 'DB_PATH', db_path)
+    database.init_db()
+
+    codex_log = tmp_path / '.codex' / 'projects' / 'demo' / 'session.jsonl'
+    codex_log.parent.mkdir(parents=True)
+    codex_log.write_text(
+        '\n'.join([
+            '{"type":"message","timestamp":"2026-04-16T10:00:00Z","project_path":"/tmp/codex-demo","role":"user","content":"missing session"}',
+            '{"type":"message","sessionId":"codex-skip","project_path":"/tmp/codex-demo","role":"user","content":"missing timestamp"}',
+            '{"type":"message","sessionId":"codex-skip","timestamp":"2026-04-16T10:00:02Z","project_path":"/tmp/codex-demo","role":"user","content":"valid record"}',
+        ]) + '\n',
+        encoding='utf-8',
+    )
+
+    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+
+    batch = w._process_file(str(codex_log))
+
+    assert batch is not None
+    assert len(batch['records']) == 1
+    assert batch['records'][0]['preview'] == 'valid record'
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    codex_count = conn.execute(
+        'SELECT COUNT(*) AS n FROM codex_messages WHERE session_id = ?',
+        ('codex-skip',),
+    ).fetchone()
+    blank_sessions = conn.execute(
+        "SELECT COUNT(*) AS n FROM codex_sessions WHERE id = ''",
+    ).fetchone()
+    conn.close()
+
+    assert codex_count['n'] == 1
+    assert blank_sessions['n'] == 0
+
+
+def test_process_file_attributes_codex_sessions_file_without_project_path(tmp_path, monkeypatch):
+    db_path = tmp_path / 'dashboard.db'
+    monkeypatch.setattr(database, 'DB_PATH', db_path)
+    database.init_db()
+
+    codex_log = tmp_path / '.codex' / 'sessions' / 'orphan-session.jsonl'
+    codex_log.parent.mkdir(parents=True)
+    codex_log.write_text(
+        '{"type":"message","sessionId":"orphan-session","timestamp":"2026-04-16T12:00:00Z","role":"assistant","content":"session-only record"}\n',
+        encoding='utf-8',
+    )
+
+    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+
+    batch = w._process_file(str(codex_log))
+
+    assert batch is not None
+    assert batch['records'][0]['project_name'] == 'orphan-session'
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        '''
+        SELECT s.project_path, p.project_name
+        FROM codex_sessions s
+        JOIN codex_projects p ON p.project_path = s.project_path
+        WHERE s.id = ?
+        ''',
+        ('orphan-session',),
+    ).fetchone()
+    conn.close()
+
+    assert row['project_name'] == 'orphan-session'
+    assert row['project_path'] == str(codex_log.with_suffix(''))
+    assert row['project_path'] != str(codex_log.parent)
