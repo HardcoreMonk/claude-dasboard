@@ -21,6 +21,7 @@ navigates to the page and interacts with the DOM.
 import re
 import sys
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -75,6 +76,41 @@ def e2e_client(tmp_path, monkeypatch):
     except sqlite3.OperationalError:
         pass
     conn.close()
+
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s1',
+        session_name='Codex search session',
+        role='user',
+        content='Need to rework the search structure',
+        content_preview='Need to rework the search structure',
+        timestamp='2026-04-16T10:00:00Z',
+        message_uuid='codex-msg-1',
+    )
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s1',
+        session_name='Codex search session',
+        role='assistant',
+        content='I will change the search UI first.',
+        content_preview='I will change the search UI first.',
+        timestamp='2026-04-16T10:00:01Z',
+        message_uuid='codex-msg-2',
+    )
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s1',
+        session_name='Codex search session',
+        role='tool',
+        content='{"name":"rg","input":"search UI"}',
+        content_preview='rg search UI',
+        timestamp='2026-04-16T10:00:02Z',
+        message_uuid='codex-tool-1',
+    )
+
     from fastapi.testclient import TestClient
     with TestClient(main.app) as client:
         yield client
@@ -123,6 +159,97 @@ def test_html_shell_has_all_required_ids(e2e_client):
         f"HTML shell missing {len(missing)} id(s) that JS modules depend on:\n  "
         + "\n  ".join(missing)
     )
+
+
+def test_search_landing_renders_primary_search_ui(e2e_client):
+    r = e2e_client.get('/')
+
+    assert r.status_code == 200
+    html = r.text
+    assert 'data-view="search"' in html
+    assert 'id="global-search-input"' in html
+    assert 'id="search-results-panel"' in html
+    assert 'id="search-context-panel"' in html
+
+
+def test_search_landing_is_default_shell_view(e2e_client):
+    html = e2e_client.get('/').text
+
+    search_nav = re.search(
+        r'<button(?=[^>]*data-view="search")(?=[^>]*class="([^"]*)")[^>]*>',
+        html,
+    )
+    overview_nav = re.search(
+        r'<button(?=[^>]*data-view="overview")(?=[^>]*class="([^"]*)")[^>]*>',
+        html,
+    )
+    search_view = re.search(
+        r'<section(?=[^>]*id="view-search")(?=[^>]*class="([^"]*)")[^>]*>',
+        html,
+    )
+    overview_view = re.search(
+        r'<section(?=[^>]*id="view-overview")(?=[^>]*class="([^"]*)")[^>]*>',
+        html,
+    )
+
+    assert search_nav, 'search nav button missing'
+    assert overview_nav, 'overview nav button missing'
+    assert search_view, 'search view section missing'
+    assert overview_view, 'overview view section missing'
+    assert 'active' in search_nav.group(1).split()
+    assert 'active' not in overview_nav.group(1).split()
+    assert 'hidden' not in search_view.group(1).split()
+    assert 'hidden' in overview_view.group(1).split()
+
+
+def test_search_flow_round_trip_matches_frontend_contract(e2e_client):
+    all_js = Path('static/app.js').read_text()
+    hit = e2e_client.get('/api/search/messages?q=search&role=assistant')
+    assert hit.status_code == 200
+    search_body = hit.json()
+    assert search_body['items'], 'fixture search should return at least one hit'
+
+    first = search_body['items'][0]
+    context = e2e_client.get(f"/api/search/messages/{first['message_id']}/context")
+    assert context.status_code == 200
+    context_body = context.json()
+
+    assert context_body['current']['message_id'] == first['message_id']
+    assert context_body['current']['body_text'] == first['body_text']
+    assert context_body['session_id'] == first['session_id']
+    assert [row['body_text'] for row in context_body['before']] == [
+        'Need to rework the search structure',
+    ]
+    assert [row['body_text'] for row in context_body['after']] == [
+        'rg search UI',
+    ]
+
+    default_view = re.search(
+        r'function\s+defaultView\(\)\s*\{\s*return\s+[\'"]search[\'"];\s*\}',
+        all_js,
+        re.S,
+    )
+    parse_hash_fallback = re.search(
+        r'return\s*\{\s*view:\s*view\s*\|\|\s*defaultView\(\),\s*rest\s*\};',
+        all_js,
+    )
+    perform_search = re.search(
+        r'async function performSearch\(query\)\s*\{.*?safeFetch\(`/api/search/messages\?\$\{params\.toString\(\)\}`\).*?state\.search\.selectedMessageId = state\.search\.results\[0\]\?\.message_id \?\? null;.*?(await selectSearchMessage\(state\.search\.selectedMessageId\);|renderSearchContext\(\);).*?\}',
+        all_js,
+        re.S,
+    )
+    select_context = re.search(
+        r'async function selectSearchMessage\(messageId\)\s*\{.*?safeFetch\(`/api/search/messages/\$\{encodeURIComponent\(nextId\)\}/context`\).*?state\.search\.context = context;.*?renderSearchContext\(\);.*?\}',
+        all_js,
+        re.S,
+    )
+
+    assert default_view, 'default search view function missing'
+    assert parse_hash_fallback, 'hash routing does not default to search'
+    assert perform_search, 'search UI no longer wires query -> results -> first-hit selection'
+    assert select_context, 'search UI no longer wires selected hit -> context fetch/render'
+    assert 'queryRequestSeq' in all_js
+    assert 'contextRequestSeq' in all_js
 
 
 def test_static_modules_load_with_correct_globals(e2e_client):

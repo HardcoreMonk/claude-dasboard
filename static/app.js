@@ -32,6 +32,15 @@ const _prefs = loadPrefs();
 const state = {
   ws: null, stats: null, charts: {},
   currentPage: 1, totalPages: 1, searchQuery: '',
+  search: {
+    query: '',
+    results: [],
+    selectedMessageId: null,
+    context: null,
+    loading: false,
+    queryRequestSeq: 0,
+    contextRequestSeq: 0,
+  },
   currentSession: null,
   usageRange: _prefs.usageRange || '24h',
   theme: _prefs.theme || 'dark',
@@ -160,10 +169,14 @@ function sortPillHtml(view, col, label, size = 'text-[10px]') {
 }
 
 // ─── Navigation + URL hash routing ─────────────────────────────────────
-const VALID_VIEWS = new Set(['overview','cost','sessions','conversations','models','projects','subagents','timeline','export']);
+const VALID_VIEWS = new Set(['search','overview','cost','sessions','conversations','models','projects','subagents','timeline','export']);
+
+function defaultView() {
+  return 'search';
+}
 
 function showView(view, { updateHash = true } = {}) {
-  if (!VALID_VIEWS.has(view)) view = 'overview';
+  if (!VALID_VIEWS.has(view)) view = defaultView();
   document.querySelectorAll('.nav-pill[data-view]').forEach(b => {
     const active = b.dataset.view === view;
     b.classList.toggle('active', active);
@@ -206,6 +219,7 @@ function onViewChange(view) {
     if (typeof cleanupTimelineCharts === 'function') cleanupTimelineCharts();
   }
   if (view === 'sessions') loadSessions();
+  if (view === 'search') renderSearchView();
   if (view === 'conversations') loadConvList();
   if (view === 'models') loadModels();
   if (view === 'projects') loadProjects();
@@ -217,7 +231,7 @@ function onViewChange(view) {
 function parseHash() {
   const h = (location.hash || '').replace(/^#\/?/, '');
   const [view, ...rest] = h.split('/');
-  return { view: view || 'overview', rest };
+  return { view: view || defaultView(), rest };
 }
 
 function applyHash() {
@@ -234,6 +248,231 @@ function applyHash() {
 }
 
 window.addEventListener('hashchange', applyHash);
+
+let _searchInputTimer = null;
+
+function initSearchView() {
+  const input = document.getElementById('global-search-input');
+  if (!input || input.dataset.bound === 'true') return;
+  input.dataset.bound = 'true';
+  input.value = state.search.query;
+  input.addEventListener('input', (e) => {
+    queueSearch(e.target.value);
+  });
+}
+
+function queueSearch(query) {
+  clearTimeout(_searchInputTimer);
+  state.search.query = (query || '').trim();
+  _searchInputTimer = setTimeout(() => {
+    performSearch(state.search.query);
+  }, 200);
+}
+
+async function performSearch(query) {
+  const resultsPanel = document.getElementById('search-results-panel');
+  if (!resultsPanel) return;
+
+  const normalized = (query || '').trim();
+  const queryRequestSeq = ++state.search.queryRequestSeq;
+  state.search.contextRequestSeq++;
+  state.search.query = normalized;
+
+  if (!normalized) {
+    state.search.results = [];
+    state.search.selectedMessageId = null;
+    state.search.context = null;
+    renderSearchView();
+    return;
+  }
+
+  state.search.loading = true;
+  renderSearchResults();
+
+  try {
+    const params = new URLSearchParams({ q: normalized, limit: '50' });
+    const data = await safeFetch(`/api/search/messages?${params.toString()}`);
+    if (queryRequestSeq !== state.search.queryRequestSeq) return;
+    state.search.results = Array.isArray(data.items) ? data.items : [];
+    state.search.selectedMessageId = state.search.results[0]?.message_id ?? null;
+    state.search.context = null;
+    state.search.loading = false;
+    renderSearchResults();
+    if (state.search.selectedMessageId != null) {
+      await selectSearchMessage(state.search.selectedMessageId);
+    } else {
+      renderSearchContext();
+    }
+  } catch (e) {
+    if (queryRequestSeq !== state.search.queryRequestSeq) return;
+    reportError('performSearch', e);
+    state.search.results = [];
+    state.search.selectedMessageId = null;
+    state.search.context = null;
+    state.search.loading = false;
+    renderSearchResults('검색 결과를 불러오지 못했습니다.');
+    renderSearchContext('문맥을 불러오지 못했습니다.');
+  } finally {
+    if (queryRequestSeq === state.search.queryRequestSeq) {
+      state.search.loading = false;
+    }
+  }
+}
+
+async function selectSearchMessage(messageId) {
+  const nextId = Number(messageId);
+  if (!nextId) return;
+  const contextRequestSeq = ++state.search.contextRequestSeq;
+  state.search.selectedMessageId = nextId;
+  renderSearchResults();
+  renderSearchContext(null, true);
+  try {
+    const context = await safeFetch(`/api/search/messages/${encodeURIComponent(nextId)}/context`);
+    if (contextRequestSeq !== state.search.contextRequestSeq) return;
+    state.search.context = context;
+    renderSearchContext();
+  } catch (e) {
+    if (contextRequestSeq !== state.search.contextRequestSeq) return;
+    reportError('selectSearchMessage', e);
+    state.search.context = null;
+    renderSearchContext('선택한 메시지 문맥을 불러오지 못했습니다.');
+  }
+}
+
+function renderSearchView() {
+  initSearchView();
+  renderSearchResults();
+  renderSearchContext();
+}
+
+function renderSearchResults(errorMessage = '') {
+  const panel = document.getElementById('search-results-panel');
+  const summary = document.getElementById('search-result-summary');
+  if (!panel || !summary) return;
+
+  if (errorMessage) {
+    summary.textContent = errorMessage;
+    panel.innerHTML = `
+      <div class="search-empty-state">
+        <p class="search-empty-title">${esc(errorMessage)}</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (!state.search.query) {
+    summary.textContent = '검색어를 입력하면 결과가 표시됩니다.';
+    panel.innerHTML = `
+      <div class="search-empty-state">
+        <p class="search-empty-title">검색어를 입력하세요</p>
+        <p class="search-empty-copy">최근 Codex 세션 메시지에서 일치 항목을 찾습니다.</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (state.search.loading) {
+    summary.textContent = `"${state.search.query}" 검색 중`;
+    panel.innerHTML = '<div class="search-loading">검색 중</div>';
+    return;
+  }
+
+  const items = state.search.results || [];
+  summary.textContent = `"${state.search.query}" 결과 ${fmtN(items.length)}건`;
+  if (!items.length) {
+    panel.innerHTML = `
+      <div class="search-empty-state">
+        <p class="search-empty-title">검색 결과가 없습니다</p>
+        <p class="search-empty-copy">다른 키워드나 더 짧은 검색어로 다시 시도하세요.</p>
+      </div>
+    `;
+    return;
+  }
+
+  panel.innerHTML = items.map((item) => {
+    const active = item.message_id === state.search.selectedMessageId;
+    return `
+      <button class="search-result-card ${active ? 'is-active' : ''}"
+              data-action="selectSearchMessage"
+              data-arg="${esc(String(item.message_id))}">
+        <div class="search-result-topline">
+          <span class="search-result-role">${esc(item.role || 'message')}</span>
+          <span class="search-result-meta">${esc(item.project_name || item.session_title || '—')}</span>
+        </div>
+        <div class="search-result-title">${esc(item.session_title || item.session_id || 'Untitled session')}</div>
+        <p class="search-result-body">${esc(item.body_text || item.content_preview || '')}</p>
+      </button>
+    `;
+  }).join('');
+}
+
+function renderSearchContext(errorMessage = '', loading = false) {
+  const panel = document.getElementById('search-context-panel');
+  if (!panel) return;
+
+  if (errorMessage) {
+    panel.innerHTML = `
+      <div class="search-empty-state">
+        <p class="search-empty-title">${esc(errorMessage)}</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (loading) {
+    panel.innerHTML = '<div class="search-loading">문맥 불러오는 중</div>';
+    return;
+  }
+
+  const context = state.search.context;
+  if (!context) {
+    panel.innerHTML = `
+      <div class="search-empty-state">
+        <p class="search-empty-title">문맥 패널</p>
+        <p class="search-empty-copy">검색 결과를 선택하면 앞뒤 메시지 흐름이 표시됩니다.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const renderContextItems = (items, tone) => {
+    if (!items?.length) {
+      return `<div class="search-context-empty">${tone === 'current' ? '메시지 본문만 있습니다.' : '인접 메시지가 없습니다.'}</div>`;
+    }
+    return items.map((item) => `
+      <article class="search-context-item ${tone}">
+        <div class="search-context-meta">
+          <span>${esc(item.role || 'message')}</span>
+          <span>${esc(item.message_id != null ? `#${item.message_id}` : '')}</span>
+        </div>
+        <p class="search-context-body">${esc(item.body_text || '')}</p>
+      </article>
+    `).join('');
+  };
+
+  panel.innerHTML = `
+    <div class="search-context-header">
+      <p class="search-eyebrow">Session Context</p>
+      <h2 class="search-context-title">${esc(context.session_title || context.session_id || 'Untitled session')}</h2>
+      <p class="search-context-subtitle">${esc(context.project_name || context.session_id || '')}</p>
+    </div>
+    <section class="search-context-group">
+      <div class="search-context-label">이전 메시지</div>
+      ${renderContextItems(context.before, 'before')}
+    </section>
+    <section class="search-context-group">
+      <div class="search-context-label">선택된 메시지</div>
+      ${renderContextItems(context.current ? [context.current] : [], 'current')}
+    </section>
+    <section class="search-context-group">
+      <div class="search-context-label">다음 메시지</div>
+      ${renderContextItems(context.after, 'after')}
+    </section>
+  `;
+}
+
+window.performSearch = performSearch;
+window.selectSearchMessage = selectSearchMessage;
 
 // ─── Safe Fetch (retry + timeout + deduplication) ───────────────────────
 const FETCH_MAX_RETRIES = 3;
@@ -462,6 +701,7 @@ const _CMDK_CACHE_TTL = 30000; // 30 seconds
 
 function _cmdkStaticItems() {
   return [
+    { label: '검색',      hint: '메시지 검색', icon: 'solar:magnifer-linear', action: () => showView('search') },
     { label: '개요',      hint: '대시보드', icon: 'solar:chart-square-linear', action: () => showView('overview') },
     { label: '비용',      hint: '토큰/비용 차트', icon: 'solar:graph-up-linear', action: () => showView('cost') },
     { label: '세션',      hint: '전체 세션 목록', icon: 'solar:list-check-linear', action: () => showView('sessions') },
@@ -3324,12 +3564,12 @@ function fmtTime(ts){if(!ts)return'—';const d=new Date(ts);if(isNaN(d))return 
 
 // ─── Keyboard shortcuts ────────────────────────────────────────────────
 // Combos:
-//   /           → focus session search (sessions view) or conv search
+//   /           → focus the active view's primary search input
 //   Esc         → close modal, clear search, unfocus input
-//   g o/s/c/m/p/e → jump to view
+//   g f/o/s/c/m/p/e → jump to view
 //   ?           → show help overlay
 const NAV_KEY_MAP = {
-  o: 'overview', b: 'cost', s: 'sessions', c: 'conversations',
+  f: 'search', o: 'overview', b: 'cost', s: 'sessions', c: 'conversations',
   m: 'models', p: 'projects', u: 'subagents', t: 'timeline', e: 'export',
 };
 let _gPending = false;
@@ -3403,6 +3643,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/') {
     e.preventDefault();
     const focusables = [
+      document.getElementById('global-search-input'),
       document.getElementById('sessionSearch'),
       document.getElementById('convSearch'),
     ].filter(Boolean);
