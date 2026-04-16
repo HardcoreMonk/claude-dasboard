@@ -9,15 +9,15 @@
 
 | URL | 용도 |
 |---|---|
-| `http://localhost:8765/docs` | **Swagger UI** — 브라우저 인터랙티브 탐색, 요청 시도 |
-| `http://localhost:8765/redoc` | **ReDoc** — 더 읽기 좋은 문서 뷰 |
-| `http://localhost:8765/openapi.json` | **OpenAPI 3.1 스펙 JSON** — 외부 통합 / 클라이언트 코드 생성 |
+| `http://localhost:8617/docs` | **Swagger UI** — 브라우저 인터랙티브 탐색, 요청 시도 |
+| `http://localhost:8617/redoc` | **ReDoc** — 더 읽기 좋은 문서 뷰 |
+| `http://localhost:8617/openapi.json` | **OpenAPI 3.1 스펙 JSON** — 외부 통합 / 클라이언트 코드 생성 |
 
 외부 툴에서 이 대시보드 API 를 호출하려면 `openapi.json` 을 가져와
 원하는 언어의 client generator 에 넣으면 됩니다. 예:
 
 ```bash
-curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
+curl -s http://localhost:8617/openapi.json | jq '.paths | keys' | head
 ```
 
 
@@ -165,21 +165,21 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 
 ```bash
 # 인증이 설정된 경우 먼저 로그인 (쿠키 저장)
-curl -c cookies.txt -X POST http://localhost:8765/api/auth/login \
+curl -c cookies.txt -X POST http://localhost:8617/api/auth/login \
   -H 'Content-Type: application/json' -d '{"password":"your-password"}'
 
 # 이후 요청에 쿠키 첨부 (-b cookies.txt)
-curl -b cookies.txt -s http://localhost:8765/api/stats | jq .
-curl -b cookies.txt -s 'http://localhost:8765/api/sessions?per_page=10&pinned_only=true' \
+curl -b cookies.txt -s http://localhost:8617/api/stats | jq .
+curl -b cookies.txt -s 'http://localhost:8617/api/sessions?per_page=10&pinned_only=true' \
   | jq '.sessions[]|{project_name,model,total_cost_usd,tags}'
-curl -s 'http://localhost:8765/api/forecast?days=14' | jq .
-curl -s 'http://localhost:8765/api/subagents/stats' | jq '.by_type_and_stop_reason'
-curl -s 'http://localhost:8765/api/sessions/<sid>/chain?depth=4' | jq .
-curl -o claude-usage.csv http://localhost:8765/api/export/csv
-curl -s http://localhost:8765/metrics | grep dashboard_
+curl -s 'http://localhost:8617/api/forecast?days=14' | jq .
+curl -s 'http://localhost:8617/api/subagents/stats' | jq '.by_type_and_stop_reason'
+curl -s 'http://localhost:8617/api/sessions/<sid>/chain?depth=4' | jq .
+curl -o claude-usage.csv http://localhost:8617/api/export/csv
+curl -s http://localhost:8617/metrics | grep dashboard_
 
 # claude.ai export 엔드포인트
-curl -s http://localhost:8765/api/claude-ai/stats | jq .
-curl -s 'http://localhost:8765/api/claude-ai/conversations?sort=message_count&per_page=5' | jq '.conversations[]|{uuid,name,message_count}'
-curl -s --get --data-urlencode 'q=하이퍼바이저' --data 'limit=5' http://localhost:8765/api/claude-ai/search | jq '.results'
+curl -s http://localhost:8617/api/claude-ai/stats | jq .
+curl -s 'http://localhost:8617/api/claude-ai/conversations?sort=message_count&per_page=5' | jq '.conversations[]|{uuid,name,message_count}'
+curl -s --get --data-urlencode 'q=하이퍼바이저' --data 'limit=5' http://localhost:8617/api/claude-ai/search | jq '.results'
 ```

@@ -36,7 +36,7 @@ fi
 echo "📦 의존성 확인 중..."
 pip install -q -r requirements.txt
 
-PORT="${PORT:-8765}"
+PORT="${PORT:-8617}"
 HOST="${HOST:-0.0.0.0}"
 
 AUTH_STATUS="OFF"

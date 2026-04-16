@@ -120,6 +120,17 @@ def _require(payload, path, keys):
     assert not missing, f"{path}: missing keys {missing}. got={list(payload.keys())[:12]}"
 
 
+# ─── Startup contract ──────────────────────────────────────────────────────
+
+def test_contract_start_script_defaults_to_codex_port():
+    start_script = Path(__file__).resolve().parents[1] / 'start.sh'
+    contents = start_script.read_text()
+
+    assert 'PORT="${PORT:-8617}"' in contents
+    assert 'PORT="${PORT:-8765}"' not in contents
+    assert '--port "$PORT"' in contents
+
+
 # ─── Health / metrics / stats ──────────────────────────────────────────────
 
 def test_contract_runtime_path_env_overrides_still_win(tmp_path, monkeypatch):
