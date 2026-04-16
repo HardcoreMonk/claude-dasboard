@@ -31,6 +31,25 @@ curl -s http://localhost:8617/openapi.json | jq '.paths | keys' | head
 | GET | `/api/auth/me` | 현재 인증 상태 확인. 응답: `{authenticated, auth_required}` |
 | GET | `/features` | Feature Reference HTML 페이지 (인증 우회) |
 
+### Codex 런타임 접근 검증
+
+운영 확인은 기본 포트 `8617` 기준으로 수행한다.
+
+```bash
+# 1. 프로세스가 0.0.0.0:8617 에 바인딩됐는지 확인
+ss -ltnp | grep 8617
+
+# 2. 로그인 강제 여부 확인
+curl http://127.0.0.1:8617/api/auth/me
+
+# 3. 비로그인 상태에서 보호 API 거부 확인
+curl -i http://127.0.0.1:8617/api/stats
+```
+
+- `DASHBOARD_PASSWORD` 가 설정된 런타임이면 `/api/auth/me` 에서 `auth_required` 가 `true` 여야 한다.
+- 같은 네트워크의 다른 기기에서는 `http://<서버IP>:8617` 로 접속해 로그인 화면이 보이는지 확인한다.
+- 비로그인 상태의 `/api/stats` 는 `401 Unauthorized` 또는 `{"error":"unauthorized"}` 를 반환해야 한다.
+
 ## 통계·시계열·예측
 
 | 메서드 | 경로 | 설명 |

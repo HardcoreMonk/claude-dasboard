@@ -32,11 +32,24 @@ def api_client(tmp_path, monkeypatch):
     We reset the module-level state of ``database`` and ``main`` so each
     test sees a clean Prometheus registry + schema.
     """
+    yield from _boot_api_client(tmp_path, monkeypatch)
+
+
+@pytest.fixture()
+def auth_api_client(tmp_path, monkeypatch):
+    yield from _boot_api_client(tmp_path, monkeypatch, dashboard_password='secret')
+
+
+def _boot_api_client(tmp_path, monkeypatch, dashboard_password=None):
     db_file = tmp_path / 'api.db'
     fake_claude_projects = tmp_path / 'claude-projects'
     fake_claude_projects.mkdir()
 
-    monkeypatch.delenv('DASHBOARD_PASSWORD', raising=False)
+    if dashboard_password is None:
+        monkeypatch.delenv('DASHBOARD_PASSWORD', raising=False)
+    else:
+        monkeypatch.setenv('DASHBOARD_PASSWORD', dashboard_password)
+    monkeypatch.setenv('DASHBOARD_DB_PATH', str(db_file))
 
     # Unregister any Prometheus collectors from a previous test run so the
     # re-import of main.py can re-register without duplicate errors.
@@ -210,6 +223,38 @@ def test_admin_ingest_status_reports_codex_counters(api_client):
     assert body['source_kind'] == 'codex'
     assert body['indexed_sessions'] == 2
     assert body['indexed_messages'] == 5
+
+
+def test_auth_me_reports_auth_required_when_password_set(auth_api_client):
+    r = auth_api_client.get('/api/auth/me')
+
+    assert r.status_code == 200
+    assert r.json() == {
+        'authenticated': False,
+        'auth_required': True,
+    }
+
+
+def test_protected_api_denied_without_login_when_password_set(auth_api_client):
+    r = auth_api_client.get('/api/stats')
+
+    assert r.status_code == 401
+    assert r.json() == {'error': 'unauthorized'}
+
+
+def test_access_verification_docs_cover_codex_runtime_checks():
+    text = '\n'.join([
+        Path('README.md').read_text(),
+        Path('docs/API.md').read_text(),
+        Path('docs/ARCHITECTURE.md').read_text(),
+    ])
+
+    assert '0.0.0.0:8617' in text
+    assert '/api/auth/me' in text
+    assert 'auth_required' in text
+    assert 'http://<서버IP>:8617' in text
+    assert '/api/stats' in text
+    assert '401' in text
 
 
 # ─── Stats / aggregations ───────────────────────────────────────────────

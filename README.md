@@ -26,6 +26,17 @@ cp .env.example .env          # DASHBOARD_PASSWORD 설정
 
 기본 접속 주소는 `http://localhost:8617` 이며, 로그인 후 대시보드에 접근한다.
 
+### 사용자 접근 검증 절차
+
+Codex 런타임을 배포하거나 재시작한 뒤에는 아래 순서로 `8617` 접근 상태와 로그인 강제를 확인한다.
+
+1. 바인딩 확인: `ss -ltnp | grep 8617` 결과에 `0.0.0.0:8617` 또는 의도한 바인딩 주소가 보여야 한다.
+2. 인증 필요 여부 확인: `curl http://127.0.0.1:8617/api/auth/me` 응답에서 `DASHBOARD_PASSWORD` 를 설정한 경우 `{"authenticated":false,"auth_required":true}` 가 반환되어야 한다.
+3. 동일 네트워크의 다른 기기에서 원격 접속 확인: 브라우저로 `http://<서버IP>:8617` 에 접속해 로그인 화면이 열리는지 확인한다.
+4. 보호 API 차단 확인: 로그인하지 않은 상태에서 `curl -i http://127.0.0.1:8617/api/stats` 를 호출해 `HTTP/1.1 401 Unauthorized` 또는 JSON `{"error":"unauthorized"}` 가 반환되는지 확인한다.
+
+인증이 꺼진 개발 환경이라면 2번의 `auth_required` 가 `false` 로 내려오며, 4번의 보호 API 차단도 발생하지 않는다. 운영 환경에서는 반드시 `DASHBOARD_PASSWORD` 를 설정한 뒤 위 절차를 다시 확인한다.
+
 ### 환경변수 (.env)
 
 ```bash

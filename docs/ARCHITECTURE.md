@@ -36,6 +36,13 @@ Codex JSONL/이벤트 적재           store_codex_message()
 - `claude-dashboard.service` 는 Claude Usage Dashboard 식별자를 유지하고 Codex 식별자와 섞지 않는다.
 - 두 서비스는 동일 코드베이스를 실행할 수 있지만 운영 데이터는 합치지 않는다. 별도 DB 루트, 별도 백업 루트, 별도 systemd unit 을 유지해 장애 복구와 보존 정책을 분리한다.
 
+### 접근 검증 체크포인트
+
+- 소켓 바인딩: 운영 점검 시 `ss -ltnp | grep 8617` 로 `0.0.0.0:8617` 리슨 여부를 먼저 확인한다.
+- 인증 필요 상태: `GET /api/auth/me` 는 로그인 여부와 별개로 `auth_required` 를 반환한다. `DASHBOARD_PASSWORD` 가 설정된 Codex 런타임에서는 `auth_required=true` 가 정상 상태다.
+- 원격 브라우저 접근: 동일 네트워크의 다른 기기에서 `http://<서버IP>:8617` 로 접속했을 때 로그인 화면이 보이면 바인딩과 HTTP 라우팅이 모두 정상이다.
+- 보호 API 차단: 비로그인 상태에서 `GET /api/stats` 같은 보호 API 는 `401` 로 거부되어야 한다. 이 값이 200이면 인증 미들웨어 또는 환경설정이 잘못된 것이다.
+
 ---
 
 ## 백엔드
