@@ -131,6 +131,16 @@ def test_contract_start_script_defaults_to_codex_port():
     assert '--port "$PORT"' in contents
 
 
+def test_contract_start_script_preserves_one_shot_env_overrides():
+    start_script = Path(__file__).resolve().parents[1] / 'start.sh'
+    contents = start_script.read_text()
+
+    assert '_ORIG_PORT_SET="${PORT+x}"' in contents
+    assert 'if [ -n "$_ORIG_PORT_SET" ]; then export PORT="$_ORIG_PORT"; fi' in contents
+    assert '_ORIG_DASHBOARD_PASSWORD_SET="${DASHBOARD_PASSWORD+x}"' in contents
+    assert 'if [ -n "$_ORIG_DASHBOARD_PASSWORD_SET" ]; then export DASHBOARD_PASSWORD="$_ORIG_DASHBOARD_PASSWORD"; fi' in contents
+
+
 def test_contract_codex_service_unit_exists_with_codex_identity():
     service_file = Path(__file__).resolve().parents[1] / 'codex-web-dashboard.service'
     contents = service_file.read_text()
