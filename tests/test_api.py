@@ -341,6 +341,114 @@ def test_codex_session_replay_returns_replay_payload(api_client):
     assert body['events'][1]['role'] == 'assistant'
     assert body['events'][2]['tool_name'] == 'rg'
     assert body['events'][3]['agent_name'] == 'planner'
+    assert body['events'][2]['payload']['name'] == 'rg'
+    assert body['events'][3]['payload']['status'] == 'completed'
+
+
+def test_codex_sessions_endpoint_returns_replay_launcher_rows(api_client):
+    r = api_client.get('/api/codex/sessions')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total'] == 2
+    assert [row['session_id'] for row in body['sessions']] == ['codex-s2', 'codex-s1']
+    first = body['sessions'][0]
+    assert first['session_title'] == 'Other Codex session'
+    assert first['project_name'] == 'codex-demo'
+    assert first['message_count'] == 1
+    assert first['replay_url'] == '/api/sessions/codex-s2/replay'
+    second = body['sessions'][1]
+    assert second['message_count'] == 4
+    assert second['role_counts'] == {
+        'agent': 1,
+        'assistant': 1,
+        'tool': 1,
+        'user': 1,
+    }
+
+
+def test_codex_timeline_summary_returns_recent_codex_events(api_client):
+    r = api_client.get('/api/timeline/summary')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total'] == 5
+    assert body['sessions'] == 2
+    assert body['session_summaries'] == [
+        {
+            'session_id': 'codex-s2',
+            'session_title': 'Other Codex session',
+            'project_name': 'codex-demo',
+            'event_count': 1,
+            'last_activity_at': '2026-04-16T11:00:00Z',
+        },
+        {
+            'session_id': 'codex-s1',
+            'session_title': 'Codex search session',
+            'project_name': 'codex-demo',
+            'event_count': 4,
+            'last_activity_at': '2026-04-16T10:00:03Z',
+        },
+    ]
+    assert [item['kind'] for item in body['items']] == [
+        'message',
+        'agent_run',
+        'tool_call',
+        'message',
+        'message',
+    ]
+    assert body['items'][0]['session_id'] == 'codex-s2'
+    assert body['items'][0]['label'] == 'assistant'
+    assert body['items'][1]['session_id'] == 'codex-s1'
+    assert body['items'][1]['label'] == 'planner'
+    assert body['items'][2]['label'] == 'rg'
+
+
+def test_codex_usage_summary_returns_session_message_and_role_counts(api_client):
+    r = api_client.get('/api/usage/summary')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['sessions'] == 2
+    assert body['messages'] == 5
+    assert body['projects'] == 1
+    assert body['latest_activity_at'] == '2026-04-16T11:00:00Z'
+    assert body['by_role'] == {
+        'agent': 1,
+        'assistant': 2,
+        'tool': 1,
+        'user': 1,
+    }
+    assert body['top_sessions'] == [
+        {
+            'session_id': 'codex-s1',
+            'session_title': 'Codex search session',
+            'project_name': 'codex-demo',
+            'message_count': 4,
+            'last_activity_at': '2026-04-16T10:00:03Z',
+        },
+        {
+            'session_id': 'codex-s2',
+            'session_title': 'Other Codex session',
+            'project_name': 'codex-demo',
+            'message_count': 1,
+            'last_activity_at': '2026-04-16T11:00:00Z',
+        },
+    ]
+
+
+def test_codex_agents_summary_returns_agent_status_totals(api_client):
+    r = api_client.get('/api/agents/summary')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total_runs'] == 1
+    assert body['active_agents'] == 1
+    assert body['statuses'] == [{'status': 'completed', 'count': 1}]
+    assert body['agents'][0]['agent_name'] == 'planner'
+    assert body['agents'][0]['status'] == 'completed'
+    assert body['agents'][0]['session_id'] == 'codex-s1'
+    assert body['by_agent'] == [{'agent_name': 'planner', 'count': 1, 'last_status': 'completed'}]
 
 
 # ─── F7 / F8 / F9 — subagent aggregations ──────────────────────────────

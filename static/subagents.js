@@ -3,17 +3,152 @@
 // success matrix). Loaded as a regular script after app.js.
 //
 // Dependencies from app.js: safeFetch, esc, fmtN, fmt$, stopReasonBadge.
+let subagentSurfaceMode = _prefs.subagentSurfaceMode || 'auto';
+
+function _ensureSubagentModeControls(hasCodexData) {
+  const view = document.getElementById('view-subagents');
+  if (!view) return;
+  let wrap = document.getElementById('subagentSurfaceMode');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'subagentSurfaceMode';
+    wrap.className = 'mb-3 flex items-center gap-1.5';
+    wrap.innerHTML = `
+      <button data-mode="auto" class="px-2.5 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Auto</button>
+      <button data-mode="codex" class="px-2.5 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Codex Agents</button>
+      <button data-mode="legacy" class="px-2.5 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Claude Subagents</button>
+    `;
+    wrap.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        subagentSurfaceMode = btn.dataset.mode || 'auto';
+        savePrefs({ subagentSurfaceMode });
+        loadSubagentHeatmap();
+        loadSubagentDetails();
+        loadSubagentSuccessMatrix();
+      });
+    });
+    view.prepend(wrap);
+  }
+  wrap.querySelectorAll('button').forEach((btn) => {
+    const active = btn.dataset.mode === subagentSurfaceMode;
+    btn.classList.toggle('bg-accent/15', active);
+    btn.classList.toggle('text-accent', active);
+    btn.classList.toggle('text-white/45', !active);
+    btn.disabled = !hasCodexData && btn.dataset.mode === 'codex';
+  });
+}
+
+function _currentSubagentMode(codexAgents) {
+  const hasCodexData = (codexAgents?.total_runs || 0) > 0;
+  _ensureSubagentModeControls(hasCodexData);
+  if (subagentSurfaceMode === 'auto') return hasCodexData ? 'codex' : 'legacy';
+  if (subagentSurfaceMode === 'codex' && !hasCodexData) return 'legacy';
+  return subagentSurfaceMode;
+}
+
+function renderCodexAgentSurface(codexAgents) {
+  const byType = document.getElementById('subagentByType');
+  const byStop = document.getElementById('subagentByStopReason');
+  const topCost = document.getElementById('subagentTopCost');
+  const topDuration = document.getElementById('subagentTopDuration');
+  const topParents = document.getElementById('subagentTopParents');
+  if (byType) {
+    byType.innerHTML = `
+      <div class="text-[10px] min-w-full">
+        ${(codexAgents.by_agent || []).map((row) => `
+          <div class="flex items-center justify-between py-1.5 border-b border-white/[0.03] last:border-b-0">
+            <span class="text-white/65 font-semibold">${esc(row.agent_name || 'agent')}</span>
+            <span class="text-white/45">${fmtN(row.count || 0)} runs · ${esc(row.last_status || '')}</span>
+          </div>
+        `).join('')}
+      </div>`;
+  }
+  if (byStop) {
+    byStop.innerHTML = (codexAgents.statuses || []).map((row) => `
+      <div class="flex items-center justify-between py-1.5 text-[11px] border-b border-white/[0.03] last:border-b-0">
+        <span class="text-white/55">${esc(row.status || 'unknown')}</span>
+        <span class="tabular-nums text-white/75 font-semibold">${fmtN(row.count || 0)}</span>
+      </div>
+    `).join('');
+  }
+  if (topCost) {
+    topCost.innerHTML = (codexAgents.agents || []).slice(0, 10).map((row, idx) => `
+      <div class="flex items-center justify-between gap-3 py-1.5 text-[11px] border-b border-white/[0.03] last:border-b-0">
+        <span class="text-white/25 font-bold">#${idx + 1}</span>
+        <span class="flex-1 min-w-0 truncate text-white/65">${esc(row.agent_name || 'agent')}</span>
+        <span class="text-white/35">${esc(row.status || '')}</span>
+      </div>
+    `).join('');
+  }
+  if (topDuration) {
+    topDuration.innerHTML = (codexAgents.agents || []).slice(0, 10).map((row) => `
+      <div class="py-1.5 text-[11px] border-b border-white/[0.03] last:border-b-0">
+        <div class="text-white/65 font-semibold">${esc(row.agent_name || 'agent')}</div>
+        <div class="text-white/35 mt-1">${esc(row.session_id || '')} · ${esc(row.timestamp || '')}</div>
+      </div>
+    `).join('');
+  }
+  if (topParents) {
+    topParents.innerHTML = '<div class="text-[11px] text-white/35">Codex agent runs do not expose parent-subagent trees in this view.</div>';
+  }
+}
 
 // ─── Subagent detail panels (6 remaining sections) ────────────────────
 async function loadSubagentDetails() {
   try {
-    const d = await safeFetch('/api/subagents/stats');
+    const [d, codexAgents] = await Promise.all([
+      safeFetch('/api/subagents/stats'),
+      safeFetch('/api/agents/summary'),
+    ]);
+    if (_currentSubagentMode(codexAgents) === 'codex') {
+      renderCodexAgentSurface(codexAgents);
+      return;
+    }
     _renderByType(d);
     _renderByStopReason(d);
     _renderTopList('subagentTopCost', d.top_by_cost || [], 'cost');
     _renderTopList('subagentTopDuration', d.top_by_duration || [], 'duration');
     _renderTopParents(d.parents_with_most_subs || []);
+    _renderCodexAgentFallback(d, codexAgents);
   } catch (e) { reportError('loadSubagentDetails', e); }
+}
+
+function _renderCodexAgentFallback(subagentStats, codexAgents) {
+  const hasClaudeData = (subagentStats?.totals?.count || 0) > 0;
+  const hasCodexData = (codexAgents?.total_runs || 0) > 0;
+  if (hasClaudeData || !hasCodexData) return;
+
+  const byType = document.getElementById('subagentByType');
+  const byStop = document.getElementById('subagentByStopReason');
+  const topCost = document.getElementById('subagentTopCost');
+  const topDuration = document.getElementById('subagentTopDuration');
+
+  if (byType) {
+    byType.innerHTML = `
+      <div class="text-[11px] text-white/60 leading-relaxed">
+        Codex agent runs ${fmtN(codexAgents.total_runs || 0)}건 · 활성 이름 ${fmtN(codexAgents.active_agents || 0)}개
+      </div>`;
+  }
+  if (byStop) {
+    byStop.innerHTML = (codexAgents.statuses || []).map((row) => `
+      <div class="flex items-center justify-between py-1.5 text-[11px] border-b border-white/[0.03] last:border-b-0">
+        <span class="text-white/55">${esc(row.status || 'unknown')}</span>
+        <span class="tabular-nums text-white/75 font-semibold">${fmtN(row.count || 0)}</span>
+      </div>
+    `).join('');
+  }
+  if (topCost) {
+    topCost.innerHTML = (codexAgents.agents || []).slice(0, 5).map((row, idx) => `
+      <div class="flex items-center justify-between gap-3 py-1.5 text-[11px] border-b border-white/[0.03] last:border-b-0">
+        <span class="text-white/25 font-bold">#${idx + 1}</span>
+        <span class="flex-1 min-w-0 truncate text-white/65">${esc(row.agent_name || 'agent')}</span>
+        <span class="text-white/35">${esc(row.status || '')}</span>
+      </div>
+    `).join('');
+  }
+  if (topDuration) {
+    topDuration.innerHTML = '<div class="text-[11px] text-white/35">Codex agent runs do not expose duration yet.</div>';
+  }
 }
 
 function _renderByType(d) {
@@ -131,6 +266,25 @@ async function loadSubagentSuccessMatrix() {
   const wrap = document.getElementById('subagentSuccessMatrix');
   if (!wrap) return;
   try {
+    const codexAgents = await safeFetch('/api/agents/summary');
+    if (_currentSubagentMode(codexAgents) === 'codex') {
+      const matrix = {};
+      (codexAgents.agents || []).forEach((row) => {
+        const key = `${row.agent_name}|${row.status}`;
+        matrix[key] = (matrix[key] || 0) + 1;
+      });
+      wrap.innerHTML = `
+        <div class="grid gap-2">
+          ${Object.entries(matrix).map(([key, count]) => {
+            const [agent, status] = key.split('|');
+            return `<div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-2 text-[11px] flex items-center justify-between gap-3">
+              <span class="text-white/65">${esc(agent)}</span>
+              <span class="text-white/35">${esc(status)} · ${fmtN(count)}</span>
+            </div>`;
+          }).join('')}
+        </div>`;
+      return;
+    }
     const d = await safeFetch('/api/subagents/stats');
     const rows = d.by_type_and_stop_reason || [];
     if (!rows.length) {
@@ -199,6 +353,22 @@ async function loadSubagentHeatmap() {
   const wrap = document.getElementById('subagentHeatmap');
   if (!wrap) return;
   try {
+    const codexAgents = await safeFetch('/api/agents/summary');
+    if (_currentSubagentMode(codexAgents) === 'codex') {
+      wrap.innerHTML = `
+        <div class="grid gap-2">
+          ${(codexAgents.agents || []).slice(0, 12).map((row) => `
+            <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-2">
+              <div class="text-[11px] font-semibold text-white/75">${esc(row.agent_name || 'agent')}</div>
+              <div class="text-[10px] text-white/35 mt-1">${esc(row.session_id || '')} · ${esc(row.timestamp || '')}</div>
+              <div class="text-[10px] text-white/35 mt-1">${esc(row.body_text || '')}</div>
+            </div>
+          `).join('')}
+        </div>`;
+      const totalEl = document.getElementById('subagentHeatmapTotal');
+      if (totalEl) totalEl.textContent = `${fmtN(codexAgents.total_runs || 0)} Codex agent runs`;
+      return;
+    }
     const d = await safeFetch('/api/subagents/heatmap');
     const projects = d.projects || [];
     const types = d.agent_types || [];

@@ -17,6 +17,7 @@ async function loadStats() {
     const d = await safeFetch('/api/stats');
     state.stats = d;
     renderStats(d);
+    loadCodexUsageSummary();
     markUpdated('stats');
     reportSuccess('loadStats');
   } catch (e) { reportError('loadStats', e); }
@@ -37,6 +38,71 @@ function renderStats(data) {
   set('statCacheSaved', `${fmtTok(a.cache_read_tokens || 0)} 읽기 · ${fmtTok(a.cache_creation_tokens || 0)} 생성`);
   set('hdrToday', `오늘: ${fmt$(t.cost_usd)}`);
   set('hdrTotal', `전체: ${fmt$(a.cost_usd)}`);
+}
+
+function ensureCodexUsagePanel() {
+  const view = document.getElementById('view-overview');
+  if (!view) return null;
+  let panel = document.getElementById('codexUsagePanel');
+  if (panel) return panel;
+  panel = document.createElement('div');
+  panel.id = 'codexUsagePanel';
+  panel.className = 'bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in mt-3';
+  panel.innerHTML = `
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <div class="text-xs font-bold text-white/40">CODEX 사용량</div>
+      <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+    </div>`;
+  view.appendChild(panel);
+  return panel;
+}
+
+async function loadCodexUsageSummary() {
+  try {
+    const summary = await safeFetch('/api/usage/summary');
+    const byRole = summary.by_role || {};
+    const codexLine = `Codex ${fmtN(summary.sessions || 0)}세션 · ${fmtN(summary.messages || 0)}메시지`;
+    set('statAllMessages', `${fmtN((state.stats?.all_time?.messages) || 0)} 메시지 · ${codexLine}`);
+    set('hdrTotal', `전체: ${fmt$(state.stats?.all_time?.cost_usd || 0)} · ${codexLine}`);
+    const dayDetail = document.getElementById('pdDayDetail');
+    if (dayDetail) {
+      dayDetail.title = `user ${fmtN(byRole.user || 0)} · assistant ${fmtN(byRole.assistant || 0)} · tool ${fmtN(byRole.tool || 0)} · agent ${fmtN(byRole.agent || 0)}`;
+    }
+    const panel = ensureCodexUsagePanel();
+    if (panel) {
+      panel.firstElementChild.innerHTML = `
+        <div class="text-xs font-bold text-white/40">CODEX 사용량</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+          <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-3">
+            <div class="text-[10px] uppercase tracking-widest text-white/35">세션</div>
+            <div class="mt-2 text-xl font-bold text-white/85 tabular-nums">${fmtN(summary.sessions || 0)}</div>
+            <div class="text-[10px] text-white/35 mt-1">${fmtN(summary.messages || 0)} messages</div>
+          </div>
+          <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-3">
+            <div class="text-[10px] uppercase tracking-widest text-white/35">역할 분포</div>
+            <div class="mt-2 text-[11px] text-white/60 leading-relaxed">user ${fmtN(byRole.user || 0)} · assistant ${fmtN(byRole.assistant || 0)} · tool ${fmtN(byRole.tool || 0)} · agent ${fmtN(byRole.agent || 0)}</div>
+          </div>
+          <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-3">
+            <div class="text-[10px] uppercase tracking-widest text-white/35">최근 활동</div>
+            <div class="mt-2 text-[11px] text-white/60">${esc(summary.latest_activity_at || '—')}</div>
+          </div>
+        </div>
+        <div class="mt-3 grid gap-2">
+          ${(summary.top_sessions || []).slice(0, 4).map((row) => `
+            <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-2 flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-[11px] font-semibold text-white/75 truncate">${esc(row.session_title || row.session_id)}</div>
+                <div class="text-[10px] text-white/35 mt-1">${esc(row.project_name || '—')} · ${fmtN(row.message_count || 0)} messages</div>
+              </div>
+              <button class="shrink-0 px-3 py-1 rounded-full bg-purple-500/15 text-purple-200 border border-purple-500/25 text-[10px] font-bold"
+                      data-action="openSessionReplay" data-arg0="${esc(row.session_id)}" data-arg1="${esc(row.session_title || row.session_id)}">Replay</button>
+            </div>
+          `).join('')}
+        </div>`;
+    }
+  } catch (e) {
+    reportError('loadCodexUsageSummary', e);
+  }
 }
 
 // ─── Period usage (day / week / month) ────────────────────────────────

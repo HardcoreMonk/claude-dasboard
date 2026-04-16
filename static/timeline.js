@@ -21,6 +21,123 @@ let _tlLastData = null;
 let _tlCollapsed = new Set(_prefs.tlCollapsed || []);
 let _tlOutlierIds = new Set();   // session ids flagged as $/hr outliers
 let _tlOutlierProjs = new Set(); // project names flagged as outliers
+let codexTimelineMode = _prefs.codexTimelineMode || 'auto';
+
+function _ensureTimelineModeControls(hasCodexData) {
+  const controls = document.getElementById('timelineControls');
+  if (!controls) return;
+  let wrap = document.getElementById('codexTimelineMode');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'codexTimelineMode';
+    wrap.className = 'flex items-center gap-1.5 ml-2';
+    wrap.innerHTML = `
+      <button data-mode="auto" class="px-2 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Auto</button>
+      <button data-mode="codex" class="px-2 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Codex</button>
+      <button data-mode="legacy" class="px-2 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Claude</button>
+    `;
+    wrap.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        codexTimelineMode = btn.dataset.mode || 'auto';
+        savePrefs({ codexTimelineMode });
+        loadTimeline();
+      });
+    });
+    controls.appendChild(wrap);
+  }
+  wrap.querySelectorAll('button').forEach((btn) => {
+    const active = btn.dataset.mode === codexTimelineMode;
+    btn.classList.toggle('bg-accent/15', active);
+    btn.classList.toggle('text-accent', active);
+    btn.classList.toggle('text-white/45', !active);
+    btn.disabled = !hasCodexData && btn.dataset.mode === 'codex';
+  });
+}
+
+function renderCodexTimelineMode(summary) {
+  const wrap = document.getElementById('timelineChartWrap');
+  const legend = document.getElementById('timelineLegend');
+  destroyChart('timeline');
+  if (!wrap || !legend) return;
+  wrap.style.height = 'auto';
+  const sessions = summary.session_summaries || [];
+  const items = summary.items || [];
+  wrap.innerHTML = `
+    <div class="space-y-3">
+      <div class="rounded-xl border border-purple-500/20 bg-purple-500/[0.05] px-4 py-3">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-[10px] uppercase tracking-widest text-purple-200/70 font-bold">Codex Timeline Mode</div>
+            <div class="text-[11px] text-white/45 mt-1">${fmtN(summary.sessions || 0)}세션 · ${fmtN(summary.total || 0)}이벤트</div>
+          </div>
+        </div>
+      </div>
+      <div class="grid gap-3 lg:grid-cols-[280px_1fr]">
+        <div class="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+          <div class="text-[10px] uppercase tracking-widest text-white/35 font-bold">세션</div>
+          <div class="mt-3 space-y-2">
+            ${sessions.map((row) => `
+              <button class="w-full text-left rounded-xl border border-white/[0.05] bg-black/20 px-3 py-2 spring hover:border-purple-500/25"
+                      data-action="openSessionReplay" data-arg0="${esc(row.session_id)}" data-arg1="${esc(row.session_title || row.session_id)}">
+                <div class="text-[11px] font-semibold text-white/75 truncate">${esc(row.session_title || row.session_id)}</div>
+                <div class="text-[10px] text-white/35 mt-1">${esc(row.project_name || '—')} · ${fmtN(row.event_count || 0)} events</div>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+        <div class="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+          <div class="text-[10px] uppercase tracking-widest text-white/35 font-bold">이벤트 스트림</div>
+          <div class="mt-3 space-y-2">
+            ${items.map((item) => `
+              <article class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-3">
+                <div class="flex items-center justify-between gap-3 text-[10px] text-white/35">
+                  <span class="font-bold uppercase tracking-widest">${esc(item.kind || 'event')}</span>
+                  <span>${esc(item.timestamp || '')}</span>
+                </div>
+                <div class="mt-1 text-sm text-white/80 font-semibold">${esc(item.label || item.session_title || item.session_id || 'event')}</div>
+                <div class="mt-1 text-[11px] text-white/45">${esc(item.project_name || '')} · ${esc(item.session_title || item.session_id || '')}</div>
+                <p class="mt-2 text-[12px] leading-relaxed text-white/65 whitespace-pre-wrap">${esc(item.body_text || '')}</p>
+              </article>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  legend.innerHTML = '<span class="text-purple-200/70">Codex mode active</span>';
+}
+
+async function _loadCodexTimelineSummary() {
+  const legend = document.getElementById('timelineLegend');
+  if (!legend) return;
+  try {
+    const summary = await safeFetch('/api/timeline/summary?limit=12');
+    const items = summary.items || [];
+    if (!items.length) return;
+    const strip = document.createElement('div');
+    strip.className = 'mb-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2';
+    strip.dataset.codexTimelineSummary = 'true';
+    strip.innerHTML = `
+      <div class="flex items-center justify-between gap-3 text-[10px] uppercase tracking-widest text-white/35">
+        <span>Codex Timeline</span>
+        <span>${fmtN(summary.sessions || 0)} sessions · ${fmtN(summary.total || 0)} events</span>
+      </div>
+      <div class="mt-2 grid gap-2">
+        ${items.slice(0, 4).map((item) => `
+          <div class="flex items-start justify-between gap-3 text-[11px]">
+            <div class="min-w-0">
+              <div class="font-semibold text-white/70">${esc(item.label || item.kind || 'event')}</div>
+              <div class="text-white/40 truncate">${esc(item.body_text || item.session_title || item.session_id || '')}</div>
+            </div>
+            <div class="shrink-0 text-white/25">${esc(item.kind || '')}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    legend.prepend(strip);
+  } catch (e) {
+    reportError('loadCodexTimelineSummary', e);
+  }
+}
 
 function _daysAgo(base, n) {
   const d = new Date(base);
@@ -93,6 +210,26 @@ function _modelFamily(model) {
 
 // ─── Main loader ─────────────────────────────────────────────────────────
 async function loadTimeline() {
+  const summary = await safeFetch('/api/timeline/summary?limit=40').catch((e) => {
+    reportError('loadCodexTimelineSummary', e);
+    return { items: [], total: 0, sessions: 0, session_summaries: [] };
+  });
+  const hasCodexData = (summary.items || []).length > 0;
+  _ensureTimelineModeControls(hasCodexData);
+  const resolvedMode = codexTimelineMode === 'auto'
+    ? (hasCodexData ? 'codex' : 'legacy')
+    : codexTimelineMode;
+  if (resolvedMode === 'codex' && hasCodexData) {
+    _tlLastData = { codex: summary };
+    renderCodexTimelineMode(summary);
+    reportSuccess('loadTimeline');
+    return;
+  }
+  const legend = document.getElementById('timelineLegend');
+  if (legend) {
+    legend.querySelectorAll('[data-codex-timeline-summary]').forEach((el) => el.remove());
+  }
+  await _loadCodexTimelineSummary();
   const { dateFrom, dateTo } = _tlDates();
   const showSubs = document.getElementById('tlShowSubagents')?.checked || false;
   const nodeVal = document.getElementById('tlNodeFilter')?.value || '';

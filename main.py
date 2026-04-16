@@ -39,6 +39,8 @@ from database import (
     read_db, write_db, init_db, check_integrity, DB_PATH, _write_lock,
     close_thread_connections, wal_checkpoint, search_codex_messages,
     get_codex_message_context, get_codex_session_replay,
+    get_codex_timeline_summary, get_codex_usage_summary, get_codex_agents_summary,
+    list_codex_sessions,
 )
 from parser import process_record
 from watcher import ClaudeFileWatcher, WatcherMetrics
@@ -919,6 +921,26 @@ def api_session_replay(session_id: str):
     if replay is None:
         return JSONResponse({'error': 'Not found'}, status_code=404)
     return replay
+
+
+@app.get("/api/codex/sessions")
+def api_codex_sessions(limit: int = Query(50, ge=1, le=200)):
+    return list_codex_sessions(limit=limit)
+
+
+@app.get("/api/timeline/summary")
+def api_timeline_summary(limit: int = Query(200, ge=1, le=500)):
+    return get_codex_timeline_summary(limit=limit)
+
+
+@app.get("/api/usage/summary")
+def api_usage_summary():
+    return get_codex_usage_summary()
+
+
+@app.get("/api/agents/summary")
+def api_agents_summary(limit: int = Query(20, ge=1, le=100)):
+    return get_codex_agents_summary(limit=limit)
 
 
 # ─── Usage time-series (timezone-aware) ───────────────────────────────────────

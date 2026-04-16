@@ -271,6 +271,28 @@ def test_static_modules_load_with_correct_globals(e2e_client):
         assert sym in all_js, f'missing symbol: {sym}'
 
 
+def test_secondary_frontend_modules_reference_codex_summary_endpoints():
+    timeline_js = Path('static/timeline.js').read_text()
+    overview_js = Path('static/overview.js').read_text()
+    plan_js = Path('static/plan.js').read_text()
+    subagents_js = Path('static/subagents.js').read_text()
+    sessions_js = Path('static/sessions.js').read_text()
+
+    assert '/api/timeline/summary' in timeline_js
+    assert 'renderCodexTimelineMode' in timeline_js
+    assert 'codexTimelineMode' in timeline_js
+    assert '/api/usage/summary' in overview_js
+    assert 'codexUsagePanel' in overview_js
+    assert '/api/usage/summary' in plan_js
+    assert 'codexPlanPanel' in plan_js
+    assert '/api/agents/summary' in subagents_js
+    assert 'subagentSurfaceMode' in subagents_js
+    assert 'renderCodexAgentSurface' in subagents_js
+    assert '/api/codex/sessions' in sessions_js
+    assert 'codexSessionsPanel' in sessions_js
+    assert '/api/sessions/' in sessions_js and '/replay' in sessions_js
+
+
 def test_overview_api_contract_matches_frontend_expectations(e2e_client):
     """Every API call the overview view makes on initial load must return
     the exact fields the JS rendering code reads. This is stricter than
@@ -319,6 +341,55 @@ def test_overview_api_contract_matches_frontend_expectations(e2e_client):
             assert field in p, f'/api/projects/top[0].{field} missing'
         # last_message is optional (None when no assistant messages) but key must exist
         assert 'last_message' in p
+
+
+def test_codex_summary_api_contract_matches_secondary_frontend_expectations(e2e_client):
+    sessions = e2e_client.get('/api/codex/sessions')
+    assert sessions.status_code == 200
+    sessions_body = sessions.json()
+    assert 'sessions' in sessions_body and 'total' in sessions_body
+    if sessions_body['sessions']:
+        row = sessions_body['sessions'][0]
+        for field in ['session_id', 'session_title', 'project_name', 'message_count', 'last_activity_at', 'replay_url', 'role_counts']:
+            assert field in row, f'/api/codex/sessions.sessions[0].{field} missing'
+
+    timeline = e2e_client.get('/api/timeline/summary')
+    assert timeline.status_code == 200
+    timeline_body = timeline.json()
+    assert 'items' in timeline_body and 'total' in timeline_body and 'sessions' in timeline_body
+    assert 'session_summaries' in timeline_body
+    if timeline_body['items']:
+        item = timeline_body['items'][0]
+        for field in ['session_id', 'timestamp', 'kind', 'label', 'body_text']:
+            assert field in item, f'/api/timeline/summary.items[0].{field} missing'
+    if timeline_body['session_summaries']:
+        row = timeline_body['session_summaries'][0]
+        for field in ['session_id', 'session_title', 'project_name', 'event_count', 'last_activity_at']:
+            assert field in row, f'/api/timeline/summary.session_summaries[0].{field} missing'
+
+    usage = e2e_client.get('/api/usage/summary')
+    assert usage.status_code == 200
+    usage_body = usage.json()
+    for field in ['sessions', 'messages', 'projects', 'latest_activity_at', 'by_role', 'top_sessions']:
+        assert field in usage_body, f'/api/usage/summary.{field} missing'
+    if usage_body['top_sessions']:
+        row = usage_body['top_sessions'][0]
+        for field in ['session_id', 'session_title', 'project_name', 'message_count', 'last_activity_at']:
+            assert field in row, f'/api/usage/summary.top_sessions[0].{field} missing'
+
+    agents = e2e_client.get('/api/agents/summary')
+    assert agents.status_code == 200
+    agents_body = agents.json()
+    for field in ['total_runs', 'active_agents', 'statuses', 'agents', 'by_agent']:
+        assert field in agents_body, f'/api/agents/summary.{field} missing'
+    if agents_body['agents']:
+        agent = agents_body['agents'][0]
+        for field in ['session_id', 'agent_name', 'status', 'timestamp']:
+            assert field in agent, f'/api/agents/summary.agents[0].{field} missing'
+    if agents_body['by_agent']:
+        row = agents_body['by_agent'][0]
+        for field in ['agent_name', 'count', 'last_status']:
+            assert field in row, f'/api/agents/summary.by_agent[0].{field} missing'
 
 
 def test_sessions_view_first_page_renders(e2e_client):

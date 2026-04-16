@@ -20,9 +20,72 @@ async function loadPlanUsage() {
     planData = await resp.json();
     renderPlanBlock('Daily', planData.daily);
     renderPlanBlock('Weekly', planData.weekly);
+    loadCodexPlanSummary();
     if (planTimer) clearInterval(planTimer);
     planTimer = setInterval(tickPlanCountdown, 1000);
   } catch (e) { reportError('loadPlanUsage', e); }
+}
+
+function ensureCodexPlanPanel() {
+  const view = document.getElementById('view-cost');
+  if (!view) return null;
+  let panel = document.getElementById('codexPlanPanel');
+  if (panel) return panel;
+  panel = document.createElement('div');
+  panel.id = 'codexPlanPanel';
+  panel.className = 'bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mb-4 anim-in';
+  panel.innerHTML = `
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
+      <div class="text-[10px] font-bold text-white/35 uppercase tracking-widest">Codex Session Usage</div>
+      <div class="text-center text-white/15 text-xs py-6 dots">로딩 중</div>
+    </div>`;
+  const chartsRow = view.querySelector('.grid.grid-cols-1.lg\\:grid-cols-3');
+  if (chartsRow) view.insertBefore(panel, chartsRow);
+  else view.appendChild(panel);
+  return panel;
+}
+
+async function loadCodexPlanSummary() {
+  try {
+    const summary = await safeFetch('/api/usage/summary');
+    const dailyMsgs = document.getElementById('planDailyMsgs');
+    const weeklyMsgs = document.getElementById('planWeeklyMsgs');
+    const hint = `Codex ${fmtN(summary.sessions || 0)}세션 · ${fmtN(summary.messages || 0)}메시지`;
+    if (dailyMsgs) dailyMsgs.title = hint;
+    if (weeklyMsgs) {
+      const base = weeklyMsgs.dataset.baseText || weeklyMsgs.textContent || '';
+      weeklyMsgs.dataset.baseText = base;
+      weeklyMsgs.textContent = `${base} · ${hint}`;
+    }
+    const panel = ensureCodexPlanPanel();
+    if (panel) {
+      panel.firstElementChild.innerHTML = `
+        <div class="text-[10px] font-bold text-white/35 uppercase tracking-widest">Codex Session Usage</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+          <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-3">
+            <div class="text-[11px] text-white/60">총 세션 ${fmtN(summary.sessions || 0)} · 총 메시지 ${fmtN(summary.messages || 0)}</div>
+            <div class="text-[10px] text-white/35 mt-1">최근 활동 ${esc(summary.latest_activity_at || '—')}</div>
+          </div>
+          <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-3 text-[10px] text-white/50">
+            user ${fmtN(summary.by_role?.user || 0)} · assistant ${fmtN(summary.by_role?.assistant || 0)} · tool ${fmtN(summary.by_role?.tool || 0)} · agent ${fmtN(summary.by_role?.agent || 0)}
+          </div>
+        </div>
+        <div class="mt-3 grid gap-2">
+          ${(summary.top_sessions || []).slice(0, 3).map((row) => `
+            <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-2 flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-[11px] font-semibold text-white/75 truncate">${esc(row.session_title || row.session_id)}</div>
+                <div class="text-[10px] text-white/35 mt-1">${fmtN(row.message_count || 0)} messages · ${esc(row.last_activity_at || '')}</div>
+              </div>
+              <button class="shrink-0 px-3 py-1 rounded-full bg-purple-500/15 text-purple-200 border border-purple-500/25 text-[10px] font-bold"
+                      data-action="openSessionReplay" data-arg0="${esc(row.session_id)}" data-arg1="${esc(row.session_title || row.session_id)}">Replay</button>
+            </div>
+          `).join('')}
+        </div>`;
+    }
+  } catch (e) {
+    reportError('loadCodexPlanSummary', e);
+  }
 }
 
 // Small write helper that also clears the .skeleton loader class once real

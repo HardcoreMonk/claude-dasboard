@@ -232,10 +232,67 @@ function bulkDelete() {
 // ─── Sessions ───────────────────────────────────────────────────────────
 let searchTimer=null;
 function searchSessions(q){clearTimeout(searchTimer);setSearchQuery(q);searchTimer=setTimeout(()=>{setPage(1);state.bulkSelected.clear();loadSessions();},300);}
+
+function _ensureCodexSessionsPanel() {
+  const view = document.getElementById('view-sessions');
+  if (!view) return null;
+  let panel = document.getElementById('codexSessionsPanel');
+  if (panel) return panel;
+  const host = view.querySelector('.bg-white\\/\\[0\\.02\\]') || view.firstElementChild;
+  if (!host) return null;
+  panel = document.createElement('div');
+  panel.id = 'codexSessionsPanel';
+  panel.className = 'mx-5 mt-4 mb-2 rounded-2xl border border-purple-500/20 bg-purple-500/[0.05] px-4 py-4';
+  panel.innerHTML = '<div class="text-center text-white/20 text-xs py-6 dots">Codex 세션 로딩 중</div>';
+  const bulkBar = document.getElementById('bulkActionBar');
+  if (bulkBar) host.insertBefore(panel, bulkBar);
+  else host.insertBefore(panel, host.querySelector('.overflow-x-auto') || host.firstChild);
+  return panel;
+}
+
+async function loadCodexSessionsPanel() {
+  const panel = _ensureCodexSessionsPanel();
+  if (!panel) return;
+  try {
+    const data = await safeFetch('/api/codex/sessions?limit=8');
+    const sessions = data.sessions || [];
+    if (!sessions.length) {
+      panel.innerHTML = '<div class="text-[11px] text-white/35">Codex 세션이 없습니다.</div>';
+      return;
+    }
+    panel.innerHTML = `
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <div class="text-[10px] uppercase tracking-widest text-purple-200/70 font-bold">Codex Replay</div>
+          <div class="text-[11px] text-white/45 mt-1">${fmtN(data.total || sessions.length)}개 세션에서 바로 리플레이 실행</div>
+        </div>
+      </div>
+      <div class="mt-3 grid gap-2">
+        ${sessions.map((session) => `
+          <div class="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-3 flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-white/80 truncate">${esc(session.session_title || session.session_id)}</div>
+              <div class="text-[10px] text-white/35 mt-1">${esc(session.project_name || '—')} · ${fmtN(session.message_count || 0)} msg · ${esc(session.last_activity_at || '')}</div>
+              <div class="text-[10px] text-white/25 mt-1">user ${fmtN(session.role_counts?.user || 0)} · assistant ${fmtN(session.role_counts?.assistant || 0)} · tool ${fmtN(session.role_counts?.tool || 0)} · agent ${fmtN(session.role_counts?.agent || 0)}</div>
+            </div>
+            <button class="shrink-0 px-3 py-1.5 rounded-full bg-purple-500/15 text-purple-200 border border-purple-500/25 text-[10px] font-bold spring hover:scale-[1.02]"
+                    data-action="openSessionReplay" data-arg0="${esc(session.session_id)}" data-arg1="${esc(session.session_title || session.session_id)}">
+              Replay
+            </button>
+          </div>
+        `).join('')}
+      </div>`;
+  } catch (e) {
+    panel.innerHTML = '<div class="text-[11px] text-red-300/60">Codex 세션 패널 로딩 실패</div>';
+    reportError('loadCodexSessionsPanel', e);
+  }
+}
+
 async function loadSessions(page=getPage()){
   const tb=document.getElementById('sessionsBody');
   tb.innerHTML='<tr><td colspan="10" class="text-center py-8 text-white/15 text-xs dots">로딩 중</td></tr>';
   try{
+    loadCodexSessionsPanel();
     setPage(page);
     const ss=getSortState('sessions');
     const p=new URLSearchParams({page,per_page:25,sort:ss.key,order:ss.order});
@@ -439,6 +496,15 @@ function renderSessions(data){
       e.stopPropagation();
       deleteSession(s.id, s.project_name);
     });
+    const replayBtn = document.createElement('button');
+    replayBtn.className = 'text-white/20 hover:text-purple-300 spring text-sm mr-1';
+    replayBtn.title = '리플레이';
+    replayBtn.textContent = '↺';
+    replayBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openSessionReplay(s.id, s.project_name || s.id);
+    });
+    actionTd.appendChild(replayBtn);
     actionTd.appendChild(pinBtn);
     actionTd.appendChild(tagBtn);
     actionTd.appendChild(delBtn);
@@ -454,6 +520,83 @@ function renderPagination(page,pages,total){
   for(let i=1;i<=pages;i++){if(pages>7&&i>2&&i<pages-1&&Math.abs(i-page)>1){if(i===3||i===pages-2){const s=document.createElement('span');s.textContent='…';s.className='text-white/10 text-[10px] px-1';el.appendChild(s);}continue;}el.appendChild(mk(i,i,false));}
   el.appendChild(mk('›',page+1,page>=pages));
   const info=document.createElement('span');info.className='text-[10px] text-white/15 ml-auto';info.textContent=`${fmtN(total)} 세션`;el.appendChild(info);
+}
+
+
+function _closeReplayModal() {
+  document.getElementById('sessionReplayModal')?.remove();
+}
+
+function renderSessionReplay(payload) {
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+  if (!events.length) {
+    return '<div class="text-center text-white/25 text-xs py-10">리플레이 이벤트 없음</div>';
+  }
+  return events.map((event) => {
+    if (event.kind === 'message') {
+      return `<article class="rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+        <div class="flex items-center justify-between gap-3 text-[10px] text-white/35 uppercase tracking-widest">
+          <span>${esc(event.role || 'message')}</span>
+          <span>${esc(event.timestamp || '')}</span>
+        </div>
+        <p class="mt-2 text-sm leading-relaxed text-white/75 whitespace-pre-wrap">${esc(event.body_text || '')}</p>
+      </article>`;
+    }
+    if (event.kind === 'tool_call') {
+      return `<article class="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.04] px-4 py-3">
+        <div class="text-[10px] font-bold uppercase tracking-widest text-cyan-300/75">tool</div>
+        <div class="mt-1 text-sm font-semibold text-cyan-200/90">${esc(event.tool_name || 'tool')}</div>
+        <p class="mt-1 text-[12px] leading-relaxed text-white/65 whitespace-pre-wrap">${esc(event.body_text || '')}</p>
+      </article>`;
+    }
+    return `<article class="rounded-xl border border-purple-500/20 bg-purple-500/[0.05] px-4 py-3">
+      <div class="text-[10px] font-bold uppercase tracking-widest text-purple-300/75">agent</div>
+      <div class="mt-1 text-sm font-semibold text-purple-200/90">${esc(event.agent_name || 'agent')}</div>
+      <p class="mt-1 text-[12px] leading-relaxed text-white/65 whitespace-pre-wrap">${esc(event.body_text || '')}</p>
+      <div class="mt-2 text-[10px] text-white/35">${esc(event.status || '')}</div>
+    </article>`;
+  }).join('');
+}
+
+async function openSessionReplay(sessionId, label) {
+  _closeReplayModal();
+  const modal = document.createElement('div');
+  modal.id = 'sessionReplayModal';
+  modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4';
+  modal.onclick = (e) => { if (e.target === modal) _closeReplayModal(); };
+  modal.innerHTML = `
+    <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[860px] max-w-[96vw] max-h-[88vh] overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in">
+      <div class="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between gap-4">
+        <div>
+          <div class="text-sm font-bold text-white/90">세션 리플레이</div>
+          <div class="text-[10px] text-white/35 mt-1">${esc(label || sessionId)}</div>
+        </div>
+        <button onclick="_closeReplayModal()" class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
+      </div>
+      <div id="sessionReplayPanel" class="p-5 space-y-3 max-h-[72vh] overflow-y-auto">
+        <div class="text-center text-white/25 text-xs py-10 dots">리플레이 로딩 중</div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  try {
+    const payload = await safeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/replay`);
+    const panel = document.getElementById('sessionReplayPanel');
+    if (!panel) return;
+    panel.innerHTML = `
+      <div class="pb-3 border-b border-white/[0.06]">
+        <div class="text-[10px] uppercase tracking-widest text-white/30">Session</div>
+        <div class="mt-1 text-sm font-semibold text-white/80">${esc(payload.session_title || payload.session_id || sessionId)}</div>
+      </div>
+      ${renderSessionReplay(payload)}
+    `;
+  } catch (e) {
+    const panel = document.getElementById('sessionReplayPanel');
+    if (panel) {
+      panel.innerHTML = '<div class="text-center text-white/25 text-xs py-10">리플레이를 불러오지 못했습니다</div>';
+    }
+    reportError('openSessionReplay', e);
+  }
 }
 
 
@@ -560,3 +703,6 @@ async function submitTagEdit() {
   }
 }
 
+window.openSessionReplay = openSessionReplay;
+window.renderSessionReplay = renderSessionReplay;
+window._closeReplayModal = _closeReplayModal;

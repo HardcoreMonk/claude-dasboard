@@ -1004,6 +1004,7 @@ def get_codex_session_replay(session_id: str) -> dict | None:
             'message_id': row['message_id'],
             'timestamp': row['timestamp'],
             'model': row['model'],
+            'payload': payload,
         }
         if row['role'] == 'tool':
             event.update({
@@ -1029,6 +1030,242 @@ def get_codex_session_replay(session_id: str) -> dict | None:
     payload = dict(session)
     payload['events'] = events
     return payload
+
+
+def list_codex_sessions(limit: int = 50) -> dict:
+    """Return recent Codex sessions suitable for replay launching."""
+    with read_db() as conn:
+        rows = conn.execute(
+            '''
+            SELECT s.id AS session_id,
+                   s.session_name AS session_title,
+                   p.project_name,
+                   s.message_count,
+                   s.user_message_count,
+                   s.updated_at AS last_activity_at
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            ORDER BY s.updated_at DESC, s.id DESC
+            LIMIT ?
+            ''',
+            (limit,),
+        ).fetchall()
+        total = conn.execute('SELECT COUNT(*) AS c FROM codex_sessions').fetchone()['c']
+        role_rows = conn.execute(
+            '''
+            SELECT session_id, role, COUNT(*) AS count
+            FROM codex_messages
+            GROUP BY session_id, role
+            '''
+        ).fetchall()
+
+    role_counts: dict[str, dict[str, int]] = {}
+    for row in role_rows:
+        role_counts.setdefault(row['session_id'], {})[row['role']] = int(row['count'] or 0)
+
+    sessions = []
+    for row in rows:
+        session = dict(row)
+        session['message_count'] = int(session['message_count'] or 0)
+        session['user_message_count'] = int(session['user_message_count'] or 0)
+        session['role_counts'] = role_counts.get(session['session_id'], {})
+        session['replay_url'] = f"/api/sessions/{session['session_id']}/replay"
+        sessions.append(session)
+
+    return {'sessions': sessions, 'total': int(total or 0)}
+
+
+def get_codex_timeline_summary(limit: int = 200) -> dict:
+    """Return recent Codex events in a compact timeline-friendly shape."""
+    with read_db() as conn:
+        rows = conn.execute(
+            '''
+            SELECT m.id AS message_id,
+                   m.session_id,
+                   m.role,
+                   m.content,
+                   m.content_preview,
+                   m.timestamp,
+                   s.session_name,
+                   p.project_name
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
+            ORDER BY m.timestamp DESC, m.id DESC
+            LIMIT ?
+            ''',
+            (limit,),
+        ).fetchall()
+        totals = conn.execute(
+            '''
+            SELECT COUNT(*) AS total,
+                   COUNT(DISTINCT session_id) AS sessions
+            FROM codex_messages
+            '''
+        ).fetchone()
+        session_rows = conn.execute(
+            '''
+            SELECT m.session_id,
+                   s.session_name AS session_title,
+                   p.project_name,
+                   COUNT(*) AS event_count,
+                   MAX(m.timestamp) AS last_activity_at
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
+            GROUP BY m.session_id, s.session_name, p.project_name
+            ORDER BY last_activity_at DESC, m.session_id DESC
+            '''
+        ).fetchall()
+
+    items: list[dict] = []
+    for row in rows:
+        payload = _decode_codex_payload(row['content'])
+        label = row['role']
+        kind = 'message'
+        if row['role'] == 'tool':
+            kind = 'tool_call'
+            label = payload.get('name', '') or 'tool'
+        elif row['role'] == 'agent':
+            kind = 'agent_run'
+            label = payload.get('agent_name', '') or 'agent'
+        items.append({
+            'message_id': row['message_id'],
+            'session_id': row['session_id'],
+            'session_title': row['session_name'],
+            'project_name': row['project_name'],
+            'timestamp': row['timestamp'],
+            'kind': kind,
+            'label': label,
+            'body_text': row['content_preview'] or '',
+        })
+
+    return {
+        'items': items,
+        'total': int(totals['total'] or 0),
+        'sessions': int(totals['sessions'] or 0),
+        'session_summaries': [
+            {
+                'session_id': row['session_id'],
+                'session_title': row['session_title'],
+                'project_name': row['project_name'],
+                'event_count': int(row['event_count'] or 0),
+                'last_activity_at': row['last_activity_at'],
+            }
+            for row in session_rows
+        ],
+    }
+
+
+def get_codex_usage_summary() -> dict:
+    """Return compact Codex usage totals for summary widgets."""
+    with read_db() as conn:
+        totals = conn.execute(
+            '''
+            SELECT COUNT(*) AS messages,
+                   COUNT(DISTINCT m.session_id) AS sessions,
+                   COUNT(DISTINCT s.project_path) AS projects,
+                   MAX(m.timestamp) AS latest_activity_at
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            '''
+        ).fetchone()
+        by_role = conn.execute(
+            '''
+            SELECT role, COUNT(*) AS count
+            FROM codex_messages
+            GROUP BY role
+            ORDER BY role
+            '''
+        ).fetchall()
+        top_sessions = conn.execute(
+            '''
+            SELECT s.id AS session_id,
+                   s.session_name AS session_title,
+                   p.project_name,
+                   s.message_count,
+                   s.updated_at AS last_activity_at
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            ORDER BY s.message_count DESC, s.updated_at DESC, s.id DESC
+            LIMIT 10
+            '''
+        ).fetchall()
+
+    return {
+        'sessions': int(totals['sessions'] or 0),
+        'messages': int(totals['messages'] or 0),
+        'projects': int(totals['projects'] or 0),
+        'latest_activity_at': totals['latest_activity_at'],
+        'by_role': {row['role']: int(row['count'] or 0) for row in by_role},
+        'top_sessions': [
+            {
+                'session_id': row['session_id'],
+                'session_title': row['session_title'],
+                'project_name': row['project_name'],
+                'message_count': int(row['message_count'] or 0),
+                'last_activity_at': row['last_activity_at'],
+            }
+            for row in top_sessions
+        ],
+    }
+
+
+def get_codex_agents_summary(limit: int = 20) -> dict:
+    """Return Codex agent-run summaries for the agent-focused secondary view."""
+    with read_db() as conn:
+        rows = conn.execute(
+            '''
+            SELECT id AS message_id, session_id, content, content_preview, timestamp
+            FROM codex_messages
+            WHERE role = 'agent'
+            ORDER BY timestamp DESC, id DESC
+            LIMIT ?
+            ''',
+            (limit,),
+        ).fetchall()
+
+    agents: list[dict] = []
+    by_status: dict[str, int] = {}
+    active_names: set[str] = set()
+    by_agent: dict[str, dict[str, object]] = {}
+    for row in rows:
+        payload = _decode_codex_payload(row['content'])
+        status = payload.get('status', '') or 'unknown'
+        agent_name = payload.get('agent_name', '') or 'agent'
+        by_status[status] = by_status.get(status, 0) + 1
+        active_names.add(agent_name)
+        agent_summary = by_agent.setdefault(agent_name, {'count': 0, 'last_status': status, 'timestamp': row['timestamp']})
+        agent_summary['count'] = int(agent_summary['count']) + 1
+        if row['timestamp'] >= str(agent_summary['timestamp']):
+            agent_summary['last_status'] = status
+            agent_summary['timestamp'] = row['timestamp']
+        agents.append({
+            'message_id': row['message_id'],
+            'session_id': row['session_id'],
+            'agent_name': agent_name,
+            'status': status,
+            'timestamp': row['timestamp'],
+            'body_text': row['content_preview'] or '',
+        })
+
+    return {
+        'total_runs': len(agents),
+        'active_agents': len(active_names),
+        'statuses': [
+            {'status': status, 'count': count}
+            for status, count in sorted(by_status.items())
+        ],
+        'by_agent': [
+            {
+                'agent_name': agent_name,
+                'count': int(summary['count']),
+                'last_status': str(summary['last_status']),
+            }
+            for agent_name, summary in sorted(by_agent.items())
+        ],
+        'agents': agents,
+    }
 
 
 def check_integrity() -> bool:
