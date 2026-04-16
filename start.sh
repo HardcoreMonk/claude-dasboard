@@ -46,7 +46,7 @@ fi
 
 echo ""
 echo "═══════════════════════════════════════════"
-echo "  Claude Usage Dashboard"
+echo "  Codex Usage Dashboard"
 echo "  http://localhost:${PORT}"
 echo "  Auth: ${AUTH_STATUS}"
 echo "═══════════════════════════════════════════"

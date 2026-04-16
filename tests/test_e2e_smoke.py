@@ -172,6 +172,20 @@ def test_search_landing_renders_primary_search_ui(e2e_client):
     assert 'id="search-context-panel"' in html
 
 
+def test_codex_branding_is_visible_in_shell_and_login(e2e_client):
+    shell_html = e2e_client.get('/').text
+    login_html = e2e_client.get('/login').text
+    start_script = Path('start.sh').read_text()
+
+    assert '<title>Codex Dashboard</title>' in shell_html
+    assert 'content="Codex CLI 세션 검색과 복기를 위한 웹 대시보드"' in shell_html
+    assert '<title>Login - Codex Dashboard</title>' in login_html
+    assert '<h1>Codex Dashboard</h1>' in login_html
+    assert 'Codex Usage Dashboard' in login_html
+    assert 'Codex Usage Dashboard' in start_script
+    assert 'Claude Usage Dashboard' not in start_script
+
+
 def test_search_landing_is_default_shell_view(e2e_client):
     html = e2e_client.get('/').text
 
