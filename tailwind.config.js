@@ -5,7 +5,7 @@ module.exports = {
     extend: {
       fontFamily: { sans: ['Pretendard', 'system-ui', 'sans-serif'] },
       colors: {
-        base: '#0a0a0a',
+        base: '#0f0f0f',
         surface: 'rgba(255,255,255,0.03)',
         accent: { DEFAULT: '#34d399', dim: 'rgba(52,211,153,0.15)', glow: 'rgba(52,211,153,0.25)' },
       },

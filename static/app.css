@@ -553,6 +553,142 @@ body.theme-light .srch-sel-msg-box {
   background: rgba(16,185,129,.06);
 }
 
+/* ═══════════════════════════════════════════════════════════
+   SUPANOVA DESIGN SYSTEM — Double-Bezel · Ambient · Reveal
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Ambient float animations ── */
+@keyframes ambient-float  { 0%,100%{transform:translateY(0)}    50%{transform:translateY(-18px)} }
+@keyframes ambient-floatB { 0%,100%{transform:translateY(0)}    50%{transform:translateY(-12px)} }
+.ambient-orb   { animation: ambient-float  7s ease-in-out infinite; }
+.ambient-orb-b { animation: ambient-floatB 9s ease-in-out infinite 1.5s; }
+.ambient-orb-c { animation: ambient-float  10s ease-in-out infinite 3s; }
+
+/* ── Noise texture overlay ── */
+.noise-overlay {
+  position: fixed; inset: 0; z-index: 60; pointer-events: none;
+  opacity: .028;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+}
+body.theme-light .noise-overlay { opacity: .018; }
+
+/* ── Double-Bezel card ── */
+/* outer shell: ring + translucent bg + generous padding */
+.bezel {
+  background: rgba(255,255,255,.022);
+  border-radius: 1.25rem;
+  padding: .375rem;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.07);
+  transition: box-shadow .4s cubic-bezier(.16,1,.3,1);
+}
+.bezel:hover {
+  box-shadow: 0 0 0 1px rgba(52,211,153,.18);
+}
+/* inner core: distinct bg + inset highlight + inner shadow */
+.bezel-inner {
+  background: rgba(255,255,255,.038);
+  border-radius: calc(1.25rem - .375rem);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07),
+              inset 0 -1px 0 rgba(0,0,0,.18);
+  transition: background .4s cubic-bezier(.16,1,.3,1),
+              box-shadow .4s cubic-bezier(.16,1,.3,1);
+}
+.bezel:hover .bezel-inner {
+  background: rgba(255,255,255,.052);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.09),
+              inset 0 -1px 0 rgba(0,0,0,.2),
+              0 8px 32px -8px rgba(52,211,153,.07);
+}
+/* light-mode bezel */
+body.theme-light .bezel {
+  background: rgba(0,0,0,.018);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.08);
+}
+body.theme-light .bezel:hover {
+  box-shadow: 0 0 0 1px rgba(16,185,129,.22);
+}
+body.theme-light .bezel-inner {
+  background: rgba(0,0,0,.02);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7),
+              inset 0 -1px 0 rgba(0,0,0,.06);
+}
+body.theme-light .bezel:hover .bezel-inner {
+  background: rgba(0,0,0,.03);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.8),
+              inset 0 -1px 0 rgba(0,0,0,.07),
+              0 8px 24px -8px rgba(16,185,129,.06);
+}
+
+/* ── Eyebrow section tag ── */
+.eyebrow {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .2rem .65rem;
+  border-radius: 999px;
+  background: rgba(52,211,153,.1);
+  color: #34d399;
+  border: 1px solid rgba(52,211,153,.2);
+  font-size: .68rem; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  line-height: 1.4;
+}
+body.theme-light .eyebrow {
+  background: rgba(16,185,129,.1);
+  color: #047857;
+  border-color: rgba(16,185,129,.3);
+}
+
+/* ── Scroll reveal (IntersectionObserver) ── */
+.reveal {
+  opacity: 0;
+  transform: translateY(1.25rem);
+  filter: blur(3px);
+  transition:
+    opacity   .6s cubic-bezier(.16,1,.3,1),
+    transform .6s cubic-bezier(.16,1,.3,1),
+    filter    .6s cubic-bezier(.16,1,.3,1);
+}
+.reveal.visible { opacity: 1; transform: none; filter: none; }
+
+/* ── Metric gradient number ── */
+.metric-num {
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(135deg, rgba(255,255,255,.95) 0%, rgba(255,255,255,.6) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+body.theme-light .metric-num {
+  background: linear-gradient(135deg, rgba(0,0,0,.88) 0%, rgba(0,0,0,.6) 100%);
+  -webkit-background-clip: text; background-clip: text;
+}
+
+/* ── Arrow-in-circle button element ── */
+.btn-arrow-wrap {
+  width: 1.5rem; height: 1.5rem;
+  border-radius: 50%;
+  background: rgba(0,0,0,.12);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: transform .4s cubic-bezier(.16,1,.3,1);
+}
+.group:hover .btn-arrow-wrap,
+button:hover .btn-arrow-wrap { transform: translateX(3px); }
+
+/* ── Glass section container ── */
+.glass-section {
+  background: rgba(255,255,255,.025);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 1rem;
+  backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+body.theme-light .glass-section {
+  background: rgba(255,255,255,.7);
+  border-color: rgba(0,0,0,.07);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9),
+              0 2px 12px rgba(0,0,0,.04);
+}
+
 /* ── Reduced motion (a11y) ── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -566,6 +702,9 @@ body.theme-light .srch-sel-msg-box {
   .skeleton { animation: none !important; background-size: 100% 100% !important; }
   .new-data-pulse { animation: none !important; }
   .dots::after { animation: none !important; opacity: .7 !important; }
+  /* Supanova additions */
+  .ambient-orb, .ambient-orb-b, .ambient-orb-c { animation: none !important; }
+  .reveal { opacity: 1 !important; transform: none !important; filter: none !important; transition: none !important; }
 }
 
 /* ── Font size +25% (fonts only, layout unchanged) ── */

@@ -178,6 +178,8 @@ function showView(view, { updateHash = true } = {}) {
   if (el) {
     el.classList.remove('hidden');
     el.querySelectorAll('.anim-in').forEach(a => { a.style.animation = 'none'; a.offsetHeight; a.style.animation = ''; });
+    // Scroll-reveal: re-arm .reveal elements that became visible
+    requestAnimationFrame(() => scrollRevealView(el));
   }
   if (updateHash) {
     const want = '#/' + view;
@@ -3767,6 +3769,30 @@ function convRefreshTail() {
     .finally(() => { _convLoading = false; });
 }
 
+// ─── Scroll reveal (Supanova) ────────────────────────────────────────────
+// IntersectionObserver-based staggered reveal for .reveal elements.
+// Called once on load and re-called each time a view becomes visible.
+// Uses --i CSS variable on each element for stagger delay (0–n * 80ms).
+// Elements already marked .visible are skipped (idempotent).
+const _revealObs = typeof IntersectionObserver !== 'undefined'
+  ? new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const el = entry.target;
+        const idx = +(getComputedStyle(el).getPropertyValue('--i').trim() || el.dataset.revealI || 0);
+        setTimeout(() => el.classList.add('visible'), idx * 80);
+        _revealObs.unobserve(el);
+      });
+    }, { threshold: 0.06, rootMargin: '0px 0px -32px 0px' })
+  : null;
+
+function scrollRevealView(container) {
+  if (!_revealObs) return;
+  (container || document).querySelectorAll('.reveal:not(.visible)').forEach(el => {
+    _revealObs.observe(el);
+  });
+}
+
 // ─── Init ───────────────────────────────────────────────────────────────
 // Single source of truth for initial state: the URL hash decides the view
 // (and triggers `onViewChange` → chart loading for overview). The WS onopen
@@ -3778,6 +3804,8 @@ window.addEventListener('load', () => {
   applyHash();
   if (typeof renderPresetSelect === 'function') renderPresetSelect();
   loadNodes();
+  // Initial scroll reveal for whatever view is active at load
+  requestAnimationFrame(() => scrollRevealView(document));
 });
 connectWS();
 setInterval(()=>{if(state.ws&&state.ws.readyState===WebSocket.OPEN)state.ws.send('ping');},25000);
