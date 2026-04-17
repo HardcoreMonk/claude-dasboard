@@ -251,15 +251,20 @@ watcher 변경 감지                    connectWS()
 |---|---|
 | 배경 | `#0f0f0f` (dark base, never pure black) |
 | 액센트 | Emerald `#34d399` (단일), 라이트 `#065f46` |
-| 카드 | 더블베젤 (`bg-white/5` + `ring-white/[0.07]` + inset shadow) |
+| 카드 | Double-Bezel — `.bezel` (outer: ring + p-1.5 + radius 1.25rem) + `.bezel-inner` (inner: inset shadow, hover emerald glow) |
 | 네비 | 플로팅 글래스 필 (`backdrop-blur-xl` + `rounded-full`) |
 | 폰트 | Pretendard + `break-keep-all` + `tabular-nums` + +25% 스케일 |
 | 아이콘 | Iconify Solar (`solar:*-linear`) |
 | 전환 | `cubic-bezier(.16,1,.3,1)` (spring), `fadeInUp` + `blur(3px)` |
+| 스크롤 reveal | `.reveal` + `.visible` — `IntersectionObserver` 뷰포트 진입 시 stagger (`--i * 80ms`) |
+| 섹션 eyebrow | `.eyebrow` — emerald 액센트 pill, uppercase tracking, 각 뷰 헤딩 앞 배치 |
+| 앰비언트 배경 | `.ambient-orb*` — 3개 radial-gradient 오브, `blur(70~100px)`, float 애니메이션 (fixed, z-0) |
+| 노이즈 텍스처 | `.noise-overlay` — SVG `feTurbulence` 고정 레이어 (opacity .028, z-60) |
+| 글래스 컨테이너 | `.glass-section` — `backdrop-blur-[10px]` + `border-white/[0.06]` + inset highlight |
 | 라이트모드 | `body.theme-light` 토글, WCAG AA 4.5:1 전 텍스트 검증 |
 | color-scheme | `html { color-scheme: dark }` + `body.theme-light { color-scheme: light }` — 브라우저 기본 UI 연동 |
 
-**캐시버스팅:** 파일명 기반 `/static/bundle.vN.js`, `tailwind.vN.css`. 서버가 정규식으로 `.vN` strip.
+**캐시버스팅:** 파일명 기반 `/static/bundle.vN.js`, `tailwind.vN.css`. 서버가 정규식으로 `.vN` strip. 현재 **v86**.
 
 ---
 
