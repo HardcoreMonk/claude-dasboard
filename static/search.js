@@ -26,8 +26,8 @@ async function _srchRun(q) {
   const url = '/api/sessions/search?q=' + encodeURIComponent(q) +
     (_srchRole ? '&role=' + encodeURIComponent(_srchRole) : '') + '&limit=50';
   try {
-    const results = await safeFetch(url);
-    _srchRenderResults(Array.isArray(results) ? results : [], q);
+    const data = await safeFetch(url);
+    _srchRenderResults(Array.isArray(data) ? data : (data.results || []), q);
   } catch (e) {
     const el = document.getElementById('srchResultsList');
     if (!el) return;
