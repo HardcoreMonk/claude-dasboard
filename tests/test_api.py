@@ -520,6 +520,37 @@ def test_codex_timeline_summary_honors_date_range_and_bounds_session_summaries(a
     assert limited_body['session_summaries'][0]['session_id'] == 'codex-s2'
 
 
+def test_timeline_endpoint_falls_back_to_codex_sessions(api_client):
+    r = api_client.get('/api/timeline?date_from=2026-04-16&date_to=2026-04-16')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total'] == 2
+    assert [row['id'] for row in body['sessions']] == ['codex-s1', 'codex-s2']
+    assert {row['project_name'] for row in body['sessions']} == {'codex-demo'}
+
+
+def test_timeline_hourly_endpoint_falls_back_to_codex_messages(api_client):
+    r = api_client.get('/api/timeline/hourly?date=2026-04-16')
+    assert r.status_code == 200
+    body = r.json()
+
+    by_hour = {row['hour']: row for row in body['hours']}
+    assert by_hour['19']['message_count'] == 1
+    assert by_hour['20']['message_count'] == 1
+    assert by_hour['19']['projects']['codex-demo']['message_count'] == 1
+    assert by_hour['20']['projects']['codex-demo']['message_count'] == 1
+
+
+def test_timeline_heatmap_endpoint_falls_back_to_codex_messages(api_client):
+    r = api_client.get('/api/timeline/heatmap?days=90')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['cells']['4_19']['count'] == 1
+    assert body['cells']['4_20']['count'] == 1
+
+
 def test_codex_usage_summary_returns_session_message_and_role_counts(api_client):
     r = api_client.get('/api/usage/summary')
     assert r.status_code == 200

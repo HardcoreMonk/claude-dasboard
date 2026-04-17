@@ -262,6 +262,36 @@ function _modelFamily(model) {
   return '_default';
 }
 
+function _timelineDataUrl(dateFrom, dateTo, showSubs, nodeVal) {
+  let url = `/api/timeline?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&include_subagents=${showSubs}`;
+  if (nodeVal) url += '&node=' + encodeURIComponent(nodeVal);
+  return url;
+}
+
+function _reportBaseDate() {
+  const input = document.getElementById('tlReportDate');
+  if (input && input.value) return input.value;
+  const today = new Date().toISOString().slice(0, 10);
+  if (input) input.value = today;
+  return today;
+}
+
+function _ensureSecondaryTimelineDefaults() {
+  const hourlyInput = document.getElementById('tlHourlyDate');
+  if (hourlyInput && !hourlyInput.value) hourlyInput.value = _reportBaseDate();
+  const deltaInput = document.getElementById('tlDeltaDate');
+  if (deltaInput && !deltaInput.value) deltaInput.value = new Date().toISOString().slice(0, 10);
+}
+
+function _loadTimelineSecondaryPanels() {
+  _ensureSecondaryTimelineDefaults();
+  _loadHeatmap();
+  _loadTrend();
+  _loadHourlyStacked();
+  _loadDailyReport(_reportBaseDate());
+  _loadDelta();
+}
+
 // ─── Main loader ─────────────────────────────────────────────────────────
 async function loadTimeline() {
   const { dateFrom, dateTo } = _tlDates();
@@ -274,10 +304,23 @@ async function loadTimeline() {
   const resolvedMode = codexTimelineMode === 'auto'
     ? (hasCodexData ? 'codex' : 'legacy')
     : codexTimelineMode;
+  const showSubs = document.getElementById('tlShowSubagents')?.checked || false;
+  const nodeVal = document.getElementById('tlNodeFilter')?.value || '';
+  const timelineUrl = _timelineDataUrl(dateFrom, dateTo, showSubs, nodeVal);
+  _populateTlNodeFilter();
   if (resolvedMode === 'codex' && hasCodexData) {
-    _tlLastData = { codex: summary, dateFrom, dateTo };
+    let secondaryData = null;
+    try {
+      secondaryData = await safeFetch(timelineUrl);
+      _computeOutliers(secondaryData);
+      _renderEfficiency(secondaryData);
+    } catch (e) {
+      reportError('loadTimelineSecondary', e);
+    }
+    _tlLastData = { codex: summary, data: secondaryData, dateFrom, dateTo };
     renderCodexTimelineMode(summary);
     _renderCodexTimelineSecondary(summary, dateFrom, dateTo);
+    _loadTimelineSecondaryPanels();
     reportSuccess('loadTimeline');
     return;
   }
@@ -287,13 +330,8 @@ async function loadTimeline() {
     legend.querySelectorAll('[data-codex-timeline-summary]').forEach((el) => el.remove());
   }
   await _loadCodexTimelineSummary();
-  const showSubs = document.getElementById('tlShowSubagents')?.checked || false;
-  const nodeVal = document.getElementById('tlNodeFilter')?.value || '';
-  let url = `/api/timeline?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&include_subagents=${showSubs}`;
-  if (nodeVal) url += '&node=' + encodeURIComponent(nodeVal);
-  _populateTlNodeFilter();
   try {
-    const data = await safeFetch(url);
+    const data = await safeFetch(timelineUrl);
     _tlLastData = { data, dateFrom, dateTo };
     _computeOutliers(data);
     _renderTimelineChart(data, dateFrom, dateTo);
@@ -303,10 +341,7 @@ async function loadTimeline() {
     _tlLastData = null;
     reportError('loadTimeline', e);
   }
-  _loadHeatmap();
-  _loadTrend();
-  _loadHourlyStacked();
-  _loadDelta();
+  _loadTimelineSecondaryPanels();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

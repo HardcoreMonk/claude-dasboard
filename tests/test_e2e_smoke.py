@@ -338,6 +338,29 @@ def test_timeline_and_subagent_modules_keep_codex_paths_self_consistent():
     assert "Promise.all([\n      safeFetch('/api/subagents/stats'),\n      safeFetch('/api/agents/summary'),\n    ])" not in subagents_js
 
 
+def test_timeline_codex_mode_keeps_secondary_panels_alive():
+    timeline_js = Path('static/timeline.js').read_text()
+
+    start = timeline_js.index("if (resolvedMode === 'codex' && hasCodexData) {")
+    end = timeline_js.index("return;", start)
+    codex_branch = timeline_js[start:end]
+
+    assert '_loadTimelineSecondaryPanels();' in codex_branch
+
+    helper_start = timeline_js.index('function _loadTimelineSecondaryPanels() {')
+    helper_end = timeline_js.index('}', helper_start)
+    helper_body = timeline_js[helper_start:helper_end]
+
+    for loader in [
+        '_loadHeatmap();',
+        '_loadTrend();',
+        '_loadHourlyStacked();',
+        '_loadDelta();',
+        '_loadDailyReport(_reportBaseDate());',
+    ]:
+        assert loader in helper_body, f'secondary timeline helper must keep {loader} active'
+
+
 def test_overview_api_contract_matches_frontend_expectations(e2e_client):
     """Every API call the overview view makes on initial load must return
     the exact fields the JS rendering code reads. This is stricter than
