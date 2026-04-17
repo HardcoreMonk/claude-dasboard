@@ -160,7 +160,7 @@ function sortPillHtml(view, col, label, size = 'text-[10px]') {
 }
 
 // ─── Navigation + URL hash routing ─────────────────────────────────────
-const VALID_VIEWS = new Set(['overview','cost','sessions','conversations','models','projects','subagents','timeline','export']);
+const VALID_VIEWS = new Set(['overview','cost','sessions','conversations','models','projects','subagents','timeline','search','export']);
 
 function showView(view, { updateHash = true } = {}) {
   if (!VALID_VIEWS.has(view)) view = 'overview';
@@ -212,6 +212,7 @@ function onViewChange(view) {
   if (view === 'subagents') { loadSubagentHeatmap(); loadSubagentDetails(); loadSubagentSuccessMatrix(); }
   if (view === 'timeline' && typeof loadTimeline === 'function') loadTimeline();
   if (view === 'export') { loadDbSize(); renderNodeList(); loadAdminStatus(); loadSchedule(); loadAuditLog(); }
+  if (view === 'search') { setTimeout(() => document.getElementById('srchInput')?.focus(), 80); }
 }
 
 function parseHash() {
@@ -469,6 +470,7 @@ function _cmdkStaticItems() {
     { label: '모델',      hint: '모델 분석', icon: 'solar:cpu-bolt-linear', action: () => showView('models') },
     { label: '프로젝트',   hint: '프로젝트 목록', icon: 'solar:folder-open-linear', action: () => showView('projects') },
     { label: 'Subagent',  hint: '히트맵 + 종료 매트릭스', icon: 'solar:widget-2-linear', action: () => showView('subagents') },
+    { label: '검색',      hint: '전체 메시지 검색', icon: 'solar:magnifer-linear', action: () => showView('search') },
     { label: '타임라인',  hint: '작업 Gantt 차트', icon: 'solar:calendar-linear', action: () => showView('timeline') },
     { label: '관리',      hint: 'CSV / 백업 / 보존', icon: 'solar:database-linear', action: () => showView('export') },
     { label: '예산 설정',  hint: '플랜/예산 편집', icon: 'solar:settings-linear', action: () => openPlanSettings() },

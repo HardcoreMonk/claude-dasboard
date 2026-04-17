@@ -497,6 +497,12 @@ body.theme-light .conv-msg-focused { box-shadow: inset 0 0 0 1.5px rgba(4,120,87
 body.theme-light .trace-current { box-shadow: inset 0 0 0 2px rgba(126,34,206,.5); background: rgba(126,34,206,.06) !important; }
 .trace-current[data-trace-error] { box-shadow: inset 0 0 0 2px rgba(248,113,113,.7); background: rgba(248,113,113,.08) !important; }
 
+/* ── Search page ── */
+.srch-role-btn { color: rgba(255,255,255,.35); border: 1px solid rgba(255,255,255,.07); }
+.srch-role-btn.active { background: rgba(52,211,153,.15); color: #34d399; border-color: rgba(52,211,153,.3); }
+.srch-hl { background: rgba(251,191,36,.25); color: rgba(255,255,255,.9); border-radius: 2px; }
+body.theme-light .srch-hl { background: rgba(251,191,36,.4); }
+
 /* ── Reduced motion (a11y) ── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -831,13 +831,17 @@ def _build_fts_query(q: str) -> str:
 def api_session_search_messages(
     q: str = Query(..., min_length=1, max_length=200),
     limit: int = Query(50, ge=1, le=200),
+    role: Optional[str] = Query(None),
 ):
     """Full-text search across message previews using SQLite FTS5."""
+    if role is not None and role not in ('user', 'assistant'):
+        return JSONResponse({'error': 'invalid role', 'valid': ['user', 'assistant']}, status_code=400)
+    role_cond = "AND m.role = ?" if role else ""
     fts_query = _build_fts_query(q)
     with read_db() as db:
         if fts_query:
             try:
-                rows = db.execute('''
+                rows = db.execute(f'''
                     SELECT m.id, m.session_id, m.role, m.content_preview,
                            m.timestamp, m.cost_micro*1.0/1000000 AS cost_usd,
                            s.project_name, s.project_path
@@ -845,23 +849,25 @@ def api_session_search_messages(
                     JOIN messages m ON m.id = fts.rowid
                     JOIN sessions s ON m.session_id = s.id
                     WHERE messages_fts MATCH ?
+                    {role_cond}
                     ORDER BY m.timestamp DESC
                     LIMIT ?
-                ''', (fts_query, limit)).fetchall()
+                ''', [fts_query] + ([role] if role else []) + [limit]).fetchall()
                 return {'results': [dict(r) for r in rows], 'query': q, 'fts': True}
             except sqlite3.OperationalError as e:
                 logger.warning("FTS query failed (%s) — falling back to LIKE", e)
         # Fallback: LIKE scan (used when FTS5 unavailable or empty token set)
-        rows = db.execute('''
+        rows = db.execute(f'''
             SELECT m.id, m.session_id, m.role, m.content_preview,
                    m.timestamp, m.cost_micro*1.0/1000000 AS cost_usd,
                    s.project_name, s.project_path
             FROM messages m
             JOIN sessions s ON m.session_id = s.id
             WHERE m.content_preview LIKE ? ESCAPE '\\'
+            {role_cond}
             ORDER BY m.timestamp DESC
             LIMIT ?
-        ''', (f'%{_esc_like(q)}%', limit)).fetchall()
+        ''', [f'%{_esc_like(q)}%'] + ([role] if role else []) + [limit]).fetchall()
     return {'results': [dict(r) for r in rows], 'query': q, 'fts': False}
 
 

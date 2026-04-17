@@ -7,7 +7,7 @@
 <meta name="description" content="Claude Code 토큰 사용량 실시간 추적 대시보드">
 
 <!-- Tailwind CSS (built from app.css via build.js) -->
-<link rel="stylesheet" href="/static/tailwind.v81.css">
+<link rel="stylesheet" href="/static/tailwind.v82.css">
 
 <!-- Pretendard (Korean) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
@@ -49,6 +49,9 @@
   </button>
   <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="subagents">
     <iconify-icon icon="solar:widget-2-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>Subagent
+  </button>
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="search">
+    <iconify-icon icon="solar:magnifer-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>검색
   </button>
   <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="timeline">
     <iconify-icon icon="solar:calendar-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>타임라인
@@ -746,6 +749,41 @@
   </div>
 </section>
 
+<!-- ─── SEARCH ─── -->
+<section class="view hidden" id="view-search">
+  <div class="grid grid-cols-1 md:grid-cols-[380px_1fr] gap-3 h-[calc(100vh-8rem)]">
+    <!-- Left: search input + filters + results -->
+    <div class="flex flex-col bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel overflow-hidden">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-3 flex flex-col gap-2 h-full">
+        <div class="relative">
+          <iconify-icon icon="solar:magnifer-linear" width="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none"></iconify-icon>
+          <input id="srchInput" type="text" placeholder="메시지, 툴 호출, 에이전트 응답 검색..."
+            oninput="srchInput(this.value)"
+            class="w-full bg-white/5 border border-white/10 rounded-lg pl-8 pr-3 py-2 text-sm text-white/80 placeholder-white/25 focus:outline-none focus:border-emerald-500/40">
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button class="srch-role-btn active px-2.5 py-1 rounded-full text-xs font-medium spring" data-srch-role="" onclick="srchSetRole('')">전체</button>
+          <button class="srch-role-btn px-2.5 py-1 rounded-full text-xs font-medium spring" data-srch-role="assistant" onclick="srchSetRole('assistant')">어시스턴트</button>
+          <button class="srch-role-btn px-2.5 py-1 rounded-full text-xs font-medium spring" data-srch-role="user" onclick="srchSetRole('user')">사용자</button>
+          <span id="srchResultCount" class="ml-auto text-white/30 text-xs"></span>
+        </div>
+        <div id="srchResultsList" class="flex-1 overflow-y-auto space-y-0.5 pr-0.5"></div>
+      </div>
+    </div>
+    <!-- Right: conversation panel -->
+    <div class="flex flex-col bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel overflow-hidden">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-3 flex flex-col gap-2 h-full">
+        <div id="srch-convViewerHeader" class="text-white/40 text-xs min-h-[1.5rem]">결과를 선택하면 전체 대화가 표시됩니다.</div>
+        <div id="srch-convNavBar" class="hidden flex items-center gap-2 text-xs text-white/40 border-t border-white/[0.07] pt-2">
+          <span id="srch-convMsgCount"></span>
+          <button onclick="openConversationFromSearch()" class="ml-auto px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 hover:bg-emerald-500/25 spring text-xs font-medium">↗ 전체 대화</button>
+        </div>
+        <div id="srch-convMessages" class="flex-1 overflow-y-auto p-1 space-y-3"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ─── EXPORT / ADMIN ─── -->
 <section class="view hidden" id="view-export">
   <div class="grid grid-cols-1 md:grid-cols-3 gap-3 anim-in">
@@ -1145,6 +1183,6 @@
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/bundle.v81.js" defer></script>
+<script src="/static/bundle.v82.js" defer></script>
 </body>
 </html>
