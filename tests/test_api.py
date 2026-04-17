@@ -16,6 +16,18 @@ REMOVED_CLAUDE_API_PATHS = (
 REMOVED_RUNTIME_PATHS = REMOVED_CLAUDE_API_PATHS + (COLLECTOR_DOWNLOAD_PATH,)
 
 
+def _clear_legacy_runtime_rows():
+    import database
+
+    with database.write_db() as db:
+        db.execute('DELETE FROM messages')
+        db.execute('DELETE FROM sessions')
+        try:
+            db.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+        except Exception:
+            pass
+
+
 def _reload_runtime_modules():
     try:
         from prometheus_client import REGISTRY
@@ -300,15 +312,18 @@ def test_access_verification_docs_cover_codex_runtime_checks():
 
 # ─── Stats / aggregations ───────────────────────────────────────────────
 
-def test_stats_excludes_synthetic_zero(api_client):
+def test_stats_are_derived_from_codex_sessions_only(api_client):
+    _clear_legacy_runtime_rows()
+
     r = api_client.get('/api/stats')
     assert r.status_code == 200
     body = r.json()
-    # total sessions excludes subagents? No — /api/stats counts ALL sessions.
-    assert body['all_time']['total_sessions'] == 4
+
+    assert body['all_time']['total_sessions'] >= 2
+    assert body['all_time']['messages'] >= 5
     models = {m['model']: m['cost'] for m in body['models']}
-    assert 'claude-opus-4-6' in models
-    assert 'claude-haiku-4-5' in models
+    assert 'gpt-5.4' in models
+    assert 'gpt-5.4-mini' in models
 
 
 def test_projects_separates_parent_and_subagent_counts(api_client):
@@ -349,6 +364,25 @@ def test_sessions_include_subagents_flag(api_client):
     assert 'agent-1a' in ids and 'agent-1b' in ids
 
 
+def test_sessions_endpoint_lists_codex_sessions_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/sessions?include_subagents=true&per_page=20')
+    assert r.status_code == 200
+    body = r.json()
+
+    ids = [row['id'] for row in body['sessions']]
+    assert 'codex-s2' in ids
+    assert 'codex-s1' in ids
+    assert body['total'] >= 2
+    first = body['sessions'][0]
+    assert first['project_name'] == 'codex-demo'
+    assert first['source_node'] == 'local'
+    assert first['is_subagent'] in (False, 0)
+    assert first['message_count'] == 1
+    assert first['total_cost_usd'] == 0.0
+
+
 # ─── Subagent endpoints ─────────────────────────────────────────────────
 
 def test_session_subagents_endpoint(api_client):
@@ -387,6 +421,20 @@ def test_search_fts_finds_keyword(api_client):
     # 2 parent-A messages contain 'haystack'
     assert len(body['results']) == 2
     assert all('haystack' in (row['content_preview'] or '') for row in body['results'])
+
+
+def test_sessions_search_is_backed_by_codex_search_index(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/sessions/search?q=search')
+    assert r.status_code == 200
+    body = r.json()
+
+    session_ids = [row['session_id'] for row in body['results']]
+    assert 'codex-s2' in session_ids
+    assert 'codex-s1' in session_ids
+    assert all(row['project_name'] == 'codex-demo' for row in body['results'])
+    assert any('Search' in (row['content_preview'] or '') for row in body['results'])
 
 
 def test_project_stats_by_path(api_client):

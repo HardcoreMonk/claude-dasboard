@@ -427,6 +427,38 @@ def test_overview_api_contract_matches_frontend_expectations(e2e_client):
         assert 'last_message' in p
 
 
+def test_overview_primary_routes_return_nonempty_codex_data_without_legacy_seed(e2e_client):
+    import database
+
+    with database.write_db() as db:
+        db.execute('DELETE FROM messages')
+        db.execute('DELETE FROM sessions')
+        try:
+            db.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+        except Exception:
+            pass
+
+    stats = e2e_client.get('/api/stats')
+    assert stats.status_code == 200
+    assert stats.json()['all_time']['total_sessions'] >= 1
+
+    sessions = e2e_client.get('/api/sessions')
+    assert sessions.status_code == 200
+    assert sessions.json()['total'] >= 1
+
+    top = e2e_client.get('/api/projects/top?limit=5&with_last_message=true')
+    assert top.status_code == 200
+    top_body = top.json()
+    assert top_body['projects']
+    if top_body['projects']:
+        p = top_body['projects'][0]
+        for field in ['project_name', 'project_path', 'total_cost', 'total_tokens',
+                      'is_active', 'last_active']:
+            assert field in p, f'/api/projects/top[0].{field} missing'
+        # last_message is optional (None when no assistant messages) but key must exist
+        assert 'last_message' in p
+
+
 def test_codex_summary_api_contract_matches_secondary_frontend_expectations(e2e_client):
     sessions = e2e_client.get('/api/codex/sessions')
     assert sessions.status_code == 200

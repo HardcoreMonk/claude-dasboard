@@ -633,6 +633,19 @@ def _get_stats() -> dict:
             FROM sessions
         ''').fetchone()
 
+        total_sessions = int(row['total_sessions'] or 0) if row else 0
+        if total_sessions == 0:
+            row = db.execute('''
+                SELECT COUNT(*) AS total_sessions,
+                       0 AS input_tokens,
+                       0 AS output_tokens,
+                       0 AS cache_creation_tokens,
+                       0 AS cache_read_tokens,
+                       0.0 AS cost_usd,
+                       COALESCE((SELECT COUNT(*) FROM codex_messages), 0) AS messages
+                FROM codex_sessions
+            ''').fetchone()
+
         today = db.execute('''
             SELECT COALESCE(SUM(total_input_tokens), 0) AS input_tokens,
                    COALESCE(SUM(total_output_tokens), 0) AS output_tokens,
@@ -643,6 +656,23 @@ def _get_stats() -> dict:
                    COUNT(*) AS sessions
             FROM sessions WHERE updated_at >= ?
         ''', (today_utc,)).fetchone()
+        if total_sessions == 0:
+            today = db.execute('''
+                SELECT 0 AS input_tokens,
+                       0 AS output_tokens,
+                       0 AS cache_creation_tokens,
+                       0 AS cache_read_tokens,
+                       0.0 AS cost_usd,
+                       COALESCE((
+                           SELECT COUNT(*)
+                           FROM codex_messages m
+                           JOIN codex_sessions s ON s.id = m.session_id
+                           WHERE s.updated_at >= ?
+                       ), 0) AS messages,
+                       COUNT(*) AS sessions
+                FROM codex_sessions
+                WHERE updated_at >= ?
+            ''', (today_utc, today_utc)).fetchone()
 
         # Unified model aggregation: cost + cache in a single scan
         model_rows = db.execute('''
@@ -656,6 +686,18 @@ def _get_stats() -> dict:
             WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
             GROUP BY model ORDER BY cost DESC
         ''').fetchall()
+        if total_sessions == 0:
+            model_rows = db.execute('''
+                SELECT model,
+                       COUNT(DISTINCT session_id) AS cnt,
+                       0.0 AS cost,
+                       0 AS input_tokens,
+                       0 AS cache_read_tokens,
+                       0 AS cache_creation_tokens
+                FROM codex_messages
+                WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
+                GROUP BY model ORDER BY cnt DESC, model ASC
+            ''').fetchall()
 
         models = [{'model': m['model'], 'cnt': m['cnt'], 'cost': m['cost']}
                   for m in model_rows]
@@ -673,6 +715,13 @@ def _get_stats() -> dict:
             FROM sessions
             GROUP BY stop_reason ORDER BY count DESC
         ''').fetchall()
+        if total_sessions == 0:
+            stop_reasons = db.execute('''
+                SELECT '(unknown)' AS stop_reason,
+                       COUNT(*) AS count,
+                       0.0 AS cost
+                FROM codex_sessions
+            ''').fetchall()
 
     return {
         'all_time': dict(row) if row else {},
@@ -794,6 +843,94 @@ def api_sessions(
             ORDER BY s.pinned DESC, s.{sort_col} {order_sql}
             LIMIT ? OFFSET ?
         ''', params + [per_page, offset]).fetchall()
+        if total == 0:
+            codex_conds: list[str] = []
+            codex_params: list = []
+            codex_sort_map = {
+                'updated_at': 's.updated_at',
+                'created_at': 's.created_at',
+                'cost_micro': 'total_cost_usd',
+                'message_count': 's.message_count',
+                'project_name': 'p.project_name',
+                'model': 's.model',
+                'total_input_tokens': 'total_input_tokens',
+                'total_output_tokens': 'total_output_tokens',
+                'total_cache_read_tokens': 'total_cache_read_tokens',
+            }
+            codex_order = codex_sort_map.get(sort_col, 's.updated_at')
+            if node:
+                if node != 'local':
+                    codex_conds.append("1 = 0")
+                else:
+                    codex_conds.append("'local' = ?")
+                    codex_params.append(node)
+            if pinned_only:
+                codex_conds.append("s.pinned = 1")
+            if project:
+                codex_conds.append("p.project_name = ?")
+                codex_params.append(project)
+            if model:
+                codex_conds.append("s.model LIKE ? ESCAPE '\\'")
+                codex_params.append(f"%{_esc_like(model)}%")
+            if search:
+                s = f"%{_esc_like(search)}%"
+                codex_conds.append("(p.project_name LIKE ? ESCAPE '\\' OR COALESCE(s.cwd, '') LIKE ? ESCAPE '\\')")
+                codex_params.extend([s, s])
+            if date_from:
+                codex_conds.append("s.updated_at >= ?")
+                codex_params.append(date_from)
+            if date_to:
+                codex_conds.append("s.updated_at <= ?")
+                codex_params.append(date_to + "T23:59:59Z" if len(date_to) == 10 else date_to)
+            if cost_min is not None:
+                codex_conds.append("0 >= ?")
+                codex_params.append(cost_min)
+            if cost_max is not None:
+                codex_conds.append("0 <= ?")
+                codex_params.append(cost_max)
+            if tag:
+                codex_conds.append("1 = 0")
+            codex_where = "WHERE " + " AND ".join(codex_conds) if codex_conds else ""
+            total = db.execute(f'''
+                SELECT COUNT(*)
+                FROM codex_sessions s
+                JOIN codex_projects p ON p.project_path = s.project_path
+                {codex_where}
+            ''', codex_params).fetchone()[0]
+            rows = db.execute(f'''
+                SELECT s.id,
+                       p.project_name,
+                       s.project_path,
+                       s.cwd,
+                       s.model,
+                       s.created_at,
+                       s.updated_at,
+                       0 AS total_input_tokens,
+                       0 AS total_output_tokens,
+                       0 AS total_cache_creation_tokens,
+                       0 AS total_cache_read_tokens,
+                       0.0 AS total_cost_usd,
+                       s.message_count,
+                       s.user_message_count,
+                       s.pinned,
+                       0 AS is_subagent,
+                       NULL AS parent_session_id,
+                       '' AS agent_type,
+                       '' AS agent_description,
+                       '' AS version,
+                       '' AS final_stop_reason,
+                       '' AS tags,
+                       0 AS turn_duration_ms,
+                       'local' AS source_node,
+                       (julianday(COALESCE(NULLIF(s.updated_at,''), s.created_at)) - julianday(s.created_at)) * 86400.0 AS duration_seconds,
+                       0 AS subagent_count,
+                       0.0 AS subagent_cost
+                FROM codex_sessions s
+                JOIN codex_projects p ON p.project_path = s.project_path
+                {codex_where}
+                ORDER BY s.pinned DESC, {codex_order} {order_sql}
+                LIMIT ? OFFSET ?
+            ''', codex_params + [per_page, offset]).fetchall()
     return {
         'sessions': [dict(r) for r in rows],
         'total': total, 'page': page, 'per_page': per_page,
@@ -835,7 +972,8 @@ def api_session_search_messages(
                     ORDER BY m.timestamp DESC
                     LIMIT ?
                 ''', (fts_query, limit)).fetchall()
-                return {'results': [dict(r) for r in rows], 'query': q, 'fts': True}
+                if rows:
+                    return {'results': [dict(r) for r in rows], 'query': q, 'fts': True}
             except sqlite3.OperationalError as e:
                 logger.warning("FTS query failed (%s) — falling back to LIKE", e)
         # Fallback: LIKE scan (used when FTS5 unavailable or empty token set)
@@ -849,6 +987,23 @@ def api_session_search_messages(
             ORDER BY m.timestamp DESC
             LIMIT ?
         ''', (f'%{_esc_like(q)}%', limit)).fetchall()
+        if not rows:
+            rows = db.execute('''
+                SELECT m.id,
+                       m.session_id,
+                       m.role,
+                       m.content_preview,
+                       m.timestamp,
+                       0.0 AS cost_usd,
+                       p.project_name,
+                       p.project_path
+                FROM codex_messages m
+                JOIN codex_sessions s ON s.id = m.session_id
+                JOIN codex_projects p ON p.project_path = s.project_path
+                WHERE m.content_preview LIKE ? ESCAPE '\\'
+                ORDER BY m.timestamp DESC
+                LIMIT ?
+            ''', (f'%{_esc_like(q)}%', limit)).fetchall()
     return {'results': [dict(r) for r in rows], 'query': q, 'fts': False}
 
 
@@ -1844,6 +1999,24 @@ def api_projects_top(
             FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
             ORDER BY total_cost DESC LIMIT ?
         ''', (candidate_limit,)).fetchall()
+        if not rows:
+            rows = db.execute('''
+                SELECT p.project_name,
+                       p.project_path,
+                       COUNT(*) AS session_count,
+                       0 AS subagent_count,
+                       0.0 AS total_cost,
+                       0 AS input_tokens,
+                       0 AS output_tokens,
+                       0 AS cache_read_tokens,
+                       0 AS total_tokens,
+                       MAX(s.updated_at) AS last_active
+                FROM codex_sessions s
+                JOIN codex_projects p ON p.project_path = s.project_path
+                GROUP BY p.project_path, p.project_name
+                ORDER BY last_active DESC
+                LIMIT ?
+            ''', (candidate_limit,)).fetchall()
 
         # Compute is_active against a fresh "now" timestamp and re-rank.
         active_cutoff = (datetime.now(_tz.utc) - timedelta(minutes=active_window_minutes)).strftime(
@@ -1892,6 +2065,25 @@ def api_projects_top(
                 )
                 SELECT * FROM ranked WHERE rn = 1
             ''', paths).fetchall()
+            if not preview_rows:
+                preview_rows = db.execute(f'''
+                    WITH ranked AS (
+                        SELECT m.content_preview, m.timestamp, m.model, m.session_id,
+                               p.project_path,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY p.project_path
+                                   ORDER BY m.timestamp DESC, m.id DESC
+                               ) AS rn
+                        FROM codex_messages m
+                        JOIN codex_sessions s ON s.id = m.session_id
+                        JOIN codex_projects p ON p.project_path = s.project_path
+                        WHERE p.project_path IN ({ph})
+                          AND m.role = 'assistant'
+                          AND m.content_preview IS NOT NULL
+                          AND m.content_preview != ''
+                    )
+                    SELECT * FROM ranked WHERE rn = 1
+                ''', paths).fetchall()
             preview_map = {r['project_path']: r for r in preview_rows}
             for p in projects:
                 row = preview_map.get(p['project_path'])
