@@ -1588,6 +1588,19 @@ def test_session_tag_set_and_filter(api_client):
     assert 'codex-s2' not in ids
 
 
+def test_session_tag_set_and_filter_work_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.post('/api/sessions/codex-s1/tags', json={'tags': 'solo,backend'})
+    assert r.status_code == 200
+    assert r.json()['updated'] is True
+
+    r = api_client.get('/api/sessions?tag=solo')
+    assert r.status_code == 200
+    ids = [s['id'] for s in r.json()['sessions']]
+    assert ids == ['codex-s1']
+
+
 def test_tags_list_endpoint(api_client):
     """GET /api/tags must aggregate distinct tags with counts."""
     api_client.post('/api/sessions/codex-s1/tags', json={'tags': 'wip,backend'})
@@ -1598,6 +1611,50 @@ def test_tags_list_endpoint(api_client):
     assert tags.get('wip') == 2
     assert tags.get('backend') == 1
     assert tags.get('frontend') == 1
+
+
+def test_tags_list_endpoint_uses_codex_rows_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    api_client.post('/api/sessions/codex-s1/tags', json={'tags': 'codex,alpha'})
+    api_client.post('/api/sessions/codex-s2/tags', json={'tags': 'codex,beta'})
+    r = api_client.get('/api/tags')
+    assert r.status_code == 200
+    tags = {t['tag']: t['count'] for t in r.json()['tags']}
+    assert tags.get('codex') == 2
+    assert tags.get('alpha') == 1
+    assert tags.get('beta') == 1
+
+
+def test_session_tag_updates_do_not_touch_legacy_rows_for_codex_sessions(api_client):
+    import database
+
+    with database.write_db() as db:
+        db.execute(
+            """
+            INSERT OR REPLACE INTO sessions
+              (id, project_name, project_path, cwd, model, created_at, updated_at, tags)
+            VALUES
+              ('codex-s1', 'legacy-shadow', '/tmp/legacy-shadow', '/tmp/legacy-shadow',
+               'claude-opus-4-6', '2026-04-01T00:00:00Z', '2026-04-01T00:00:00Z', 'legacy-only')
+            """
+        )
+
+    r = api_client.post('/api/sessions/codex-s1/tags', json={'tags': 'codex-only'})
+    assert r.status_code == 200
+
+    with database.read_db() as db:
+        legacy_tags = db.execute(
+            'SELECT tags FROM sessions WHERE id = ?',
+            ('codex-s1',),
+        ).fetchone()['tags']
+        codex_tags = db.execute(
+            'SELECT tags FROM codex_sessions WHERE id = ?',
+            ('codex-s1',),
+        ).fetchone()['tags']
+
+    assert legacy_tags == 'legacy-only'
+    assert codex_tags == 'codex-only'
 
 
 def test_sessions_exposes_tags_column(api_client):

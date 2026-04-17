@@ -2957,18 +2957,26 @@ def api_session_set_tags(session_id: str, body: SessionTagsBody):
     """Store a comma-separated tag list on a session. The frontend trims
     and normalises, the backend just stores the string."""
     tags = body.tags.strip()
+    codex_row = get_codex_session_detail_row(session_id)
+    if codex_row is not None:
+        with write_db() as db:
+            codex_cur = db.execute(
+                'UPDATE codex_sessions SET tags = ? WHERE id = ?',
+                (tags, session_id),
+            )
+        return {
+            'ok': True,
+            'updated': codex_cur.rowcount > 0,
+            'tags': tags,
+        }
     with write_db() as db:
         legacy_cur = db.execute(
             'UPDATE sessions SET tags = ? WHERE id = ?',
             (tags, session_id),
         )
-        codex_cur = db.execute(
-            'UPDATE codex_sessions SET tags = ? WHERE id = ?',
-            (tags, session_id),
-        )
     return {
         'ok': True,
-        'updated': (legacy_cur.rowcount + codex_cur.rowcount) > 0,
+        'updated': legacy_cur.rowcount > 0,
         'tags': tags,
     }
 
