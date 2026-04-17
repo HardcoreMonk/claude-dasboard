@@ -1,11 +1,13 @@
 // ─── Search View ────────────────────────────────────────────────────────────
-// Standalone search page: left panel (results) + right panel (conversation).
+// Standalone search page: left panel (results) + right panel (3-section context).
 // Does NOT touch state.convMessages — keeps conversations view unaffected.
 
 let _srchRole = '';
 let _srchTimer = null;
 let _srchCurrentSid = null;
 let _srchCurrentSession = null;
+
+const _SRCH_CTX = 3; // messages before/after selected message
 
 function srchInput(q) {
   clearTimeout(_srchTimer);
@@ -44,14 +46,26 @@ function _srchClearResults() {
   const count = document.getElementById('srchResultCount');
   if (list) list.textContent = '';
   if (count) count.textContent = '';
-  const hdr = document.getElementById('srch-convViewerHeader');
-  if (hdr) hdr.textContent = '';
-  const nav = document.getElementById('srch-convNavBar');
-  if (nav) nav.classList.add('hidden');
-  const msgs = document.getElementById('srch-convMessages');
-  if (msgs) msgs.textContent = '';
+  _srchResetPanel();
   _srchCurrentSid = null;
   _srchCurrentSession = null;
+}
+
+function _srchResetPanel() {
+  const hdr = document.getElementById('srch-convViewerHeader');
+  const contextPane = document.getElementById('srch-contextPane');
+  const emptyState = document.getElementById('srch-emptyState');
+  const nav = document.getElementById('srch-convNavBar');
+  if (hdr) hdr.textContent = '결과를 선택하면 전체 대화가 표시됩니다.';
+  if (contextPane) contextPane.classList.add('hidden');
+  if (emptyState) emptyState.classList.remove('hidden');
+  if (nav) nav.classList.add('hidden');
+  ['srch-prevMsgs', 'srch-selMsg', 'srch-nextMsgs'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = '';
+  });
+  const nextSep = document.getElementById('srch-nextSep');
+  if (nextSep) nextSep.classList.add('hidden');
 }
 
 const _SRCH_ROLE_LABEL = { user: '사용자', assistant: '어시스턴트', system: '시스템', tool: '도구' };
@@ -121,6 +135,25 @@ function _srchRenderResults(results, q) {
   list.appendChild(frag);
 }
 
+// Render a single message with position badge into container
+function _srchRenderContextMsg(container, m, posIdx, isSelected, allMsgs) {
+  const row = document.createElement('div');
+  row.className = 'flex gap-2 items-start';
+
+  const badge = document.createElement('div');
+  badge.className = 'shrink-0 font-mono text-[9px] pt-2.5 w-7 text-right select-none ' +
+    (isSelected ? 'text-emerald-400/70' : 'text-white/18');
+  badge.textContent = '#' + (posIdx + 1);
+  row.appendChild(badge);
+
+  const msgWrap = document.createElement('div');
+  msgWrap.className = 'flex-1 min-w-0 flex flex-col';
+  _renderSingleMessage(msgWrap, m, allMsgs, null);
+  row.appendChild(msgWrap);
+
+  container.appendChild(row);
+}
+
 async function _srchOpenResult(sid, msgId, cardEl) {
   document.querySelectorAll('.srch-result-card').forEach(c => {
     c.classList.remove('active', 'bg-white/8', 'border-emerald-500/20');
@@ -128,10 +161,11 @@ async function _srchOpenResult(sid, msgId, cardEl) {
   if (cardEl) cardEl.classList.add('active', 'bg-white/8', 'border-emerald-500/20');
 
   const hdr = document.getElementById('srch-convViewerHeader');
-  const msgs = document.getElementById('srch-convMessages');
+  const contextPane = document.getElementById('srch-contextPane');
+  const emptyState = document.getElementById('srch-emptyState');
   const nav = document.getElementById('srch-convNavBar');
-  if (msgs) msgs.textContent = '';
-  if (nav) nav.classList.add('hidden');
+
+  // Show loading state
   if (hdr) {
     hdr.textContent = '';
     const loading = document.createElement('span');
@@ -139,6 +173,10 @@ async function _srchOpenResult(sid, msgId, cardEl) {
     loading.textContent = '로딩 중...';
     hdr.appendChild(loading);
   }
+  if (contextPane) contextPane.classList.add('hidden');
+  if (emptyState) emptyState.classList.add('hidden');
+  if (nav) nav.classList.add('hidden');
+
   _srchCurrentSid = sid;
 
   try {
@@ -148,12 +186,26 @@ async function _srchOpenResult(sid, msgId, cardEl) {
     ]);
     _srchCurrentSession = s;
 
-    const targetOffset = Math.max(0, (pos.position || 0) - 50);
-    const localIdx = (pos.position || 0) - targetOffset;
+    const position = pos.position || 0; // 0-based absolute index
+    const prevStart = Math.max(0, position - _SRCH_CTX);
+    const prevCount = position - prevStart;
+    const totalMsgs = s.message_count || 0;
 
-    const data = await safeFetch('/api/sessions/' + encodeURIComponent(sid) + '/messages?limit=500&offset=' + targetOffset);
-    const allMsgs = Array.isArray(data) ? data : (data.messages || []);
+    // Load prev + selected + next in two fetches
+    const [prevData, selData] = await Promise.all([
+      prevCount > 0
+        ? safeFetch('/api/sessions/' + encodeURIComponent(sid) + '/messages?limit=' + prevCount + '&offset=' + prevStart)
+        : Promise.resolve({ messages: [] }),
+      safeFetch('/api/sessions/' + encodeURIComponent(sid) + '/messages?limit=' + (1 + _SRCH_CTX) + '&offset=' + position),
+    ]);
 
+    const prevMsgs = Array.isArray(prevData) ? prevData : (prevData.messages || []);
+    const selAndNext = Array.isArray(selData) ? selData : (selData.messages || []);
+    const selMsg = selAndNext[0] || null;
+    const nextMsgs = selAndNext.slice(1);
+    const allFetched = [...prevMsgs, ...selAndNext];
+
+    // Render session header
     if (hdr) {
       hdr.textContent = '';
       const row = document.createElement('div');
@@ -178,41 +230,50 @@ async function _srchOpenResult(sid, msgId, cardEl) {
         row.appendChild(costEl);
       }
 
-      if (s.message_count != null) {
-        const cntEl = document.createElement('span');
-        cntEl.className = 'text-white/30 text-xs';
-        cntEl.textContent = String(s.message_count) + '개 메시지';
-        row.appendChild(cntEl);
-      }
-
       hdr.appendChild(row);
     }
 
-    if (msgs) {
-      msgs.textContent = '';
-      let prevBr = null;
-      for (const m of allMsgs) {
-        _renderTimeGap(msgs, m, prevBr);
-        _renderSingleMessage(msgs, m, allMsgs, prevBr);
-        prevBr = m;
+    // Render prev messages
+    const prevEl = document.getElementById('srch-prevMsgs');
+    if (prevEl) {
+      prevEl.textContent = '';
+      for (let i = 0; i < prevMsgs.length; i++) {
+        _srchRenderContextMsg(prevEl, prevMsgs[i], prevStart + i, false, allFetched);
       }
     }
 
-    const msgCount = document.getElementById('srch-convMsgCount');
-    if (msgCount) msgCount.textContent = allMsgs.length + '개 메시지';
-    if (nav) nav.classList.remove('hidden');
+    // Render selected message
+    const selEl = document.getElementById('srch-selMsg');
+    if (selEl) {
+      selEl.textContent = '';
+      if (selMsg) _srchRenderContextMsg(selEl, selMsg, position, true, allFetched);
+    }
 
-    setTimeout(() => {
-      if (!msgs) return;
-      const allEls = msgs.querySelectorAll('[data-msg-role]');
-      const target = allEls[localIdx];
-      if (target) {
-        target.classList.add('conv-msg-focused');
-        const cRect = msgs.getBoundingClientRect();
-        const tRect = target.getBoundingClientRect();
-        msgs.scrollTop += tRect.top - cRect.top - cRect.height / 2 + target.offsetHeight / 2;
+    // Render next messages
+    const nextEl = document.getElementById('srch-nextMsgs');
+    const nextSep = document.getElementById('srch-nextSep');
+    if (nextEl) {
+      nextEl.textContent = '';
+      if (nextMsgs.length > 0) {
+        for (let i = 0; i < nextMsgs.length; i++) {
+          _srchRenderContextMsg(nextEl, nextMsgs[i], position + 1 + i, false, allFetched);
+        }
+        if (nextSep) nextSep.classList.remove('hidden');
+      } else {
+        if (nextSep) nextSep.classList.add('hidden');
       }
-    }, 80);
+    }
+
+    // Show context pane
+    if (contextPane) contextPane.classList.remove('hidden');
+    if (emptyState) emptyState.classList.add('hidden');
+
+    // Nav bar
+    const msgCount = document.getElementById('srch-convMsgCount');
+    const posInfo = document.getElementById('srch-convPosInfo');
+    if (msgCount) msgCount.textContent = totalMsgs ? totalMsgs + '개 메시지' : '';
+    if (posInfo) posInfo.textContent = '#' + (position + 1);
+    if (nav) nav.classList.remove('hidden');
 
   } catch (e) {
     if (hdr) {
@@ -222,6 +283,7 @@ async function _srchOpenResult(sid, msgId, cardEl) {
       err.textContent = '로딩 실패: ' + (e.message || String(e));
       hdr.appendChild(err);
     }
+    if (emptyState) emptyState.classList.remove('hidden');
   }
 }
 
