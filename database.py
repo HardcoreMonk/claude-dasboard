@@ -31,7 +31,7 @@ _READ_CONN_TTL = 300              # seconds before recycling a cached read conne
 _READ_EPOCH = 0                   # incremented after writes so readers reopen snapshots
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 16               # bump on every schema change
+SCHEMA_VERSION = 17               # bump on every schema change
 _CODEX_FTS_TOKEN_RE = re.compile(r'[\w가-힣]+', re.UNICODE)
 
 
@@ -245,6 +245,7 @@ CREATE TABLE IF NOT EXISTS codex_sessions (
     updated_at TEXT,
     model TEXT,
     cwd TEXT,
+    source_node TEXT DEFAULT 'local',
     pinned INTEGER DEFAULT 0,
     message_count INTEGER DEFAULT 0,
     user_message_count INTEGER DEFAULT 0
@@ -252,6 +253,7 @@ CREATE TABLE IF NOT EXISTS codex_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_codex_sessions_project_path ON codex_sessions(project_path);
 CREATE INDEX IF NOT EXISTS idx_codex_sessions_updated_at ON codex_sessions(updated_at);
+CREATE INDEX IF NOT EXISTS idx_codex_sessions_source_node ON codex_sessions(source_node);
 
 CREATE TABLE IF NOT EXISTS codex_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -700,21 +702,23 @@ def _ensure_codex_session(
     updated_at: str = '',
     cwd: str = '',
     model: str | None = None,
+    source_node: str = 'local',
 ) -> None:
     conn.execute(
         '''
         INSERT INTO codex_sessions
-            (id, project_path, session_name, created_at, updated_at, cwd, model)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (id, project_path, session_name, created_at, updated_at, cwd, model, source_node)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             project_path = excluded.project_path,
             session_name = COALESCE(NULLIF(excluded.session_name, ''), codex_sessions.session_name),
             created_at = COALESCE(NULLIF(excluded.created_at, ''), codex_sessions.created_at),
             updated_at = COALESCE(NULLIF(excluded.updated_at, ''), codex_sessions.updated_at),
             cwd = COALESCE(NULLIF(excluded.cwd, ''), codex_sessions.cwd),
-            model = COALESCE(NULLIF(excluded.model, ''), codex_sessions.model)
+            model = COALESCE(NULLIF(excluded.model, ''), codex_sessions.model),
+            source_node = COALESCE(NULLIF(excluded.source_node, ''), codex_sessions.source_node, 'local')
         ''',
-        (session_id, project_path, session_name, created_at, updated_at, cwd, model or ''),
+        (session_id, project_path, session_name, created_at, updated_at, cwd, model or '', source_node or 'local'),
     )
 
 
@@ -732,12 +736,23 @@ def store_codex_message(
     parent_uuid: str = '',
     model: str = '',
     cwd: str = '',
+    source_node: str = 'local',
 ) -> int:
     """Persist a Codex message plus its project/session context."""
     preview = content_preview or content[:240]
     with write_db() as conn:
         _ensure_codex_project(conn, project_path, project_name or Path(project_path).name or project_path)
-        _ensure_codex_session(conn, session_id, project_path, session_name, timestamp, timestamp, cwd, model)
+        _ensure_codex_session(
+            conn,
+            session_id,
+            project_path,
+            session_name,
+            timestamp,
+            timestamp,
+            cwd,
+            model,
+            source_node,
+        )
         cur = conn.execute(
             '''
             INSERT OR IGNORE INTO codex_messages
@@ -1273,7 +1288,7 @@ def list_codex_sessions_table(
                 '' AS final_stop_reason,
                 '' AS tags,
                 0 AS turn_duration_ms,
-                'local' AS source_node,
+                COALESCE(NULLIF(s.source_node, ''), 'local') AS source_node,
                 0 AS duration_seconds,
                 0 AS subagent_count,
                 0.0 AS subagent_cost,
@@ -1326,7 +1341,7 @@ def get_codex_session_detail_row(session_id: str) -> dict | None:
                 '' AS final_stop_reason,
                 '' AS tags,
                 0 AS turn_duration_ms,
-                'local' AS source_node,
+                COALESCE(NULLIF(s.source_node, ''), 'local') AS source_node,
                 0 AS duration_seconds,
                 0 AS subagent_count,
                 0.0 AS subagent_cost,
@@ -1772,6 +1787,15 @@ def init_db() -> None:
                     DROP TABLE IF EXISTS claude_ai_conversations;
                 ''')
                 current = _commit_migration(conn, 16)
+            if current < 17:
+                logger.info("Migrating schema v%d → 17 (codex_sessions.source_node)", current)
+                _ensure_column(conn, 'codex_sessions', 'source_node', "TEXT DEFAULT 'local'")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_codex_sessions_source_node "
+                    "ON codex_sessions(source_node)"
+                )
+                conn.execute("UPDATE codex_sessions SET source_node = 'local' WHERE source_node IS NULL OR source_node = ''")
+                current = _commit_migration(conn, 17)
             # One-time VACUUM to activate auto_vacuum=INCREMENTAL on legacy databases
             av = conn.execute('PRAGMA auto_vacuum').fetchone()[0]
             if av != 2:  # 2 = INCREMENTAL

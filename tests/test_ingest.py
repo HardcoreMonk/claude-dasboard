@@ -225,7 +225,9 @@ def test_ingest_creates_session(client):
     import database
     with database.read_db() as db:
         row = db.execute(
-            'SELECT source_node, project_name FROM sessions WHERE id = ?',
+            'SELECT source_node, p.project_name FROM codex_sessions s '
+            'JOIN codex_projects p ON p.project_path = s.project_path '
+            'WHERE s.id = ?',
             ('remote-sess-1',),
         ).fetchone()
     assert row is not None, 'session must be created after ingest'
@@ -249,10 +251,30 @@ def test_ingest_creates_messages(client):
     import database
     with database.read_db() as db:
         count = db.execute(
-            'SELECT COUNT(*) FROM messages WHERE session_id = ?',
+            'SELECT COUNT(*) FROM codex_messages WHERE session_id = ?',
             ('msg-sess',),
         ).fetchone()[0]
     assert count == 2
+
+
+def test_nodes_counts_are_derived_from_codex_remote_sessions(client):
+    _, key = _register_node(client, 'count-node')
+    record = _make_assistant_record(session_id='count-sess', uuid='count-u1',
+                                    cwd='/tmp/count-project')
+    r = client.post('/api/ingest',
+                    json={
+                        'node_id': 'count-node',
+                        'file_path': '/home/user/.codex/projects/count/history.jsonl',
+                        'records': [record],
+                    },
+                    headers={'X-Ingest-Key': key})
+    assert r.status_code == 200
+
+    nodes = client.get('/api/nodes')
+    assert nodes.status_code == 200
+    node = next(n for n in nodes.json()['nodes'] if n['node_id'] == 'count-node')
+    assert node['session_count'] == 1
+    assert node['message_count'] == 1
 
 
 # ─── Collector download endpoint ─────────────────────────────────────

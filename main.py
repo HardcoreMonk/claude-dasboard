@@ -65,7 +65,7 @@ from database import (
     wal_checkpoint,
     write_db,
 )
-from codex_parser import process_record
+from codex_parser import normalize_codex_record, process_record
 from codex_watcher import CodexFileWatcher, WatcherMetrics
 
 logging.basicConfig(
@@ -3321,6 +3321,91 @@ class IngestPayload(BaseModel):
     records: list[dict] = Field(..., max_length=500)
 
 
+def _ingest_codex_remote_record(record: dict, file_path: str, source_node: str) -> Optional[dict]:
+    raw = dict(record)
+    raw['_source_path'] = file_path
+    normalized = normalize_codex_record(raw)
+    project_path = normalized.project_path
+    project_name = normalized.project_name
+    if not project_path:
+        path = Path(file_path)
+        project_path = str(path.parent)
+        project_name = path.parent.name
+    if not (normalized.session_id and normalized.timestamp and project_path):
+        return None
+
+    if normalized.event_type == 'message':
+        role = normalized.payload.get('message', {}).get('role') or normalized.payload.get('role') or 'assistant'
+        content = normalized.payload.get('content', '')
+    elif normalized.event_type == 'tool':
+        role = 'tool'
+        content = json.dumps(normalized.payload, ensure_ascii=False, sort_keys=True)
+    elif normalized.event_type == 'agent':
+        role = 'agent'
+        content = json.dumps(normalized.payload, ensure_ascii=False, sort_keys=True)
+    else:
+        role = normalized.event_type or 'message'
+        content = json.dumps(normalized.payload, ensure_ascii=False, sort_keys=True)
+
+    preview = ''
+    if role == 'message' or role == 'assistant' or role == 'user':
+        preview = str(normalized.payload.get('content', '') or '')[:240]
+    elif role == 'tool':
+        preview = ' '.join(
+            part for part in [
+                str(normalized.payload.get('name', '') or ''),
+                str(normalized.payload.get('input', '') or ''),
+            ] if part
+        )[:240]
+    elif role == 'agent':
+        preview = ' '.join(
+            part for part in [
+                str(normalized.payload.get('agent_name', '') or ''),
+                str(normalized.payload.get('status', '') or ''),
+            ] if part
+        )[:240]
+    if not preview:
+        preview = normalized.searchable_text[:240]
+
+    message_id = hashlib.sha1(
+        '|'.join([
+            normalized.session_id,
+            file_path,
+            str(raw.get('_line_number', '')),
+            normalized.timestamp,
+            role,
+            preview,
+        ]).encode('utf-8')
+    ).hexdigest()
+
+    from database import store_codex_message
+
+    inserted_id = store_codex_message(
+        project_path=project_path,
+        project_name=project_name or Path(project_path).name or project_path,
+        session_id=normalized.session_id,
+        session_name=normalized.session_id,
+        role=role,
+        content=content,
+        content_preview=preview,
+        timestamp=normalized.timestamp,
+        message_uuid=message_id,
+        source_node=source_node,
+    )
+    if inserted_id <= 0:
+        return None
+    return {
+        'type': 'new_message',
+        'session_id': normalized.session_id,
+        'project_name': project_name or Path(project_path).name or project_path,
+        'project_path': project_path,
+        'timestamp': normalized.timestamp,
+        'role': role,
+        'preview': preview[:300],
+        'source_node': source_node,
+    }
+
+
 @app.post("/api/ingest")
 async def api_ingest(payload: IngestPayload, request: Request):
     """Receive JSONL records from a remote collector agent."""
@@ -3329,21 +3414,20 @@ async def api_ingest(payload: IngestPayload, request: Request):
         return JSONResponse({'error': 'invalid node_id or ingest key'}, 403)
 
     new_records: list[dict] = []
+    for line_number, record in enumerate(payload.records):
+        raw = dict(record)
+        raw.setdefault('_line_number', line_number)
+        result = _ingest_codex_remote_record(raw, payload.file_path, payload.node_id)
+        if result:
+            new_records.append(result)
     with write_db() as db:
-        for record in payload.records:
-            result = process_record(
-                record, payload.file_path, db,
-                source_node=payload.node_id)
-            if result:
-                new_records.append(result)
-        # Update node stats
         db.execute('''
             UPDATE remote_nodes
             SET last_seen = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-                session_count = (SELECT COUNT(*) FROM sessions
+                session_count = (SELECT COUNT(*) FROM codex_sessions
                                  WHERE source_node = ?),
-                message_count = (SELECT COUNT(*) FROM messages m
-                                 JOIN sessions s ON m.session_id = s.id
+                message_count = (SELECT COUNT(*) FROM codex_messages m
+                                 JOIN codex_sessions s ON m.session_id = s.id
                                  WHERE s.source_node = ?)
             WHERE node_id = ?
         ''', (payload.node_id, payload.node_id, payload.node_id))
@@ -3373,10 +3457,10 @@ def api_nodes():
         ).fetchall()
         local_stats = db.execute('''
             SELECT COUNT(*) AS session_count,
-                   (SELECT COUNT(*) FROM messages m
-                    JOIN sessions s ON m.session_id = s.id
+                   (SELECT COUNT(*) FROM codex_messages m
+                    JOIN codex_sessions s ON m.session_id = s.id
                     WHERE s.source_node = 'local') AS message_count
-            FROM sessions WHERE source_node = 'local'
+            FROM codex_sessions WHERE source_node = 'local'
         ''').fetchone()
     nodes = [{'node_id': 'local', 'label': 'Local',
               'session_count': local_stats['session_count'],
@@ -3832,7 +3916,11 @@ def api_admin_status():
 
     with read_db() as db:
         schema_v = db.execute("PRAGMA user_version").fetchone()[0]
-        codex_ingest = get_codex_ingest_status()
+        codex_ingest = {
+            'source_kind': 'codex',
+            'indexed_sessions': int(db.execute('SELECT COUNT(*) FROM codex_sessions').fetchone()[0]),
+            'indexed_messages': int(db.execute('SELECT COUNT(*) FROM codex_messages').fetchone()[0]),
+        }
         counts = {
             'sessions': codex_ingest.get('indexed_sessions', 0),
             'messages': codex_ingest.get('indexed_messages', 0),
