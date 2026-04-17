@@ -3,6 +3,8 @@
 @tailwind utilities;
 
 /* ── Base ── */
+html { color-scheme: dark; }
+body.theme-light { color-scheme: light; }
 body { font-feature-settings: 'ss01','tnum'; }
 ::-webkit-scrollbar { width:5px; height:5px; }
 ::-webkit-scrollbar-track { background:transparent; }
@@ -14,7 +16,7 @@ body { font-feature-settings: 'ss01','tnum'; }
 body.theme-light * { scrollbar-color: rgba(0,0,0,.12) transparent; }
 
 /* ── WCAG AA contrast floor (dark theme only) ── */
-/* Raise text-white/25~35 to minimum /45 for 4.5:1 ratio on #0a0a0a */
+/* Raise text-white/25~35 to minimum /45 for 4.5:1 ratio on #0f0f0f */
 body:not(.theme-light) .text-white\/25  { color: rgba(255,255,255,.45); }
 body:not(.theme-light) .text-white\/30  { color: rgba(255,255,255,.45); }
 body:not(.theme-light) .text-white\/35  { color: rgba(255,255,255,.48); }
@@ -140,7 +142,7 @@ table > thead {
   position: sticky;
   top: 0;
   z-index: 5;
-  background: rgba(10,10,10,.85);
+  background: rgba(15,15,15,.85);
   backdrop-filter: blur(8px);
 }
 table > thead th { background: transparent; }
@@ -298,6 +300,32 @@ body.theme-light .bg-black\/60 { background: rgba(0,0,0,.35); }
 /* ── Scrollbar ── */
 body.theme-light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); }
 body.theme-light ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.22); }
+
+/* ── Missing bg-white/* light mappings ── */
+body.theme-light .bg-white\/\[0\.01\] { background: rgba(0,0,0,.01); }
+body.theme-light .bg-white\/\[0\.06\] { background: rgba(0,0,0,.05); }
+body.theme-light .bg-white\/\[0\.08\] { background: rgba(0,0,0,.06); }
+body.theme-light .bg-white\/8         { background: rgba(0,0,0,.06); }
+body.theme-light .bg-white\/10        { background: rgba(0,0,0,.07); }
+body.theme-light .bg-white\/15        { background: rgba(0,0,0,.09); }
+body.theme-light .bg-white\/20        { background: rgba(0,0,0,.12); }
+
+/* ── Missing border-white/* light mappings ── */
+body.theme-light .border-white\/\[0\.04\] { border-color: rgba(0,0,0,.06); }
+body.theme-light .border-white\/\[0\.08\] { border-color: rgba(0,0,0,.11); }
+body.theme-light .border-white\/\[0\.10\] { border-color: rgba(0,0,0,.13); }
+
+/* ── Missing ring-white/* light mappings ── */
+body.theme-light .ring-white\/\[0\.12\] { --tw-ring-color: rgba(0,0,0,.15); }
+
+/* ── Missing text-white/* light mappings ── */
+body.theme-light .text-white\/18 { color: rgba(0,0,0,.36); }
+
+/* ── Hover bg states on light bg ── */
+body.theme-light .hover\:bg-white\/\[0\.04\]:hover { background: rgba(0,0,0,.04); }
+body.theme-light .hover\:bg-white\/5:hover          { background: rgba(0,0,0,.04); }
+body.theme-light .hover\:bg-white\/10:hover         { background: rgba(0,0,0,.07); }
+body.theme-light .hover\:bg-white\/20:hover         { background: rgba(0,0,0,.12); }
 
 /* ── Table hover on light bg ── */
 body.theme-light tbody tr:hover { background: rgba(0,0,0,.03); }
@@ -501,9 +529,12 @@ body.theme-light .trace-current { box-shadow: inset 0 0 0 2px rgba(126,34,206,.5
 .srch-role-btn { color: rgba(255,255,255,.35); border: 1px solid rgba(255,255,255,.07); }
 .srch-role-btn.active { background: rgba(52,211,153,.15); color: #34d399; border-color: rgba(52,211,153,.3); }
 .srch-hl { background: rgba(251,191,36,.25); color: rgba(255,255,255,.9); border-radius: 2px; }
-body.theme-light .srch-hl { background: rgba(251,191,36,.4); }
+body.theme-light .srch-hl { background: rgba(251,191,36,.4); color: rgba(0,0,0,.85); }
+body.theme-light .srch-role-btn { color: rgba(0,0,0,.5); border-color: rgba(0,0,0,.12); }
+body.theme-light .srch-role-btn.active { background: rgba(16,185,129,.18); color: #047857; border-color: rgba(16,185,129,.45); }
 .text-white\/18 { color: rgba(255,255,255,.18); }
 #srch-contextPane { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.08) transparent; }
+body.theme-light #srch-contextPane { scrollbar-color: rgba(0,0,0,.12) transparent; }
 /* FIX-003: Selected message box — prominent emerald outline + glow */
 .srch-sel-msg-box {
   border: 1px solid rgba(52,211,153,.35);
