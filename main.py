@@ -1513,6 +1513,204 @@ def _codex_project_delete(project_name: str, path: Optional[str]) -> dict:
     }
 
 
+_CODEX_SUBAGENTS_SORT_MAP = {
+    'updated_at': 'updated_at',
+    'created_at': 'created_at',
+    'cost': 'cost_usd',
+    'messages': 'message_count',
+    'type': 'agent_type',
+    'description': 'agent_description',
+}
+
+
+def _codex_agent_run_rows(
+    *,
+    parent_session_id: Optional[str] = None,
+    agent_type: Optional[str] = None,
+    search: Optional[str] = None,
+) -> list[dict]:
+    rows: list[dict] = []
+    with read_db() as db:
+        sql = '''
+            SELECT
+                m.id AS message_id,
+                m.message_uuid,
+                m.session_id,
+                m.content,
+                m.content_preview,
+                m.timestamp,
+                m.model,
+                s.project_path,
+                p.project_name
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE m.role = 'agent'
+        '''
+        params: list[object] = []
+        if parent_session_id:
+            sql += ' AND m.session_id = ?'
+            params.append(parent_session_id)
+        sql += ' ORDER BY m.timestamp DESC, m.id DESC'
+        for row in db.execute(sql, params).fetchall():
+            payload = {}
+            try:
+                payload = json.loads(row['content'] or '')
+            except Exception:
+                payload = {}
+            name = payload.get('agent_name', '') or 'agent'
+            status = payload.get('status', '') or 'unknown'
+            desc = row['content_preview'] or f'{name} {status}'
+            item = {
+                'id': f"agent-run-{row['message_id']}",
+                'parent_session_id': row['session_id'],
+                'agent_type': name,
+                'agent_description': desc,
+                'model': row['model'] or '',
+                'created_at': row['timestamp'],
+                'updated_at': row['timestamp'],
+                'cost_usd': 0.0,
+                'message_count': 1,
+                'total_input_tokens': 0,
+                'total_output_tokens': 0,
+                'total_cache_read_tokens': 0,
+                'project_name': row['project_name'],
+                'project_path': row['project_path'],
+                'duration_seconds': 0.0,
+                'final_stop_reason': status,
+                'parent_tool_use_id': '',
+                'task_prompt': '',
+            }
+            if agent_type and item['agent_type'] != agent_type:
+                continue
+            if search:
+                hay = f"{item['agent_type']} {item['agent_description']}".lower()
+                if search.lower() not in hay:
+                    continue
+            rows.append(item)
+    return rows
+
+
+def _codex_session_subagents_payload(session_id: str) -> dict:
+    rows = _codex_agent_run_rows(parent_session_id=session_id)
+    return {
+        'parent_session_id': session_id,
+        'subagents': rows,
+        'total': len(rows),
+    }
+
+
+def _codex_subagents_list_payload(
+    *,
+    agent_type: Optional[str],
+    parent: Optional[str],
+    search: Optional[str],
+    sort: str,
+    order: str,
+    page: int,
+    per_page: int,
+) -> dict:
+    rows = _codex_agent_run_rows(parent_session_id=parent, agent_type=agent_type, search=search)
+    sort_key = _CODEX_SUBAGENTS_SORT_MAP.get(sort, 'cost_usd')
+    reverse = str(order).lower() != 'asc'
+    rows = sorted(rows, key=lambda row: (row.get(sort_key), row['id']), reverse=reverse)
+    offset = (page - 1) * per_page
+    return {
+        'subagents': rows[offset:offset + per_page],
+        'total': len(rows),
+        'page': page,
+        'per_page': per_page,
+        'pages': max(1, -(-len(rows) // per_page)),
+        'sort': sort,
+        'order': 'asc' if not reverse else 'desc',
+    }
+
+
+def _codex_subagents_stats_payload() -> dict:
+    rows = _codex_agent_run_rows()
+    by_type: dict[str, dict] = {}
+    by_stop_reason: dict[str, dict] = {}
+    by_type_and_stop_reason: dict[tuple[str, str], dict] = {}
+    parents: dict[str, dict] = {}
+    for row in rows:
+        type_row = by_type.setdefault(row['agent_type'], {
+            'agent_type': row['agent_type'],
+            'count': 0,
+            'cost': 0.0,
+            'tokens': 0,
+            'messages': 0,
+            'avg_cost': 0.0,
+            'avg_duration_seconds': 0.0,
+            'max_duration_seconds': 0.0,
+        })
+        type_row['count'] += 1
+        type_row['messages'] += row['message_count']
+
+        stop_row = by_stop_reason.setdefault(row['final_stop_reason'], {
+            'stop_reason': row['final_stop_reason'],
+            'count': 0,
+            'cost': 0.0,
+        })
+        stop_row['count'] += 1
+
+        combo = by_type_and_stop_reason.setdefault((row['agent_type'], row['final_stop_reason']), {
+            'agent_type': row['agent_type'],
+            'stop_reason': row['final_stop_reason'],
+            'count': 0,
+            'cost': 0.0,
+        })
+        combo['count'] += 1
+
+        parent_row = parents.setdefault(row['parent_session_id'], {
+            'parent_session_id': row['parent_session_id'],
+            'sub_count': 0,
+            'total_cost': 0.0,
+            'project': row['project_name'],
+        })
+        parent_row['sub_count'] += 1
+
+    return {
+        'totals': {
+            'count': len(rows),
+            'cost': 0.0,
+            'tokens': 0,
+            'messages': len(rows),
+        },
+        'by_type': list(by_type.values()),
+        'top_by_cost': rows[:10],
+        'top_by_duration': rows[:10],
+        'parents_with_most_subs': sorted(parents.values(), key=lambda row: (-row['sub_count'], row['parent_session_id']))[:10],
+        'by_stop_reason': list(by_stop_reason.values()),
+        'by_type_and_stop_reason': list(by_type_and_stop_reason.values()),
+    }
+
+
+def _codex_subagents_heatmap_payload() -> dict:
+    rows = _codex_agent_run_rows()
+    projects: list[str] = []
+    agent_types: list[str] = []
+    seen_projects: set[str] = set()
+    seen_types: set[str] = set()
+    cells: dict[str, dict] = {}
+    for row in rows:
+        project_name = row['project_name']
+        agent_type = row['agent_type']
+        if project_name not in seen_projects:
+            seen_projects.add(project_name)
+            projects.append(project_name)
+        if agent_type not in seen_types:
+            seen_types.add(agent_type)
+            agent_types.append(agent_type)
+        key = f'{agent_type}|{project_name}'
+        cell = cells.setdefault(key, {'count': 0, 'cost': 0.0, 'tokens': 0})
+        cell['count'] += 1
+    return {
+        'projects': projects,
+        'agent_types': agent_types,
+        'cells': cells,
+    }
+
+
 @app.get("/api/codex/projects/{project_name}/stats")
 def api_codex_project_stats(project_name: str, path: Optional[str] = Query(None)):
     payload = _codex_project_stats_payload(project_name, path)
@@ -2724,6 +2922,8 @@ def api_session_subagents(session_id: str):
             WHERE parent_session_id = ? AND is_subagent = 1
             ORDER BY cost_micro DESC, updated_at DESC
         ''', (session_id,)).fetchall()
+    if not rows:
+        return _codex_session_subagents_payload(session_id)
     return {
         'parent_session_id': session_id,
         'subagents': [dict(r) for r in rows],
@@ -2776,6 +2976,16 @@ def api_subagents_list(
             ORDER BY {sort_col} {order_sql}
             LIMIT ? OFFSET ?
         ''', [*params, per_page, offset]).fetchall()
+    if total == 0:
+        return _codex_subagents_list_payload(
+            agent_type=agent_type,
+            parent=parent,
+            search=search,
+            sort=sort,
+            order=order,
+            page=page,
+            per_page=per_page,
+        )
     return {
         'subagents': [dict(r) for r in rows],
         'total': total, 'page': page, 'per_page': per_page,
@@ -2853,6 +3063,8 @@ def api_subagents_stats():
             GROUP BY agent_type, stop_reason
             ORDER BY agent_type, count DESC
         ''').fetchall()
+    if not totals or totals['count'] == 0:
+        return _codex_subagents_stats_payload()
     return {
         'totals': dict(totals) if totals else {},
         'by_type': [dict(r) for r in by_type],
@@ -2950,6 +3162,8 @@ def api_subagents_heatmap():
             GROUP BY agent_type, project_name
             ORDER BY cost DESC
         ''').fetchall()
+    if not rows:
+        return _codex_subagents_heatmap_payload()
     projects: list[str] = []
     seen_p: set[str] = set()
     types: list[str] = []

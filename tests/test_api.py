@@ -476,6 +476,77 @@ def test_subagents_stats(api_client):
     assert len(body['top_by_cost']) == 2
 
 
+def test_session_subagents_endpoint_falls_back_to_codex_agent_runs(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/sessions/codex-s1/subagents')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['parent_session_id'] == 'codex-s1'
+    assert body['total'] == 1
+    row = body['subagents'][0]
+    assert row['parent_session_id'] == 'codex-s1'
+    assert row['agent_type'] == 'planner'
+    assert row['agent_description'] == 'planner completed'
+    assert row['final_stop_reason'] == 'completed'
+    assert row['message_count'] == 1
+
+
+def test_subagents_list_falls_back_to_codex_agent_runs(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/subagents?agent_type=planner')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total'] == 1
+    row = body['subagents'][0]
+    assert row['parent_session_id'] == 'codex-s1'
+    assert row['project_name'] == 'codex-demo'
+    assert row['agent_type'] == 'planner'
+    assert row['final_stop_reason'] == 'completed'
+
+
+def test_subagents_stats_fall_back_to_codex_agent_runs(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/subagents/stats')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['totals']['count'] >= 1
+    assert body['totals']['messages'] >= 1
+    planner = next(row for row in body['by_type'] if row['agent_type'] == 'planner')
+    assert planner == {
+        'agent_type': 'planner',
+        'count': 1,
+        'cost': 0.0,
+        'tokens': 0,
+        'messages': 1,
+        'avg_cost': 0.0,
+        'avg_duration_seconds': 0.0,
+        'max_duration_seconds': 0.0,
+    }
+    assert {'stop_reason': 'completed', 'count': 1, 'cost': 0.0} in body['by_stop_reason']
+
+
+def test_subagents_heatmap_falls_back_to_codex_agent_runs(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/subagents/heatmap')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert 'codex-demo' in body['projects']
+    assert 'planner' in body['agent_types']
+    assert body['cells']['planner|codex-demo'] == {
+        'count': 1,
+        'cost': 0.0,
+        'tokens': 0,
+    }
+
+
 # ─── Search + project disambiguation ────────────────────────────────────
 
 def test_search_fts_finds_keyword(api_client):
