@@ -1257,6 +1257,67 @@ def _codex_usage_periods_payload() -> dict:
     }
 
 
+def _codex_plan_usage_payload() -> dict:
+    with read_db() as db:
+        cfg = _plan_cfg(db)
+        r_hour = cfg['reset_hour']
+        r_wd = cfg['reset_weekday']
+        tz = _user_tz(db)
+        now = datetime.now(tz)
+
+        ds = now.replace(hour=r_hour, minute=0, second=0, microsecond=0)
+        if now < ds:
+            ds -= timedelta(days=1)
+        de = ds + timedelta(days=1)
+
+        days_since = (now.weekday() - r_wd) % 7
+        ws = (now - timedelta(days=days_since)).replace(
+            hour=r_hour, minute=0, second=0, microsecond=0)
+        if now < ws:
+            ws -= timedelta(weeks=1)
+        we = ws + timedelta(weeks=1)
+
+        ds_utc = ds.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        ws_utc = ws.astimezone(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        def _q(since):
+            return db.execute(
+                '''
+                SELECT COUNT(*) AS messages
+                FROM codex_messages
+                WHERE timestamp >= ?
+                ''',
+                (since,),
+            ).fetchone()
+
+        dr, wr = _q(ds_utc), _q(ws_utc)
+        dl, wl = cfg['daily_cost_limit'], cfg['weekly_cost_limit']
+
+        def _blk(row, lim, start, end):
+            return {
+                'used_cost': 0.0,
+                'limit_cost': lim,
+                'used_tokens': 0,
+                'cache_tokens': 0,
+                'messages': int(row['messages'] or 0),
+                'percentage': 0,
+                'remaining_seconds': int(max(0, (end - now).total_seconds())),
+                'reset_at': end.isoformat(),
+                'period_start': start.isoformat(),
+            }
+
+    return {
+        'daily': _blk(dr, dl, ds, de),
+        'weekly': _blk(wr, wl, ws, we),
+        'config': {k: v for k, v in cfg.items() if k != 'id'},
+        'plan': detect_plan(),
+    }
+
+
+def _has_codex_runtime_data(db) -> bool:
+    return bool(int(db.execute('SELECT COUNT(*) FROM codex_sessions').fetchone()[0] or 0))
+
+
 def _codex_forecast_payload(days: int = 14) -> dict:
     with read_db() as db:
         tz = _user_tz(db)
@@ -1283,7 +1344,7 @@ def _codex_forecast_payload(days: int = 14) -> dict:
         'daily_used': 0,
         'weekly_limit': 0,
         'weekly_used': 0,
-        'days': days,
+        'window_days': days,
     }
 
 
@@ -1985,6 +2046,24 @@ def api_agents_summary(limit: int = Query(20, ge=1, le=100)):
 @app.get("/api/usage/hourly")
 def api_usage_hourly(hours: int = Query(24, ge=1, le=168)):
     with read_db() as db:
+        if _has_codex_runtime_data(db):
+            rows = db.execute(
+                '''
+                SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) AS hour,
+                       0 AS input_tokens,
+                       COUNT(*) AS output_tokens,
+                       0 AS cache_creation_tokens,
+                       0 AS cache_read_tokens,
+                       0.0 AS cost_usd,
+                       COUNT(*) AS message_count
+                FROM codex_messages
+                WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+                GROUP BY hour
+                ORDER BY hour
+                ''',
+                (f'-{hours} hours',),
+            ).fetchall()
+            return {'data': [dict(r) for r in rows]}
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
         rows = db.execute('''
@@ -2006,6 +2085,24 @@ def api_usage_hourly(hours: int = Query(24, ge=1, le=168)):
 @app.get("/api/usage/daily")
 def api_usage_daily(days: int = Query(30, ge=1, le=365)):
     with read_db() as db:
+        if _has_codex_runtime_data(db):
+            rows = db.execute(
+                '''
+                SELECT strftime('%Y-%m-%d', timestamp) AS date,
+                       0 AS input_tokens,
+                       COUNT(*) AS output_tokens,
+                       0 AS cache_creation_tokens,
+                       0 AS cache_read_tokens,
+                       0.0 AS cost_usd,
+                       COUNT(*) AS message_count
+                FROM codex_messages
+                WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+                GROUP BY date
+                ORDER BY date
+                ''',
+                (f'-{days} days',),
+            ).fetchall()
+            return {'data': [dict(r) for r in rows]}
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
         rows = db.execute('''
@@ -2043,6 +2140,9 @@ def api_models(
     page: int = Query(1, ge=1),
     per_page: int = Query(500, ge=1, le=500),
 ):
+    with read_db() as db:
+        if _has_codex_runtime_data(db):
+            return get_codex_models(sort=sort, order=order, page=page, per_page=per_page)
     sort_col = _MODELS_SORT_MAP.get(sort, 'message_count')
     order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
     offset = (page - 1) * per_page
@@ -2512,6 +2612,8 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
          each limit is reached at the current pace.
     """
     with read_db() as db:
+        if _has_codex_runtime_data(db):
+            return _codex_forecast_payload(days)
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
         rows = db.execute('''
@@ -2659,6 +2761,8 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
 def api_usage_periods():
     """Daily / weekly / monthly usage summary with deltas."""
     with read_db() as db:
+        if _has_codex_runtime_data(db):
+            return _codex_usage_periods_payload()
         tz = _user_tz(db)
         now = datetime.now(tz)
 
@@ -2733,6 +2837,8 @@ def api_usage_periods():
 @app.get("/api/plan/usage")
 def api_plan_usage():
     with read_db() as db:
+        if _has_codex_runtime_data(db):
+            return _codex_plan_usage_payload()
         cfg = _plan_cfg(db)
         r_hour = cfg['reset_hour']
         r_wd   = cfg['reset_weekday']

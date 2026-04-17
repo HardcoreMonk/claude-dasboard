@@ -463,6 +463,66 @@ def test_projects_top_shows_subagent_count(api_client):
     assert any(p['subagent_count'] > 0 for p in r.json()['projects'])
 
 
+def test_usage_and_model_endpoints_prefer_codex_data_when_both_sources_exist(api_client):
+    import database
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    recent = (now - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    database.store_codex_message(
+        project_path='/tmp/codex-live',
+        project_name='codex-live',
+        session_id='codex-live-s1',
+        session_name='Live usage session',
+        role='assistant',
+        content='recent codex assistant output',
+        content_preview='recent codex assistant output',
+        timestamp=recent,
+        message_uuid='codex-live-usage-1',
+        model='gpt-5.4',
+    )
+
+    hourly = api_client.get('/api/usage/hourly?hours=24')
+    assert hourly.status_code == 200
+    hourly_rows = hourly.json()['data']
+    assert hourly_rows
+    assert any(row['message_count'] >= 1 for row in hourly_rows)
+    assert all(row['cost_usd'] == 0.0 for row in hourly_rows)
+
+    daily = api_client.get('/api/usage/daily?days=7')
+    assert daily.status_code == 200
+    daily_rows = daily.json()['data']
+    assert daily_rows
+    assert any(row['message_count'] >= 1 for row in daily_rows)
+    assert all(row['cost_usd'] == 0.0 for row in daily_rows)
+
+    periods = api_client.get('/api/usage/periods')
+    assert periods.status_code == 200
+    periods_body = periods.json()
+    assert periods_body['day']['messages'] >= 1
+    assert periods_body['day']['cost'] == 0.0
+
+    forecast = api_client.get('/api/forecast?days=14')
+    assert forecast.status_code == 200
+    forecast_body = forecast.json()
+    assert forecast_body['avg_cost_per_day'] == 0.0
+    assert forecast_body['avg_msgs_per_day'] >= 0.0
+    assert forecast_body['window_days'] == 14
+
+    plan_usage = api_client.get('/api/plan/usage')
+    assert plan_usage.status_code == 200
+    plan_body = plan_usage.json()
+    assert plan_body['daily']['used_cost'] == 0.0
+    assert plan_body['daily']['messages'] >= 1
+
+    models = api_client.get('/api/models?sort=messages&order=desc')
+    assert models.status_code == 200
+    model_names = [row['model'] for row in models.json()['models']]
+    assert 'gpt-5.4' in model_names
+    assert 'claude-opus-4-6' not in model_names
+
+
 def test_project_stats_falls_back_to_codex_by_path(api_client):
     _clear_legacy_runtime_rows()
 
