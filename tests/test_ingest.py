@@ -3,7 +3,7 @@ Ingest API + Node management test suite.
 
 Covers: POST /api/nodes, GET /api/nodes, DELETE /api/nodes/{id},
         POST /api/nodes/{id}/rotate-key, POST /api/ingest,
-        GET /api/collector.py, auth requirements.
+        removed legacy collector download, auth requirements.
 """
 import json
 import sys
@@ -12,6 +12,9 @@ import pytest
 
 
 TEST_PASSWORD = 'ingest-test-pw'
+REMOVED_RUNTIME_PATHS = (
+    '/api/collector.py',
+)
 
 
 @pytest.fixture()
@@ -252,14 +255,12 @@ def test_ingest_creates_messages(client):
     assert count == 2
 
 
-# ─── Collector Download ───────────────────────────────────────────────
+# ─── Removed legacy download endpoint ────────────────────────────────
 
-def test_collector_download(client):
-    r = client.get('/api/collector.py')
-    assert r.status_code == 200
-    assert 'python' in r.headers.get('content-type', '').lower()
-    body = r.text
-    assert 'def main' in body or 'def run_once' in body
+@pytest.mark.parametrize('path', REMOVED_RUNTIME_PATHS)
+def test_collector_download_removed(client, path):
+    r = client.get(path)
+    assert r.status_code == 404
 
 
 # ─── Auth required for node management ────────────────────────────────

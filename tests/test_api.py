@@ -9,6 +9,13 @@ from pathlib import Path
 import pytest
 
 
+COLLECTOR_DOWNLOAD_PATH = '/api/collector.py'
+REMOVED_CLAUDE_API_PATHS = (
+    '/api/claude-ai/stats',
+)
+REMOVED_RUNTIME_PATHS = REMOVED_CLAUDE_API_PATHS + (COLLECTOR_DOWNLOAD_PATH,)
+
+
 def _reload_runtime_modules():
     try:
         from prometheus_client import REGISTRY
@@ -225,6 +232,38 @@ def test_admin_ingest_status_reports_codex_counters(api_client):
     assert body['source_kind'] == 'codex'
     assert body['indexed_sessions'] >= 2
     assert body['indexed_messages'] >= 5
+
+
+def test_admin_db_size_reports_storage_breakdown(api_client):
+    r = api_client.get('/api/admin/db-size')
+    assert r.status_code == 200
+    body = r.json()
+
+    for key in [
+        'size_bytes',
+        'wal_size_bytes',
+        'used_bytes',
+        'free_bytes',
+        'page_size',
+        'page_count',
+        'freelist_count',
+    ]:
+        assert key in body
+
+    assert body['size_bytes'] >= 0
+    assert body['wal_size_bytes'] >= 0
+    assert body['used_bytes'] >= 0
+    assert body['free_bytes'] >= 0
+    assert body['page_size'] > 0
+
+
+@pytest.mark.parametrize(
+    'path',
+    REMOVED_RUNTIME_PATHS,
+)
+def test_legacy_claude_runtime_routes_are_gone(api_client, path):
+    r = api_client.get(path)
+    assert r.status_code == 404
 
 
 def test_auth_me_reports_auth_required_when_password_set(auth_api_client):

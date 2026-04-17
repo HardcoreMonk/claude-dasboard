@@ -26,6 +26,12 @@ from pathlib import Path
 import pytest
 
 
+REMOVED_RUNTIME_PATHS = (
+    '/api/claude-ai/stats',
+    '/api/collector.py',
+)
+
+
 @pytest.fixture()
 def e2e_client(tmp_path, monkeypatch):
     """Boot the app against a small but representative fixture DB."""
@@ -196,6 +202,15 @@ def test_codex_branding_is_visible_in_shell_and_login(e2e_client):
     assert 'Codex Usage Dashboard' in login_html
     assert 'Codex Usage Dashboard' in start_script
     assert 'Claude Usage Dashboard' not in start_script
+
+
+@pytest.mark.parametrize(
+    'path',
+    REMOVED_RUNTIME_PATHS,
+)
+def test_legacy_claude_and_collector_routes_are_not_exposed(e2e_client, path):
+    r = e2e_client.get(path)
+    assert r.status_code == 404
 
 
 def test_search_landing_is_default_shell_view(e2e_client):

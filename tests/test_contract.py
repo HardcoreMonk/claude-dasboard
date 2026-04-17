@@ -15,6 +15,17 @@ from pathlib import Path
 import pytest
 
 
+COLLECTOR_DOWNLOAD_PATH = '/api/collector.py'
+REMOVED_CLAUDE_API_PATHS = (
+    '/api/claude-ai/stats',
+    '/api/claude-ai/conversations',
+    '/api/claude-ai/conversations/conv-1',
+    '/api/claude-ai/conversations/conv-1/messages',
+    '/api/claude-ai/search?q=sample',
+)
+REMOVED_RUNTIME_PATHS = REMOVED_CLAUDE_API_PATHS + (COLLECTOR_DOWNLOAD_PATH,)
+
+
 def _reload_runtime_modules():
     try:
         from prometheus_client import REGISTRY
@@ -58,8 +69,7 @@ def contract_client(tmp_path, monkeypatch):
 
     database.init_db()
     conn = sqlite3.connect(str(db_file))
-    # Minimal seeding: one parent, one subagent, a handful of messages, a tag,
-    # a claude.ai conversation + message.
+    # Minimal seeding: one parent, one subagent, a handful of messages, a tag.
     conn.executescript('''
         INSERT INTO sessions
           (id, project_name, project_path, cwd, model, created_at, updated_at,
@@ -83,26 +93,10 @@ def contract_client(tmp_path, monkeypatch):
             500, 200, 30000, 'claude-opus-4-6', '2026-04-01T00:00:01Z', 'end_turn'),
           ('s1', 'mu3', 'assistant', '{"type":"text","text":"explore"}', 'explore',
             100, 50, 4000, 'claude-haiku-4-5', '2026-04-01T01:00:01Z', 'end_turn');
-        INSERT INTO claude_ai_conversations
-          (uuid, name, summary, created_at, updated_at, message_count,
-           user_message_count, attachment_count, file_count, total_text_bytes,
-           imported_at)
-        VALUES
-          ('conv-1', 'sample', '', '2026-03-01T00:00:00Z', '2026-03-01T01:00:00Z',
-           1, 0, 0, 0, 100, '2026-04-11T00:00:00Z');
-        INSERT INTO claude_ai_messages
-          (conversation_uuid, message_uuid, parent_message_uuid, sender,
-           created_at, updated_at, text, content_preview, content_json,
-           has_thinking, has_tool_use, attachment_count, file_count)
-        VALUES
-          ('conv-1', 'cm-1', '', 'assistant', '2026-03-01T00:00:30Z',
-           '2026-03-01T00:00:30Z', 'sample reply', 'sample reply', '[]',
-           0, 0, 0, 0);
     ''')
     conn.commit()
     try:
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-        conn.execute("INSERT INTO claude_ai_messages_fts(claude_ai_messages_fts) VALUES('rebuild')")
         conn.commit()
     except sqlite3.OperationalError:
         pass
@@ -419,46 +413,15 @@ def test_contract_plan_usage(contract_client):
               'messages', 'remaining_seconds', 'reset_at'])
 
 
-# ─── claude.ai export ─────────────────────────────────────────────────────
+# ─── legacy Claude routes removed ──────────────────────────────────────────
 
-def test_contract_cai_stats(contract_client):
-    r = contract_client.get('/api/claude-ai/stats')
-    assert r.status_code == 200
-    _require(r.json(), '/api/claude-ai/stats',
-             ['conversations', 'messages', 'total_text_bytes'])
-
-
-def test_contract_cai_conversations(contract_client):
-    r = contract_client.get('/api/claude-ai/conversations?per_page=5')
-    assert r.status_code == 200
-    body = r.json()
-    _require(body, '/api/claude-ai/conversations',
-             ['conversations', 'total', 'page', 'per_page'])
-    if body['conversations']:
-        _require(body['conversations'][0], '/api/claude-ai/conversations[0]',
-                 ['uuid', 'name', 'created_at', 'updated_at',
-                  'message_count', 'total_text_bytes'])
-
-
-def test_contract_cai_conversation_detail(contract_client):
-    r = contract_client.get('/api/claude-ai/conversations/conv-1')
-    assert r.status_code == 200
-    _require(r.json(), '/api/claude-ai/conversations/{uuid}',
-             ['uuid', 'name', 'message_count'])
-
-
-def test_contract_cai_conversation_messages(contract_client):
-    r = contract_client.get('/api/claude-ai/conversations/conv-1/messages')
-    assert r.status_code == 200
-    body = r.json()
-    _require(body, '/api/claude-ai/conversations/{uuid}/messages',
-             ['conversation', 'messages', 'total'])
-
-
-def test_contract_cai_search(contract_client):
-    r = contract_client.get('/api/claude-ai/search?q=sample')
-    assert r.status_code == 200
-    _require(r.json(), '/api/claude-ai/search', ['results', 'query'])
+@pytest.mark.parametrize(
+    'path',
+    REMOVED_RUNTIME_PATHS,
+)
+def test_contract_legacy_claude_and_collector_routes_are_gone(contract_client, path):
+    r = contract_client.get(path)
+    assert r.status_code == 404
 
 
 # ─── Admin (non-destructive) ──────────────────────────────────────────────
@@ -466,17 +429,39 @@ def test_contract_cai_search(contract_client):
 def test_contract_admin_db_size(contract_client):
     r = contract_client.get('/api/admin/db-size')
     assert r.status_code == 200
-    _require(r.json(), '/api/admin/db-size', ['size_bytes', 'size_mb'])
+    body = r.json()
+    _require(
+        body,
+        '/api/admin/db-size',
+        [
+            'size_bytes',
+            'wal_size_bytes',
+            'used_bytes',
+            'free_bytes',
+            'page_size',
+            'page_count',
+            'freelist_count',
+        ],
+    )
+    assert body['size_bytes'] >= 0
+    assert body['wal_size_bytes'] >= 0
+    assert body['used_bytes'] >= 0
+    assert body['free_bytes'] >= 0
+    assert body['page_size'] > 0
+    assert body['page_count'] >= 0
+    assert body['freelist_count'] >= 0
 
 
 def test_contract_admin_status_includes_codex_ingest_fields(contract_client):
     r = contract_client.get('/api/admin/status')
     assert r.status_code == 200
+    body = r.json()
     _require(
-        r.json(),
+        body,
         '/api/admin/status',
         ['source_kind', 'indexed_sessions', 'indexed_messages', 'counts', 'watcher'],
     )
+    assert body['source_kind'] == 'codex'
 
 
 def test_contract_admin_retention_preview(contract_client):
