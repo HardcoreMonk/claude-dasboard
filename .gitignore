@@ -43,3 +43,6 @@ test-results/
 
 # Database (runtime generated)
 dashboard.db
+.gstack/
+srch-snap.md
+srch-snap2.md
