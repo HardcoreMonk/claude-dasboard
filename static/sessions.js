@@ -248,6 +248,8 @@ async function loadSessions(page=getPage()){
     if(af.cost_max)p.set('cost_max',af.cost_max);
     if(af.node)p.set('node',af.node);
     if(af.ai_tag)p.set('ai_tag',af.ai_tag);
+    if(af.tool)p.set('tool',af.tool);
+    if(af.min_turns)p.set('min_turns',af.min_turns);
     const d=await safeFetch('/api/sessions?'+p);
     state.totalPages=d.pages||1; // TODO: accessor
     renderSessionsThead();
@@ -280,6 +282,8 @@ function toggleAdvFilters() {
     if (g('advCostMin'))  g('advCostMin').value  = af.cost_min || '';
     if (g('advCostMax'))  g('advCostMax').value  = af.cost_max || '';
     if (g('advAiTagFilter')) g('advAiTagFilter').value = af.ai_tag || '';
+    if (g('advToolFilter'))  g('advToolFilter').value  = af.tool || '';
+    if (g('advMinTurns'))    g('advMinTurns').value    = af.min_turns || '';
   }
 }
 function applyAdvFilters() {
@@ -291,6 +295,8 @@ function applyAdvFilters() {
     cost_max:  g('advCostMax')?.value || '',
     node:      g('advNodeFilter')?.value || '',
     ai_tag:    g('advAiTagFilter')?.value || '',
+    tool:      g('advToolFilter')?.value || '',
+    min_turns: g('advMinTurns')?.value || '',
   });
   savePrefs({ advFilters: getAdvFilters() });
   setPage(1);
@@ -300,7 +306,7 @@ function applyAdvFilters() {
 function clearAdvFilters() {
   setAdvFilters({});
   savePrefs({ advFilters: {} });
-  ['advDateFrom','advDateTo','advCostMin','advCostMax','advNodeFilter','advAiTagFilter'].forEach(id => {
+  ['advDateFrom','advDateTo','advCostMin','advCostMax','advNodeFilter','advAiTagFilter','advToolFilter','advMinTurns'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -324,6 +330,8 @@ function renderAdvFiltersSummary() {
     if (af.cost_min || af.cost_max)  parts.push(`비용: $${af.cost_min || 0} ~ $${af.cost_max || '∞'}`);
     if (af.node)  parts.push(`노드: ${af.node}`);
     if (af.ai_tag) parts.push(`AI태그: ${af.ai_tag}`);
+    if (af.tool) parts.push(`툴: ${af.tool}`);
+    if (af.min_turns) parts.push(`최소메시지: ${af.min_turns}`);
     sum.textContent = parts.join(' · ');
   }
 }
@@ -419,7 +427,8 @@ function renderSessions(data){
         <div class="text-[10px] text-white/30 mt-0.5 truncate max-w-xs">${esc(trimPath(s.cwd||''))}</div>
         <div class="mt-1 flex flex-wrap gap-1 items-center">
           ${nodeBadge}
-          ${s.is_subagent?'<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400/70">subagent</span>':''}
+          ${s.is_subagent?'<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400/70">subagent</span>'+(s.is_subagent&&!s.parent_tool_use_id?'<span class="inline-block text-[9px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/75 border border-amber-500/25 font-semibold">orphan</span>':''):''}
+
           ${tagBadges}
           ${aiTagBadges}
           ${subBadge}

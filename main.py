@@ -707,6 +707,8 @@ def api_sessions(
     tag: Optional[str] = Query(None, max_length=80),
     node: Optional[str] = Query(None, max_length=64),
     ai_tag: Optional[str] = Query(None, max_length=40),
+    tool: Optional[str] = Query(None, max_length=50),
+    min_turns: Optional[int] = Query(None, ge=1),
 ):
     """List parent sessions. Subagents are excluded by default — use
     ``?include_subagents=true`` or the dedicated ``/api/subagents`` endpoint.
@@ -768,6 +770,19 @@ def api_sessions(
                 " WHERE value = ?)"
             )
             params.append(ai_tag)
+        if tool is not None:
+            if not re.match(r'^[A-Za-z][A-Za-z0-9_]{0,49}$', tool):
+                return JSONResponse({'error': 'invalid tool name'}, status_code=400)
+            conds.append(
+                "EXISTS (SELECT 1 FROM messages m, json_each(m.content) AS blk"
+                "  WHERE m.session_id = s.id AND m.role = 'assistant'"
+                "  AND json_extract(blk.value, '$.type') = 'tool_use'"
+                "  AND json_extract(blk.value, '$.name') = ?)"
+            )
+            params.append(tool)
+        if min_turns is not None:
+            conds.append("s.message_count >= ?")
+            params.append(min_turns)
         where = "WHERE " + " AND ".join(conds) if conds else ""
         total = db.execute(f"SELECT COUNT(*) FROM sessions {where}", params).fetchone()[0]
         offset = (page - 1) * per_page

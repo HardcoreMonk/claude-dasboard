@@ -1664,7 +1664,11 @@ function convTraceStep(n) {
   });
   steps[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
   const counter = document.getElementById('convTraceCounter');
-  if (counter) counter.textContent = `${idx + 1} / ${steps.length}`;
+  if (counter) {
+    const isErr = steps[idx].hasAttribute('data-trace-error');
+    counter.textContent = (isErr ? '\u25c7 ' : '') + `${idx + 1} / ${steps.length}`;
+    counter.style.color = isErr ? 'rgba(248,113,113,.8)' : '';
+  }
 }
 function convTracePrev() {
   if (!state.convTraceMode || !state.convTraceSteps.length) return;
@@ -1710,6 +1714,7 @@ function _renderSingleMessage(container, m, allMsgs, prevBr) {
       const parsed = JSON.parse(m.content || 'null');
       if (Array.isArray(parsed) && parsed.some(b => b.type === 'tool_use')) {
         w.setAttribute('data-trace-step', '');
+        if (m._hasTraceError) w.setAttribute('data-trace-error', '');
       }
     } catch(e) {}
   }
@@ -1765,7 +1770,7 @@ async function openConversation(sid,session,listItem){
     const stop = stopReasonBadge(session.final_stop_reason);
     const tuid = session.parent_tool_use_id
       ? `<span class="text-purple-300/60 font-mono">${esc(session.parent_tool_use_id)}</span>`
-      : '<span class="text-white/25">(not linked)</span>';
+      : '<span class="inline-block text-[9px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/75 border border-amber-500/25 font-semibold">orphan</span>';
     const parent = session.parent_session_id
       ? `<button onclick="openParentFromSubagent('${esc(session.parent_session_id)}')" class="text-accent/80 hover:text-accent underline font-mono">${esc(session.parent_session_id.slice(0,8))}</button>`
       : '—';
@@ -1854,6 +1859,24 @@ async function openConversation(sid,session,listItem){
   catch(err){c.innerHTML=`<div class="text-center text-white/25 text-xs py-10">로딩 실패</div>`;return;}
   c.innerHTML='';
   if(!msgs.length){c.innerHTML=`<div class="text-center text-white/25 text-xs py-10">메시지 없음</div>`;return;}
+  // Pre-pass: build _errIds set for ◇ error branch markers
+  const _errIds = new Set();
+  msgs.forEach(m => {
+    if (m.role !== 'user') return;
+    try {
+      const _c = JSON.parse(m.content || 'null');
+      if (!Array.isArray(_c)) return;
+      _c.forEach(b => { if (b.type === 'tool_result' && b.is_error && b.tool_use_id) _errIds.add(b.tool_use_id); });
+    } catch(e) {}
+  });
+  msgs.forEach(m => {
+    if (m.role !== 'assistant') return;
+    try {
+      const _c = JSON.parse(m.content || 'null');
+      if (!Array.isArray(_c)) return;
+      m._hasTraceError = _c.filter(b => b.type === 'tool_use').some(b => _errIds.has(b.id));
+    } catch(e) {}
+  });
   // Collect branch transitions so we only label a message when branch changes
   const branches = new Set();
   msgs.forEach(m => { if (m.git_branch) branches.add(m.git_branch); });
