@@ -183,6 +183,22 @@ def test_init_db_creates_codex_schema_objects(temp_db):
     }
 
 
+def test_init_db_does_not_create_claude_ai_schema_objects(temp_db):
+    import database
+    database.init_db()
+
+    conn = sqlite3.connect(str(temp_db))
+    objects = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE name IN ('claude_ai_conversations', 'claude_ai_messages', 'claude_ai_messages_fts')"
+        )
+    }
+
+    assert objects == set()
+
+
 def test_codex_fts_search_returns_message_with_context(temp_db):
     import database
     database.init_db()

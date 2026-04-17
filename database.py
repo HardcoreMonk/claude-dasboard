@@ -30,7 +30,7 @@ _read_local = threading.local()   # per-thread cached read connection
 _READ_CONN_TTL = 300              # seconds before recycling a cached read connection
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 15               # bump on every schema change
+SCHEMA_VERSION = 16               # bump on every schema change
 _CODEX_FTS_TOKEN_RE = re.compile(r'[\w가-힣]+', re.UNICODE)
 
 
@@ -217,73 +217,6 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content_preview ON 
 END;
 '''
 
-
-# v9: claude.ai export tables — isolated from sessions/messages so the existing
-# cost / forecast / budget aggregates stay clean. Source of truth is the
-# conversations.json emitted by claude.ai's "Export data" feature, which does
-# NOT include tokens, model names, or cost — only conversations + messages +
-# content blocks (text / thinking / tool_use / tool_result).
-_MIGRATE_V9_TABLES = '''
-CREATE TABLE IF NOT EXISTS claude_ai_conversations (
-    uuid TEXT PRIMARY KEY,
-    name TEXT,
-    summary TEXT,
-    created_at TEXT,
-    updated_at TEXT,
-    message_count INTEGER DEFAULT 0,
-    user_message_count INTEGER DEFAULT 0,
-    attachment_count INTEGER DEFAULT 0,
-    file_count INTEGER DEFAULT 0,
-    total_text_bytes INTEGER DEFAULT 0,
-    imported_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS claude_ai_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation_uuid TEXT NOT NULL,
-    message_uuid TEXT UNIQUE,
-    parent_message_uuid TEXT,
-    sender TEXT,
-    created_at TEXT,
-    text TEXT,
-    content_preview TEXT,
-    content_json TEXT,
-    has_thinking INTEGER DEFAULT 0,
-    has_tool_use INTEGER DEFAULT 0,
-    attachment_count INTEGER DEFAULT 0,
-    file_count INTEGER DEFAULT 0
-);
-
-CREATE INDEX IF NOT EXISTS idx_cai_msg_conv    ON claude_ai_messages(conversation_uuid);
-CREATE INDEX IF NOT EXISTS idx_cai_msg_created ON claude_ai_messages(created_at);
-CREATE INDEX IF NOT EXISTS idx_cai_conv_updated ON claude_ai_conversations(updated_at);
-'''
-
-_MIGRATE_V9_FTS = '''
-CREATE VIRTUAL TABLE IF NOT EXISTS claude_ai_messages_fts USING fts5(
-    content_preview,
-    content='claude_ai_messages',
-    content_rowid='id',
-    tokenize='unicode61 remove_diacritics 0'
-);
-
-CREATE TRIGGER IF NOT EXISTS cai_msg_fts_ai AFTER INSERT ON claude_ai_messages BEGIN
-    INSERT INTO claude_ai_messages_fts(rowid, content_preview)
-    VALUES (new.id, COALESCE(new.content_preview, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS cai_msg_fts_ad AFTER DELETE ON claude_ai_messages BEGIN
-    INSERT INTO claude_ai_messages_fts(claude_ai_messages_fts, rowid, content_preview)
-    VALUES ('delete', old.id, COALESCE(old.content_preview, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS cai_msg_fts_au AFTER UPDATE OF content_preview ON claude_ai_messages BEGIN
-    INSERT INTO claude_ai_messages_fts(claude_ai_messages_fts, rowid, content_preview)
-    VALUES ('delete', old.id, COALESCE(old.content_preview, ''));
-    INSERT INTO claude_ai_messages_fts(rowid, content_preview)
-    VALUES (new.id, COALESCE(new.content_preview, ''));
-END;
-'''
 
 # v15: Codex-native project/session/message store with message-first FTS.
 _MIGRATE_V15_CODEX = '''
@@ -819,27 +752,22 @@ def store_codex_message(
 def purge_legacy_dashboard_data() -> dict[str, int]:
     """Drop legacy Claude-backed rows from the runtime database.
 
-    Codex dashboard no longer uses the old sessions/messages or claude.ai
-    imports as a UI data source. Keep schema objects for compatibility, but
-    clear the rows so the runtime surfaces cannot drift back to Claude data.
+    Codex dashboard no longer uses the old sessions/messages runtime rows as
+    a UI data source. Clear them so the runtime surfaces cannot drift back to
+    pre-Codex data.
     """
     with write_db() as conn:
         counts = {
             'sessions': int(conn.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]),
             'messages': int(conn.execute('SELECT COUNT(*) FROM messages').fetchone()[0]),
-            'claude_ai_conversations': int(conn.execute('SELECT COUNT(*) FROM claude_ai_conversations').fetchone()[0]),
-            'claude_ai_messages': int(conn.execute('SELECT COUNT(*) FROM claude_ai_messages').fetchone()[0]),
         }
         conn.execute('DELETE FROM messages')
         conn.execute('DELETE FROM sessions')
-        conn.execute('DELETE FROM claude_ai_messages')
-        conn.execute('DELETE FROM claude_ai_conversations')
         conn.execute(
             "DELETE FROM file_watch_state WHERE file_path LIKE ?",
             ('%/.claude/%',),
         )
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-        conn.execute("INSERT INTO claude_ai_messages_fts(claude_ai_messages_fts) VALUES('rebuild')")
         return counts
 
 
@@ -1721,12 +1649,7 @@ def init_db() -> None:
                 _ensure_column(conn, 'sessions', 'tags', "TEXT")
                 current = _commit_migration(conn, 8)
             if current < 9:
-                logger.info("Migrating schema v%d → 9 (claude.ai tables)", current)
-                conn.executescript(_MIGRATE_V9_TABLES)
-                try:
-                    conn.executescript(_MIGRATE_V9_FTS)
-                except sqlite3.OperationalError as e:
-                    logger.warning("v9 FTS5 skipped: %s", e)
+                logger.info("Migrating schema v%d → 9 (retired claude.ai schema marker)", current)
                 current = _commit_migration(conn, 9)
             if current < 10:
                 logger.info("Migrating schema v%d → 10 (parent_session_id hot path index)", current)
@@ -1739,12 +1662,7 @@ def init_db() -> None:
                 )
                 current = _commit_migration(conn, 10)
             if current < 11:
-                logger.info("Migrating schema v%d → 11 (claude_ai_messages.updated_at)", current)
-                # claude.ai export re-imports couldn't detect edits previously
-                # (INSERT OR IGNORE dropped any updated version). Adding
-                # updated_at lets the importer compare versions and replace
-                # stale rows when a later export carries a newer timestamp.
-                _ensure_column(conn, 'claude_ai_messages', 'updated_at', "TEXT")
+                logger.info("Migrating schema v%d → 11 (retired claude.ai update marker)", current)
                 current = _commit_migration(conn, 11)
             if current < 12:
                 logger.info("Migrating schema v%d → 12 (sessions.turn_duration_ms)", current)
@@ -1801,6 +1719,20 @@ def init_db() -> None:
                 except sqlite3.OperationalError as e:
                     logger.warning("v15 Codex FTS skipped: %s", e)
                 current = _commit_migration(conn, 15)
+            if current < 16:
+                logger.info("Migrating schema v%d → 16 (drop retired claude.ai schema)", current)
+                conn.executescript('''
+                    DROP TRIGGER IF EXISTS cai_msg_fts_ai;
+                    DROP TRIGGER IF EXISTS cai_msg_fts_ad;
+                    DROP TRIGGER IF EXISTS cai_msg_fts_au;
+                    DROP TABLE IF EXISTS claude_ai_messages_fts;
+                    DROP INDEX IF EXISTS idx_cai_msg_conv;
+                    DROP INDEX IF EXISTS idx_cai_msg_created;
+                    DROP INDEX IF EXISTS idx_cai_conv_updated;
+                    DROP TABLE IF EXISTS claude_ai_messages;
+                    DROP TABLE IF EXISTS claude_ai_conversations;
+                ''')
+                current = _commit_migration(conn, 16)
             # One-time VACUUM to activate auto_vacuum=INCREMENTAL on legacy databases
             av = conn.execute('PRAGMA auto_vacuum').fetchone()[0]
             if av != 2:  # 2 = INCREMENTAL
