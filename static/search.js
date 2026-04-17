@@ -64,6 +64,8 @@ function _srchResetPanel() {
     const el = document.getElementById(id);
     if (el) el.textContent = '';
   });
+  const prevSep = document.getElementById('srch-prevSep');
+  if (prevSep) prevSep.classList.add('hidden');
   const nextSep = document.getElementById('srch-nextSep');
   if (nextSep) nextSep.classList.add('hidden');
 }
@@ -141,8 +143,9 @@ function _srchRenderContextMsg(container, m, posIdx, isSelected, allMsgs) {
   row.className = 'flex gap-2 items-start';
 
   const badge = document.createElement('div');
+  // FIX-004: badge opacity — selected bright emerald, context soft white
   badge.className = 'shrink-0 font-mono text-[9px] pt-2.5 w-7 text-right select-none ' +
-    (isSelected ? 'text-emerald-400/70' : 'text-white/18');
+    (isSelected ? 'text-emerald-400 font-semibold' : 'text-white/30');
   badge.textContent = '#' + (posIdx + 1);
   row.appendChild(badge);
 
@@ -205,33 +208,45 @@ async function _srchOpenResult(sid, msgId, cardEl) {
     const nextMsgs = selAndNext.slice(1);
     const allFetched = [...prevMsgs, ...selAndNext];
 
-    // Render session header
+    // FIX-001: Render session header — visible, structured
     if (hdr) {
       hdr.textContent = '';
       const row = document.createElement('div');
-      row.className = 'flex flex-wrap items-center gap-x-3 gap-y-1';
+      row.className = 'flex flex-wrap items-center gap-x-2.5 gap-y-1';
 
       const nameEl = document.createElement('span');
-      nameEl.className = 'font-semibold text-white/80 text-sm';
+      nameEl.className = 'font-semibold text-white/85 text-sm leading-tight';
       nameEl.textContent = s.project_name || '알 수 없음';
       row.appendChild(nameEl);
 
       if (s.model) {
+        const dot = document.createElement('span');
+        dot.className = 'text-white/20 text-xs';
+        dot.textContent = '·';
+        row.appendChild(dot);
         const modelEl = document.createElement('span');
-        modelEl.className = 'text-white/40 text-xs';
+        modelEl.className = 'text-white/45 text-xs font-mono';
         modelEl.textContent = s.model;
         row.appendChild(modelEl);
       }
 
       if (s.total_cost_usd != null) {
+        const dot2 = document.createElement('span');
+        dot2.className = 'text-white/20 text-xs';
+        dot2.textContent = '·';
+        row.appendChild(dot2);
         const costEl = document.createElement('span');
-        costEl.className = 'text-emerald-400 text-xs';
+        costEl.className = 'text-emerald-400/80 text-xs';
         costEl.textContent = '$' + Number(s.total_cost_usd).toFixed(4);
         row.appendChild(costEl);
       }
 
       hdr.appendChild(row);
     }
+
+    // FIX-002: Show/hide "이전 메시지" top separator
+    const prevSep = document.getElementById('srch-prevSep');
+    if (prevSep) prevSep.classList.toggle('hidden', prevMsgs.length === 0);
 
     // Render prev messages
     const prevEl = document.getElementById('srch-prevMsgs');
@@ -268,11 +283,17 @@ async function _srchOpenResult(sid, msgId, cardEl) {
     if (contextPane) contextPane.classList.remove('hidden');
     if (emptyState) emptyState.classList.add('hidden');
 
-    // Nav bar
+    // Nav bar + FIX-006: thread position track
     const msgCount = document.getElementById('srch-convMsgCount');
     const posInfo = document.getElementById('srch-convPosInfo');
+    const posTrack = document.getElementById('srch-posTrack');
     if (msgCount) msgCount.textContent = totalMsgs ? totalMsgs + '개 메시지' : '';
     if (posInfo) posInfo.textContent = '#' + (position + 1);
+    if (posTrack && totalMsgs > 0) {
+      const pct = Math.round(((position + 1) / totalMsgs) * 100);
+      posTrack.style.left = Math.max(0, Math.min(pct, 98)) + '%';
+      posTrack.title = '전체 대화의 ' + pct + '% 위치';
+    }
     if (nav) nav.classList.remove('hidden');
 
   } catch (e) {

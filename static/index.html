@@ -7,7 +7,7 @@
 <meta name="description" content="Claude Code 토큰 사용량 실시간 추적 대시보드">
 
 <!-- Tailwind CSS (built from app.css via build.js) -->
-<link rel="stylesheet" href="/static/tailwind.v83.css">
+<link rel="stylesheet" href="/static/tailwind.v84.css">
 
 <!-- Pretendard (Korean) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
@@ -773,41 +773,56 @@
     <!-- Right: context viewer -->
     <div class="flex flex-col bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel overflow-hidden">
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-3 flex flex-col gap-2 h-full overflow-hidden">
-        <!-- Session header -->
-        <div id="srch-convViewerHeader" class="text-white/40 text-xs min-h-[1.5rem] shrink-0">결과를 선택하면 전체 대화가 표시됩니다.</div>
+        <!-- Session header (FIX-001: visible structured header) -->
+        <div id="srch-convViewerHeader" class="shrink-0 pb-2 border-b border-white/[0.06] min-h-[2rem]">
+          <span class="text-white/30 text-xs italic">결과를 선택하면 전체 대화가 표시됩니다.</span>
+        </div>
         <!-- 3-section context pane: prev / selected / next -->
         <div id="srch-contextPane" class="hidden flex-1 flex flex-col overflow-y-auto gap-0 pr-0.5">
+          <!-- FIX-002: "이전 메시지" top separator -->
+          <div id="srch-prevSep" class="hidden flex items-center gap-2 py-1.5 shrink-0">
+            <div class="flex-1 border-t border-white/[0.07]"></div>
+            <span class="text-white/30 text-[10px] font-mono tracking-wide">이전 메시지</span>
+            <div class="flex-1 border-t border-white/[0.07]"></div>
+          </div>
           <!-- Previous messages -->
           <div id="srch-prevMsgs" class="flex flex-col gap-2 pb-2"></div>
           <!-- Selected message separator -->
           <div class="flex items-center gap-2 py-1.5 shrink-0">
-            <div class="flex-1 border-t border-emerald-500/20"></div>
-            <span class="text-emerald-400/50 text-[10px] font-mono tracking-wide">검색된 메시지</span>
-            <div class="flex-1 border-t border-emerald-500/20"></div>
+            <div class="flex-1 border-t border-emerald-500/30"></div>
+            <span class="text-emerald-400/70 text-[10px] font-mono tracking-wide">검색된 메시지</span>
+            <div class="flex-1 border-t border-emerald-500/30"></div>
           </div>
-          <!-- Selected message -->
-          <div id="srch-selMsg" class="flex flex-col gap-2 pb-2 ring-1 ring-emerald-500/15 rounded-lg p-1.5 bg-emerald-500/[0.03]"></div>
-          <!-- Next messages separator -->
+          <!-- FIX-003: Selected message — stronger highlight -->
+          <div id="srch-selMsg" class="flex flex-col gap-2 pb-2 rounded-lg p-1.5 srch-sel-msg-box"></div>
+          <!-- Next messages separator (FIX-007: more visible) -->
           <div id="srch-nextSep" class="hidden flex items-center gap-2 py-1.5 shrink-0">
-            <div class="flex-1 border-t border-white/[0.07]"></div>
-            <span class="text-white/20 text-[10px] font-mono tracking-wide">이후 메시지</span>
-            <div class="flex-1 border-t border-white/[0.07]"></div>
+            <div class="flex-1 border-t border-white/[0.10]"></div>
+            <span class="text-white/35 text-[10px] font-mono tracking-wide">이후 메시지</span>
+            <div class="flex-1 border-t border-white/[0.10]"></div>
           </div>
           <!-- Next messages -->
           <div id="srch-nextMsgs" class="flex flex-col gap-2 pt-0"></div>
         </div>
-        <!-- Empty state (shown when no result selected) -->
-        <div id="srch-emptyState" class="flex-1 flex items-center justify-center text-white/20 text-xs">
-          <div class="text-center space-y-1">
-            <iconify-icon icon="solar:magnifer-linear" width="28" class="opacity-20 block mx-auto mb-2"></iconify-icon>
-            좌측에서 결과를 선택하세요
+        <!-- FIX-005: Empty state — more visible -->
+        <div id="srch-emptyState" class="flex-1 flex items-center justify-center text-white/30 text-xs">
+          <div class="text-center">
+            <iconify-icon icon="solar:magnifer-linear" width="32" class="opacity-30 block mx-auto mb-2.5 text-white/50"></iconify-icon>
+            <div class="text-white/35 text-xs font-medium mb-1">검색하여 메시지를 찾아보세요</div>
+            <div class="text-white/20 text-[11px]">좌측에서 결과 선택 → 전후 문맥 확인</div>
           </div>
         </div>
-        <!-- Nav bar -->
-        <div id="srch-convNavBar" class="hidden shrink-0 flex items-center gap-2 text-xs text-white/40 border-t border-white/[0.07] pt-2">
-          <span id="srch-convMsgCount" class="font-mono text-[10px]"></span>
-          <span id="srch-convPosInfo" class="text-white/20 font-mono text-[10px]"></span>
-          <button onclick="openConversationFromSearch()" class="ml-auto px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 hover:bg-emerald-500/25 spring text-xs font-medium">↗ 전체 대화</button>
+        <!-- FIX-006: Nav bar with thread position visualizer -->
+        <div id="srch-convNavBar" class="hidden shrink-0 flex flex-col gap-1.5 border-t border-white/[0.07] pt-2">
+          <div class="flex items-center gap-2 text-xs text-white/40">
+            <span id="srch-convMsgCount" class="font-mono text-[10px]"></span>
+            <span id="srch-convPosInfo" class="text-emerald-400/70 font-mono text-[10px] font-semibold"></span>
+            <button onclick="openConversationFromSearch()" class="ml-auto px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 hover:bg-emerald-500/25 spring text-xs font-medium">↗ 전체 대화</button>
+          </div>
+          <!-- Thread position track -->
+          <div class="relative h-[3px] rounded-full bg-white/[0.06] overflow-hidden">
+            <div id="srch-posTrack" class="absolute left-0 top-0 h-full w-1.5 rounded-full bg-emerald-400/60 transition-all duration-300"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1213,6 +1228,6 @@
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/bundle.v83.js" defer></script>
+<script src="/static/bundle.v84.js" defer></script>
 </body>
 </html>
