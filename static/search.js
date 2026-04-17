@@ -61,8 +61,8 @@ function _srchMakeCard(r, q) {
   const card = document.createElement('div');
   card.className = 'srch-result-card cursor-pointer px-3 py-2.5 rounded-lg hover:bg-white/5 spring border border-transparent';
   card.dataset.sid = String(r.session_id);
-  card.dataset.mid = String(r.message_id);
-  card.addEventListener('click', () => _srchOpenResult(String(r.session_id), String(r.message_id), card));
+  card.dataset.mid = String(r.id);
+  card.addEventListener('click', () => _srchOpenResult(String(r.session_id), String(r.id), card));
 
   const meta = document.createElement('div');
   meta.className = 'flex items-center gap-1.5 mb-1 flex-wrap';
