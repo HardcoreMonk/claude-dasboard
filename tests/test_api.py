@@ -1405,6 +1405,18 @@ def test_csv_export_includes_new_columns(api_client):
         assert col in header_line, f'CSV header missing column: {col}'
 
 
+def test_csv_export_falls_back_to_codex_sessions(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/export/csv')
+    assert r.status_code == 200
+    lines = r.text.splitlines()
+
+    assert lines[0].startswith('session_id,project_name,project_path')
+    assert any('codex-s1,codex-demo,/tmp/codex-demo' in line for line in lines[1:])
+    assert any('codex-s2,codex-demo,/tmp/codex-demo' in line for line in lines[1:])
+
+
 def test_forecast_endpoint(api_client):
     """/api/forecast must return projection + burn-rate fields."""
     r = api_client.get('/api/forecast?days=14')
@@ -1424,6 +1436,20 @@ def test_session_chain_endpoint(api_client):
     assert body['root'] == 'parent-A'
     assert 'nodes' in body
     assert isinstance(body['nodes'], list)
+
+
+def test_session_chain_falls_back_to_codex_agent_runs(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/sessions/codex-s1/chain')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['root'] == 'codex-s1'
+    assert body['count'] == 2
+    assert [node['id'] for node in body['nodes']] == ['codex-s1', 'agent-run-4']
+    assert body['nodes'][1]['agent_type'] == 'planner'
+    assert body['nodes'][1]['parent_session_id'] == 'codex-s1'
 
 
 # ─── Auth-enabled smoke test ──────────────────────────────────────────────

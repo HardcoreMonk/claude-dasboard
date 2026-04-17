@@ -1711,6 +1711,81 @@ def _codex_subagents_heatmap_payload() -> dict:
     }
 
 
+def _codex_chain_payload(session_id: str, depth: int) -> dict:
+    nodes: list[dict] = []
+    with read_db() as db:
+        root = db.execute(
+            '''
+            SELECT
+                s.id,
+                '' AS agent_type,
+                COALESCE(NULLIF(s.session_name, ''), s.id) AS agent_description,
+                0.0 AS cost_usd,
+                s.message_count,
+                NULL AS parent_session_id,
+                s.project_path,
+                0 AS is_subagent
+            FROM codex_sessions s
+            WHERE s.id = ?
+            ''',
+            (session_id,),
+        ).fetchone()
+        if not root:
+            return {'root': session_id, 'nodes': [], 'count': 0}
+        nodes.append({**dict(root), 'level': 0})
+    if depth > 1:
+        children = _codex_agent_run_rows(parent_session_id=session_id)
+        for child in children[:max(0, depth - 1)]:
+            nodes.append({
+                'id': child['id'],
+                'agent_type': child['agent_type'],
+                'agent_description': child['agent_description'],
+                'cost_usd': child['cost_usd'],
+                'message_count': child['message_count'],
+                'parent_session_id': child['parent_session_id'],
+                'project_path': child['project_path'],
+                'is_subagent': 1,
+                'level': 1,
+            })
+    return {'root': session_id, 'nodes': nodes, 'count': len(nodes)}
+
+
+def _codex_csv_rows() -> list[dict]:
+    with read_db() as db:
+        rows = db.execute(
+            '''
+            SELECT
+                s.id AS session_id,
+                p.project_name,
+                s.project_path,
+                COALESCE(s.cwd, s.project_path) AS cwd,
+                COALESCE(NULLIF(s.model, ''), '(unknown)') AS model,
+                s.created_at,
+                s.updated_at,
+                0 AS duration_seconds,
+                0 AS total_input_tokens,
+                0 AS total_output_tokens,
+                0 AS total_cache_creation_tokens,
+                0 AS total_cache_read_tokens,
+                0.0 AS total_cost_usd,
+                s.message_count,
+                s.user_message_count,
+                0 AS is_subagent,
+                '' AS parent_session_id,
+                '' AS parent_tool_use_id,
+                '' AS agent_type,
+                '' AS agent_description,
+                '' AS final_stop_reason,
+                s.pinned,
+                '' AS tags
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            ORDER BY s.updated_at DESC, s.id DESC
+            '''
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 @app.get("/api/codex/projects/{project_name}/stats")
 def api_codex_project_stats(project_name: str, path: Optional[str] = Query(None)):
     payload = _codex_project_stats_payload(project_name, path)
@@ -3135,6 +3210,8 @@ def api_session_chain(session_id: str, depth: int = Query(3, ge=1, le=5)):
                     _walk(ch['id'], level + 1)
 
         _walk(session_id, 0)
+    if not nodes:
+        return _codex_chain_payload(session_id, depth)
     return {'root': session_id, 'nodes': nodes, 'count': len(nodes)}
 
 
@@ -3251,6 +3328,15 @@ def api_export_csv():
         w.writerow(_CSV_COLS)
         yield buf.getvalue()
         with read_db() as db:
+            total = db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]
+            if total == 0:
+                buf = io.StringIO()
+                w = csv.writer(buf)
+                for d in _codex_csv_rows():
+                    w.writerow([d.get(c, '') if d.get(c) is not None else ''
+                                for c in _CSV_COLS])
+                yield buf.getvalue()
+                return
             cursor = db.execute(f'''
                 SELECT id AS session_id, project_name, project_path, cwd, model,
                        created_at, updated_at,
