@@ -33,10 +33,23 @@ _READ_EPOCH = 0                   # incremented after writes so readers reopen s
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
 SCHEMA_VERSION = 18               # bump on every schema change
 _CODEX_FTS_TOKEN_RE = re.compile(r'[\w가-힣]+', re.UNICODE)
+_LEGACY_RUNTIME_DISABLED_VALUES = {'0', 'false', 'no', 'off'}
 
 
 def _esc_like(value: str) -> str:
     return value.replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
+
+
+def _legacy_runtime_enabled() -> bool:
+    return os.environ.get('DASHBOARD_ENABLE_LEGACY_RUNTIME', '1').strip().lower() not in _LEGACY_RUNTIME_DISABLED_VALUES
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -225,6 +238,54 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content_preview ON 
     INSERT INTO messages_fts(rowid, content_preview)
     VALUES (new.id, COALESCE(new.content_preview, ''));
 END;
+'''
+
+
+_CODEX_BOOTSTRAP_SCHEMA = '''
+CREATE TABLE IF NOT EXISTS file_watch_state (
+    file_path TEXT PRIMARY KEY,
+    last_line INTEGER DEFAULT 0,
+    last_modified REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS plan_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    daily_cost_limit REAL DEFAULT 50.0,
+    weekly_cost_limit REAL DEFAULT 300.0,
+    reset_hour INTEGER DEFAULT 0,
+    reset_weekday INTEGER DEFAULT 0,
+    timezone_offset INTEGER DEFAULT 9,
+    timezone_name TEXT DEFAULT 'Asia/Seoul'
+);
+INSERT OR IGNORE INTO plan_config (id) VALUES (1);
+
+CREATE TABLE IF NOT EXISTS remote_nodes (
+    node_id TEXT PRIMARY KEY,
+    label TEXT,
+    ingest_key_hash TEXT NOT NULL,
+    last_seen TEXT,
+    session_count INTEGER DEFAULT 0,
+    message_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS admin_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    action TEXT NOT NULL,
+    actor_ip TEXT,
+    status TEXT NOT NULL DEFAULT 'ok',
+    detail TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_ts
+ON admin_audit(ts DESC);
+
+CREATE TABLE IF NOT EXISTS app_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
 '''
 
 
@@ -784,6 +845,8 @@ def purge_legacy_dashboard_data() -> dict[str, int]:
     pre-Codex data.
     """
     with write_db() as conn:
+        if not _legacy_runtime_enabled() or not (_table_exists(conn, 'sessions') and _table_exists(conn, 'messages')):
+            return {'sessions': 0, 'messages': 0}
         counts = {
             'sessions': int(conn.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]),
             'messages': int(conn.execute('SELECT COUNT(*) FROM messages').fetchone()[0]),
@@ -1697,120 +1760,124 @@ def init_db() -> None:
     with _write_lock:
         conn = _new_connection()
         try:
-            conn.executescript(_SCHEMA_V1)
-            # Defensive: guarantee columns added after v1 are present even on old DBs
-            _ensure_column(conn, 'sessions', 'pinned', 'INTEGER DEFAULT 0')
-            conn.commit()
             current = _get_user_version(conn)
-            if current < 2:
-                logger.info("Migrating schema v%d → 2", current)
-                conn.executescript(_MIGRATE_V2)
-                current = _commit_migration(conn, 2)
-            if current < 3:
-                logger.info("Migrating schema v%d → 3 (FTS5)", current)
-                try:
-                    conn.executescript(_MIGRATE_V3)
-                    _backfill_fts(conn)
-                    current = _commit_migration(conn, 3)
-                except sqlite3.OperationalError as e:
-                    logger.warning(
-                        "FTS5 migration skipped (SQLite build lacks fts5?): %s", e)
-                    # S6: still advance user_version — the attempt counts.
-                    # Search API has a LIKE fallback. A future migration can
-                    # retry FTS5 if the sqlite build later supports it.
-                    current = _commit_migration(conn, 3)
-            if current < 4:
-                logger.info("Migrating schema v%d → 4 (heal project/model)", current)
-                _heal_project_identity(conn)
-                _heal_session_models(conn)
-                current = _commit_migration(conn, 4)
-            if current < 5:
-                logger.info("Migrating schema v%d → 5 (subagent reassign)", current)
-                _migrate_v5_subagent_reassign(conn)
-                _migrate_v5_clear_false_subagent_flag(conn)
-                _migrate_v5_recompute_session_totals(conn)
-                # Subagent rows' model column is empty until we pick it from
-                # their messages — piggy-back on the existing healer.
-                _heal_session_models(conn)
-                current = _commit_migration(conn, 5)
-            if current < 6:
-                logger.info("Migrating schema v%d → 6 (tag compact subagents)", current)
-                _migrate_v6_tag_compact_subagents(conn)
-                current = _commit_migration(conn, 6)
-            if current < 7:
-                logger.info("Migrating schema v%d → 7 (stop_reason + parent_tool_use_id)", current)
-                _migrate_v7_add_columns(conn)
-                _migrate_v7_backfill_stop_reason(conn)
-                _migrate_v7_recompute_final_stop_reason(conn)
-                _migrate_v7_link_parent_tool_use(conn)
-                current = _commit_migration(conn, 7)
-            if current < 8:
-                logger.info("Migrating schema v%d → 8 (session tags)", current)
-                _ensure_column(conn, 'sessions', 'tags', "TEXT")
-                current = _commit_migration(conn, 8)
-            if current < 9:
-                logger.info("Migrating schema v%d → 9 (retired claude.ai schema marker)", current)
-                current = _commit_migration(conn, 9)
-            if current < 10:
-                logger.info("Migrating schema v%d → 10 (parent_session_id hot path index)", current)
-                # Hot path /api/sessions does correlated subqueries filtered by
-                # parent_session_id + is_subagent. Without this composite index
-                # each row triggers a full SCAN of sessions — O(N²) at scale.
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_sessions_parent_is_sub "
-                    "ON sessions(parent_session_id, is_subagent)"
-                )
-                current = _commit_migration(conn, 10)
-            if current < 11:
-                logger.info("Migrating schema v%d → 11 (retired claude.ai update marker)", current)
-                current = _commit_migration(conn, 11)
-            if current < 12:
-                logger.info("Migrating schema v%d → 12 (sessions.turn_duration_ms)", current)
-                _ensure_column(conn, 'sessions', 'turn_duration_ms', "INTEGER DEFAULT 0")
-                current = _commit_migration(conn, 12)
-            if current < 13:
-                logger.info("Migrating schema v%d → 13 (source_node + remote_nodes)", current)
-                _ensure_column(conn, 'sessions', 'source_node', "TEXT DEFAULT 'local'")
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_sessions_source_node "
-                    "ON sessions(source_node)"
-                )
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS remote_nodes (
-                        node_id TEXT PRIMARY KEY,
-                        label TEXT,
-                        ingest_key_hash TEXT NOT NULL,
-                        last_seen TEXT,
-                        session_count INTEGER DEFAULT 0,
-                        message_count INTEGER DEFAULT 0,
-                        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            if _legacy_runtime_enabled():
+                conn.executescript(_SCHEMA_V1)
+                # Defensive: guarantee columns added after v1 are present even on old DBs
+                _ensure_column(conn, 'sessions', 'pinned', 'INTEGER DEFAULT 0')
+                conn.commit()
+                if current < 2:
+                    logger.info("Migrating schema v%d → 2", current)
+                    conn.executescript(_MIGRATE_V2)
+                    current = _commit_migration(conn, 2)
+                if current < 3:
+                    logger.info("Migrating schema v%d → 3 (FTS5)", current)
+                    try:
+                        conn.executescript(_MIGRATE_V3)
+                        _backfill_fts(conn)
+                        current = _commit_migration(conn, 3)
+                    except sqlite3.OperationalError as e:
+                        logger.warning(
+                            "FTS5 migration skipped (SQLite build lacks fts5?): %s", e)
+                        # S6: still advance user_version — the attempt counts.
+                        # Search API has a LIKE fallback. A future migration can
+                        # retry FTS5 if the sqlite build later supports it.
+                        current = _commit_migration(conn, 3)
+                if current < 4:
+                    logger.info("Migrating schema v%d → 4 (heal project/model)", current)
+                    _heal_project_identity(conn)
+                    _heal_session_models(conn)
+                    current = _commit_migration(conn, 4)
+                if current < 5:
+                    logger.info("Migrating schema v%d → 5 (subagent reassign)", current)
+                    _migrate_v5_subagent_reassign(conn)
+                    _migrate_v5_clear_false_subagent_flag(conn)
+                    _migrate_v5_recompute_session_totals(conn)
+                    # Subagent rows' model column is empty until we pick it from
+                    # their messages — piggy-back on the existing healer.
+                    _heal_session_models(conn)
+                    current = _commit_migration(conn, 5)
+                if current < 6:
+                    logger.info("Migrating schema v%d → 6 (tag compact subagents)", current)
+                    _migrate_v6_tag_compact_subagents(conn)
+                    current = _commit_migration(conn, 6)
+                if current < 7:
+                    logger.info("Migrating schema v%d → 7 (stop_reason + parent_tool_use_id)", current)
+                    _migrate_v7_add_columns(conn)
+                    _migrate_v7_backfill_stop_reason(conn)
+                    _migrate_v7_recompute_final_stop_reason(conn)
+                    _migrate_v7_link_parent_tool_use(conn)
+                    current = _commit_migration(conn, 7)
+                if current < 8:
+                    logger.info("Migrating schema v%d → 8 (session tags)", current)
+                    _ensure_column(conn, 'sessions', 'tags', "TEXT")
+                    current = _commit_migration(conn, 8)
+                if current < 9:
+                    logger.info("Migrating schema v%d → 9 (retired claude.ai schema marker)", current)
+                    current = _commit_migration(conn, 9)
+                if current < 10:
+                    logger.info("Migrating schema v%d → 10 (parent_session_id hot path index)", current)
+                    # Hot path /api/sessions does correlated subqueries filtered by
+                    # parent_session_id + is_subagent. Without this composite index
+                    # each row triggers a full SCAN of sessions — O(N²) at scale.
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_sessions_parent_is_sub "
+                        "ON sessions(parent_session_id, is_subagent)"
                     )
-                ''')
-                current = _commit_migration(conn, 13)
-            if current < 14:
-                logger.info("Migrating schema v%d → 14 (admin_audit + app_config)", current)
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS admin_audit (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-                        action TEXT NOT NULL,
-                        actor_ip TEXT,
-                        status TEXT NOT NULL DEFAULT 'ok',
-                        detail TEXT
+                    current = _commit_migration(conn, 10)
+                if current < 11:
+                    logger.info("Migrating schema v%d → 11 (retired claude.ai update marker)", current)
+                    current = _commit_migration(conn, 11)
+                if current < 12:
+                    logger.info("Migrating schema v%d → 12 (sessions.turn_duration_ms)", current)
+                    _ensure_column(conn, 'sessions', 'turn_duration_ms', "INTEGER DEFAULT 0")
+                    current = _commit_migration(conn, 12)
+                if current < 13:
+                    logger.info("Migrating schema v%d → 13 (source_node + remote_nodes)", current)
+                    _ensure_column(conn, 'sessions', 'source_node', "TEXT DEFAULT 'local'")
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_sessions_source_node "
+                        "ON sessions(source_node)"
                     )
-                ''')
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_admin_audit_ts "
-                    "ON admin_audit(ts DESC)"
-                )
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS app_config (
-                        key TEXT PRIMARY KEY,
-                        value TEXT NOT NULL,
-                        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                    conn.execute('''
+                        CREATE TABLE IF NOT EXISTS remote_nodes (
+                            node_id TEXT PRIMARY KEY,
+                            label TEXT,
+                            ingest_key_hash TEXT NOT NULL,
+                            last_seen TEXT,
+                            session_count INTEGER DEFAULT 0,
+                            message_count INTEGER DEFAULT 0,
+                            created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                        )
+                    ''')
+                    current = _commit_migration(conn, 13)
+                if current < 14:
+                    logger.info("Migrating schema v%d → 14 (admin_audit + app_config)", current)
+                    conn.execute('''
+                        CREATE TABLE IF NOT EXISTS admin_audit (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                            action TEXT NOT NULL,
+                            actor_ip TEXT,
+                            status TEXT NOT NULL DEFAULT 'ok',
+                            detail TEXT
+                        )
+                    ''')
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_admin_audit_ts "
+                        "ON admin_audit(ts DESC)"
                     )
-                ''')
-                current = _commit_migration(conn, 14)
+                    conn.execute('''
+                        CREATE TABLE IF NOT EXISTS app_config (
+                            key TEXT PRIMARY KEY,
+                            value TEXT NOT NULL,
+                            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                        )
+                    ''')
+                    current = _commit_migration(conn, 14)
+            else:
+                conn.executescript(_CODEX_BOOTSTRAP_SCHEMA)
+                conn.commit()
             if current < 15:
                 logger.info("Migrating schema v%d → 15 (Codex schema + FTS)", current)
                 conn.executescript(_MIGRATE_V15_CODEX)

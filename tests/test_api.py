@@ -311,6 +311,72 @@ def test_codex_runtime_defaults_without_env_overrides(monkeypatch):
     assert database.DB_PATH == Path.home() / '.codex' / 'dashboard.db'
     assert main.BACKUP_DIR == Path.home() / '.codex' / 'dashboard-backups'
 
+
+def test_codex_only_init_db_skips_legacy_runtime_tables(tmp_path, monkeypatch):
+    monkeypatch.setenv('DASHBOARD_DB_PATH', str(tmp_path / 'codex-only.db'))
+    monkeypatch.setenv('DASHBOARD_ENABLE_LEGACY_RUNTIME', '0')
+    _reload_runtime_modules()
+
+    import database
+
+    database.init_db()
+    with database.read_db() as db:
+        names = {
+            row['name']
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            ).fetchall()
+        }
+
+    assert 'codex_projects' in names
+    assert 'codex_sessions' in names
+    assert 'codex_messages' in names
+    assert 'sessions' not in names
+    assert 'messages' not in names
+    assert 'messages_fts' not in names
+
+
+def test_codex_only_api_boots_and_stats_without_legacy_runtime_tables(tmp_path, monkeypatch):
+    monkeypatch.setenv('DASHBOARD_DB_PATH', str(tmp_path / 'codex-only-api.db'))
+    monkeypatch.setenv('DASHBOARD_ENABLE_LEGACY_RUNTIME', '0')
+    _reload_runtime_modules()
+
+    import database
+    import main
+
+    database.init_db()
+    database.store_codex_message(
+        project_path='/tmp/codex-only',
+        project_name='codex-only',
+        session_id='codex-only-s1',
+        session_name='Codex-only session',
+        role='assistant',
+        content='codex only bootstrap',
+        content_preview='codex only bootstrap',
+        timestamp='2026-04-18T00:00:00Z',
+        message_uuid='codex-only-bootstrap-1',
+        model='gpt-5.4',
+    )
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(main.app) as client:
+        r = client.get('/api/stats')
+        assert r.status_code == 200
+        assert r.json()['all_time']['total_sessions'] == 1
+
+    with database.read_db() as db:
+        names = {
+            row['name']
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            ).fetchall()
+        }
+
+    assert 'sessions' not in names
+    assert 'messages' not in names
+    assert 'messages_fts' not in names
+
 def test_health(api_client):
     r = api_client.get('/api/health')
     assert r.status_code == 200
