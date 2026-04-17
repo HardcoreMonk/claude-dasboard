@@ -68,38 +68,45 @@ def contract_client(tmp_path, monkeypatch):
     import main  # noqa: F401
 
     database.init_db()
+    database.store_codex_message(
+        project_path='/tmp/demo',
+        project_name='demo',
+        session_id='p1',
+        session_name='demo',
+        role='user',
+        content='{"type":"text","text":"hi"}',
+        content_preview='hi',
+        timestamp='2026-04-01T00:00:00Z',
+        message_uuid='mu1',
+        model='',
+    )
+    database.store_codex_message(
+        project_path='/tmp/demo',
+        project_name='demo',
+        session_id='p1',
+        session_name='demo',
+        role='assistant',
+        content='{"type":"text","text":"hello"}',
+        content_preview='hello',
+        timestamp='2026-04-01T00:00:01Z',
+        message_uuid='mu2',
+        model='claude-opus-4-6',
+    )
+    database.store_codex_message(
+        project_path='/tmp/demo',
+        project_name='demo',
+        session_id='p1',
+        session_name='demo',
+        role='agent',
+        content='{"agent_name":"Explore","status":"end_turn"}',
+        content_preview='Explore',
+        timestamp='2026-04-01T00:00:02Z',
+        message_uuid='mu3',
+        model='claude-haiku-4-5',
+    )
     conn = sqlite3.connect(str(db_file))
-    # Minimal seeding: one parent, one subagent, a handful of messages, a tag.
-    conn.executescript('''
-        INSERT INTO sessions
-          (id, project_name, project_path, cwd, model, created_at, updated_at,
-           total_input_tokens, total_output_tokens, cost_micro, message_count,
-           user_message_count, is_subagent, parent_session_id, agent_type,
-           agent_description, final_stop_reason, tags)
-        VALUES
-          ('p1', 'demo', '/tmp/demo', '/tmp/demo', 'claude-opus-4-6',
-           '2026-04-01T00:00:00Z', '2026-04-02T00:00:00Z',
-           1000, 500, 60000, 2, 1, 0, NULL, '', '', 'end_turn', 'alpha,beta'),
-          ('s1', 'demo', '/tmp/demo', '/tmp/demo', 'claude-haiku-4-5',
-           '2026-04-01T01:00:00Z', '2026-04-01T02:00:00Z',
-           100, 50, 4000, 1, 0, 1, 'p1', 'Explore', 'audit', 'end_turn', '');
-        INSERT INTO messages
-          (session_id, message_uuid, role, content, content_preview,
-           input_tokens, output_tokens, cost_micro, model, timestamp, stop_reason)
-        VALUES
-          ('p1', 'mu1', 'user', '{"type":"text","text":"hi"}', 'hi',
-            0, 0, 0, '', '2026-04-01T00:00:00Z', ''),
-          ('p1', 'mu2', 'assistant', '{"type":"text","text":"hello"}', 'hello',
-            500, 200, 30000, 'claude-opus-4-6', '2026-04-01T00:00:01Z', 'end_turn'),
-          ('s1', 'mu3', 'assistant', '{"type":"text","text":"explore"}', 'explore',
-            100, 50, 4000, 'claude-haiku-4-5', '2026-04-01T01:00:01Z', 'end_turn');
-    ''')
+    conn.execute("UPDATE codex_sessions SET tags = 'alpha,beta' WHERE id = 'p1'")
     conn.commit()
-    try:
-        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
     conn.close()
 
     from fastapi.testclient import TestClient
@@ -293,7 +300,7 @@ def test_contract_session_detail(contract_client):
     r = contract_client.get('/api/sessions/p1')
     assert r.status_code == 200
     _require(r.json(), '/api/sessions/{id}',
-             ['id', 'project_name', 'cost_micro'])
+             ['id', 'project_name', 'total_cost_usd'])
 
 
 def test_contract_session_messages(contract_client):
