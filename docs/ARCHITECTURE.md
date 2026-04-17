@@ -3,6 +3,8 @@
 Codex-first Dashboard 의 시스템 구조, 데이터 흐름, 컴포넌트 설계를 기술한다.
 API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
 
+프로젝트 운영 기준과 문서 우선순위는 `AGENTS.md`를 따른다.
+
 ---
 
 ## 시스템 개요
@@ -248,7 +250,7 @@ const sortState = {                // 뷰별 정렬 (localStorage 영속)
 };
 ```
 
-`localStorage` (`claude-dashboard-prefs-v1`) 에 테마, 정렬, 필터, 타임라인 범위 등 영속.
+`localStorage` (`codex-dashboard-prefs-v1`) 에 테마, 정렬, 필터, 타임라인 범위 등 영속.
 
 ### SPA 라우팅
 

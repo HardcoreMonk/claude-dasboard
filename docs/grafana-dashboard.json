@@ -1,11 +1,11 @@
 {
   "annotations": { "list": [] },
-  "description": "Claude Usage Dashboard — minimal 4-panel health view. Import via Grafana UI: Dashboards → New → Import → Upload JSON. Pick the Prometheus datasource that scrapes the dashboard's /metrics endpoint.",
+  "description": "Codex Dashboard — minimal 4-panel health view. Import via Grafana UI: Dashboards -> New -> Import -> Upload JSON. Pick the Prometheus datasource that scrapes the dashboard's /metrics endpoint.",
   "editable": true,
   "schemaVersion": 38,
-  "title": "Claude Dashboard — health",
-  "uid": "claude-dashboard-health",
-  "tags": ["claude", "dashboard"],
+  "title": "Codex Dashboard - health",
+  "uid": "codex-dashboard-health",
+  "tags": ["codex", "dashboard"],
   "timezone": "browser",
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
@@ -16,7 +16,7 @@
       "title": "Service up",
       "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
       "targets": [
-        { "expr": "up{job=\"claude-dashboard\"}", "refId": "A" }
+        { "expr": "up{job=\"codex-dashboard\"}", "refId": "A" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -59,7 +59,7 @@
       "title": "HTTP request rate (by status)",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
       "targets": [
-        { "expr": "sum by (status) (rate(http_requests_total{job=\"claude-dashboard\"}[1m]))", "refId": "A", "legendFormat": "{{status}}" }
+        { "expr": "sum by (status) (rate(http_requests_total{job=\"codex-dashboard\"}[1m]))", "refId": "A", "legendFormat": "{{status}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" } }
     },
@@ -69,9 +69,9 @@
       "title": "HTTP latency p50 / p95 / p99",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"claude-dashboard\"}[5m])) by (le))", "refId": "A", "legendFormat": "p50" },
-        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"claude-dashboard\"}[5m])) by (le))", "refId": "B", "legendFormat": "p95" },
-        { "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"claude-dashboard\"}[5m])) by (le))", "refId": "C", "legendFormat": "p99" }
+        { "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"codex-dashboard\"}[5m])) by (le))", "refId": "A", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"codex-dashboard\"}[5m])) by (le))", "refId": "B", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"codex-dashboard\"}[5m])) by (le))", "refId": "C", "legendFormat": "p99" }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } }
     },

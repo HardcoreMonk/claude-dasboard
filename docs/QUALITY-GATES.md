@@ -2,6 +2,8 @@
 
 코드가 main 브랜치에 머지되기 전 반드시 통과해야 하는 검증 기준.
 
+문서와 설정을 함께 수정했다면 `AGENTS.md` 기준과 충돌이 없어야 한다.
+
 ---
 
 ## Gate 1: 테스트 (필수)
@@ -113,4 +115,10 @@ Gate 6~8은 리뷰어가 수동 확인.
 ```bash
 # 한 줄로 Gate 1~3 확인
 ./.venv/bin/python -m pytest tests/ --tb=short && npm run build && ruff check .
+```
+
+문서/운영 설정을 수정한 경우 추가 확인:
+
+```bash
+rg -n "8617|codex-web-dashboard|~/.codex/dashboard.db" README.md AGENTS.md CLAUDE.md docs
 ```

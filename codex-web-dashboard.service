@@ -13,7 +13,7 @@ RestartSec=5
 Environment=PORT=8617
 Environment=DASHBOARD_DB_PATH=/home/hardcoremonk/.codex/dashboard.db
 Environment=DASHBOARD_BACKUP_DIR=/home/hardcoremonk/.codex/dashboard-backups
-# Optional: set DASHBOARD_PASSWORD=yourpassword for HTTP Basic Auth
+# Optional: set DASHBOARD_PASSWORD=yourpassword to require cookie-session login
 
 # Resource limits — tuned for a 500 MB-ish DB and 8 parallel scan workers.
 MemoryMax=512M

@@ -1,7 +1,9 @@
 # 데이터베이스 스키마
 
-SQLite 파일: `~/.claude/dashboard.db`
-모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA auto_vacuum=INCREMENTAL`, `PRAGMA user_version=14`
+프로젝트 운영 기준과 문서 우선순위는 `AGENTS.md`를 따른다.
+
+SQLite 기본 파일: `~/.codex/dashboard.db`
+모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA auto_vacuum=INCREMENTAL`, `PRAGMA user_version=15`
 
 ## 비용은 INTEGER micro-dollars
 
@@ -189,13 +191,14 @@ idx_sessions_parent_tool_use
 | v12 | `sessions.turn_duration_ms` — user→assistant 턴 실행 시간 (ms) |
 | v13 | `sessions.source_node` + `remote_nodes` 테이블 — 다중 서버 수집 식별 (`idx_sessions_source_node`) |
 | v14 | `admin_audit` + `app_config` — 관리자 액션 감사 로그 + in-app 설정 스토어 (`idx_admin_audit_ts`) |
+| v15 | `codex_projects` + `codex_sessions` + `codex_messages` + Codex 전용 FTS |
 
 ### DB 재구축 (드물게)
 
 ```bash
-rm ~/.claude/dashboard.db
-sudo systemctl restart claude-dashboard
-# 시작 시 JSONL 재스캔 + v0→v14 마이그레이션 + integrity check
+rm ~/.codex/dashboard.db
+sudo systemctl restart codex-web-dashboard
+# 시작 시 JSONL 재스캔 + v0→v15 마이그레이션 + integrity check
 ```
 
 ## 모델 가격표

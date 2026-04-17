@@ -1,5 +1,7 @@
 # Architecture Decision Records
 
+프로젝트 상위 기준은 `AGENTS.md`, 구현 불변식은 `CLAUDE.md`를 따른다.
+
 | # | 제목 | 상태 | 일자 |
 |---|------|------|------|
 | [0001](0001-sqlite-single-file-db.md) | SQLite 단일 파일 DB | 확정 | 2026-03 |

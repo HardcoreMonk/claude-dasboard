@@ -3,6 +3,8 @@
 62 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features` 은 인증 우회.
 현재 대시보드는 Codex 세션 탐색 전용으로 동작한다. legacy Claude/claude.ai 라우트는 데이터 보존과 호환을 위해 남아 있지만, 기본 UI 는 사용하지 않는다.
 
+프로젝트 기준과 문서 우선순위는 `AGENTS.md`를 따른다. 이 문서는 인터페이스 계약과 호출 예시에 집중한다.
+
 ## 자동 생성 스펙 (FastAPI)
 
 이 문서와 별개로 FastAPI 가 자동 생성하는 라이브 스펙이 있습니다:
@@ -187,7 +189,7 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 ```bash
 # 인증이 설정된 경우 먼저 로그인 (쿠키 저장)
 curl -c cookies.txt -X POST http://localhost:8617/api/auth/login \
-  -H 'Content-Type: application/json' -d '{"password":"your-password"}'
+  -H 'Content-Type: application/json' -d '{"password":"codex2026"}'
 
 # 이후 요청에 쿠키 첨부 (-b cookies.txt)
 curl -b cookies.txt -s http://localhost:8617/api/stats | jq .
