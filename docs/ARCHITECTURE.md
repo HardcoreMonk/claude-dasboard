@@ -161,7 +161,7 @@ start_watching()
 ### 모듈 구조
 
 ```
-index.html          Tailwind 쉘 + 9개 뷰 섹션 + nav + 모달 + data-action 이벤트 위임
+index.html          Tailwind 쉘 + 10개 뷰 섹션 + nav + 모달 + data-action 이벤트 위임
 login.html          독립 로그인 페이지
   ├─ main.js        ES module entry point (import 순서 정의)
   ├─ app.js         코어: state, bus, accessors, WS, routing, utils, h(), 4단계 상태 감지
@@ -171,7 +171,8 @@ login.html          독립 로그인 페이지
   ├─ plan.js        플랜 사용량, 설정 모달
   ├─ subagents.js   7개 섹션 시각화 (유형별·종료사유·히트맵·매트릭스)
   ├─ timeline.js    Gantt 차트, 히트맵(드릴다운), 효율분석, 일간리포트(시간별 아코디언), 스택드 바 차트, 트렌드비교
-  ├─ app.css        스타일 + 라이트모드 매핑 + 반응형 + reduced-motion
+  ├─ search.js      전문 검색 — 3섹션 컨텍스트 뷰어 (이전·선택·이후 ±3), 역할 필터, 세션 점프
+  ├─ app.css        스타일 + 라이트모드 매핑 + 반응형 + reduced-motion + color-scheme
   └─ [빌드 산출물]
      ├─ bundle.js     esbuild concat+minify (sourcemap 포함)
      └─ tailwind.css  tailwindcss CLI 프로덕션 빌드
@@ -221,7 +222,7 @@ const sortState = {                // 뷰별 정렬 (localStorage 영속)
 
 ```
 URL hash: #/overview, #/cost, #/sessions, #/conversations,
-          #/models, #/projects, #/subagents, #/timeline, #/export
+          #/models, #/projects, #/subagents, #/timeline, #/search, #/export
 ```
 
 - `showView(name)` — 뷰 전환 (DOM show/hide + nav pill active + hash 업데이트)
@@ -248,7 +249,7 @@ watcher 변경 감지                    connectWS()
 
 | 요소 | 사양 |
 |---|---|
-| 배경 | `#0a0a0a` (never pure black) |
+| 배경 | `#0f0f0f` (dark base, never pure black) |
 | 액센트 | Emerald `#34d399` (단일), 라이트 `#065f46` |
 | 카드 | 더블베젤 (`bg-white/5` + `ring-white/[0.07]` + inset shadow) |
 | 네비 | 플로팅 글래스 필 (`backdrop-blur-xl` + `rounded-full`) |
@@ -256,6 +257,7 @@ watcher 변경 감지                    connectWS()
 | 아이콘 | Iconify Solar (`solar:*-linear`) |
 | 전환 | `cubic-bezier(.16,1,.3,1)` (spring), `fadeInUp` + `blur(3px)` |
 | 라이트모드 | `body.theme-light` 토글, WCAG AA 4.5:1 전 텍스트 검증 |
+| color-scheme | `html { color-scheme: dark }` + `body.theme-light { color-scheme: light }` — 브라우저 기본 UI 연동 |
 
 **캐시버스팅:** 파일명 기반 `/static/bundle.vN.js`, `tailwind.vN.css`. 서버가 정규식으로 `.vN` strip.
 
