@@ -36,7 +36,7 @@ def auth_client(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
@@ -76,7 +76,7 @@ def noauth_client(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database

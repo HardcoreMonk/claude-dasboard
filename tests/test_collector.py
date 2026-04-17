@@ -1,14 +1,14 @@
 """
 Collector agent unit tests.
 
-Tests the standalone collector.py functions (load_state, save_state,
+Tests the standalone codex_collector.py functions (load_state, save_state,
 scan_files, read_new_lines) without needing the server.
 """
 import json
 
 import pytest
 
-import collector
+import codex_collector as collector
 
 
 # ─── State persistence ────────────────────────────────────────────────
@@ -48,14 +48,14 @@ def test_save_state_creates_directory(tmp_path):
 
 def test_scan_files_empty_dir(tmp_path, monkeypatch):
     """Empty projects directory returns no changed files."""
-    monkeypatch.setattr(collector, 'CLAUDE_PROJECTS', tmp_path)
+    monkeypatch.setattr(collector, 'CODEX_ROOTS', (tmp_path,))
     result = collector.scan_files({})
     assert result == []
 
 
 def test_scan_files_detects_new(tmp_path, monkeypatch):
     """A new .jsonl file should be detected with start_line=0."""
-    monkeypatch.setattr(collector, 'CLAUDE_PROJECTS', tmp_path)
+    monkeypatch.setattr(collector, 'CODEX_ROOTS', (tmp_path,))
     # Create a JSONL file inside the projects directory
     project_dir = tmp_path / 'demo-project'
     project_dir.mkdir()

@@ -288,7 +288,7 @@ app.add_middleware(
 # track EVERY request (including 401s from auth), register auth FIRST and
 # metrics SECOND. At runtime the order is: metrics → auth → route.
 
-_AUTH_BYPASS = {'/api/health', '/metrics', '/api/ingest', '/api/collector.py',
+_AUTH_BYPASS = {'/api/health', '/metrics', '/api/ingest', '/api/codex-collector.py',
                 '/api/auth/login', '/api/auth/me', '/login', '/features'}
 _AUTH_BYPASS_PREFIX = ('/static/',)
 
@@ -2838,18 +2838,18 @@ def api_export_csv():
 
 # ─── Remote node ingestion ────────────────────────────────────────────────────
 
-_COLLECTOR_PATH = Path(__file__).parent / 'collector.py'
+_COLLECTOR_PATH = Path(__file__).parent / 'codex_collector.py'
 
 
-@app.get("/api/collector.py")
-def api_download_collector():
-    """Download the collector agent script for remote servers."""
+@app.get("/api/codex-collector.py")
+def api_download_codex_collector():
+    """Download the Codex collector agent script for remote servers."""
     if not _COLLECTOR_PATH.is_file():
-        return JSONResponse({'error': 'collector.py not found'}, 404)
+        return JSONResponse({'error': 'codex_collector.py not found'}, 404)
     return FileResponse(
         _COLLECTOR_PATH,
         media_type='text/x-python',
-        headers={'Content-Disposition': 'attachment; filename="collector.py"'},
+        headers={'Content-Disposition': 'attachment; filename="codex_collector.py"'},
     )
 
 

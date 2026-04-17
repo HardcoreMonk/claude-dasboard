@@ -28,7 +28,7 @@ def _reload_runtime_modules():
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
 
@@ -72,7 +72,7 @@ def _boot_api_client(tmp_path, monkeypatch, dashboard_password=None):
 
     # Drop any cached modules so the new DB_PATH / CLAUDE_PROJECTS stick
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
@@ -1061,7 +1061,7 @@ def test_api_works_with_auth_cookie(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database

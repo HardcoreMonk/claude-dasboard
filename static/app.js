@@ -2838,16 +2838,16 @@ async function submitNodeRegister() {
       steps.className = 'mt-2 space-y-1.5';
       const step1 = document.createElement('div');
       step1.className = 'p-2 bg-black/20 rounded-lg text-[9px] text-white/40 font-mono break-all';
-      step1.textContent = '# 1. \uC6D0\uACA9 \uC11C\uBC84\uC5D0\uC11C collector \uB2E4\uC6B4\uB85C\uB4DC';
+      step1.textContent = '# 1. \uC6D0\uACA9 \uC11C\uBC84\uC5D0\uC11C Codex collector \uB2E4\uC6B4\uB85C\uB4DC';
       const dl = document.createElement('div');
       dl.className = 'p-2 bg-black/20 rounded-lg text-[9px] text-white/40 font-mono break-all';
-      dl.textContent = 'curl -o collector.py ' + location.origin + '/api/collector.py';
+      dl.textContent = 'curl -o codex_collector.py ' + location.origin + '/api/codex-collector.py';
       const step2 = document.createElement('div');
       step2.className = 'p-2 bg-black/20 rounded-lg text-[9px] text-white/40 font-mono break-all';
       step2.textContent = '# 2. \uC2E4\uD589';
       const cmd = document.createElement('div');
       cmd.className = 'p-2 bg-black/20 rounded-lg text-[9px] text-accent/60 font-mono break-all';
-      cmd.textContent = 'python3 collector.py --url ' + location.origin + ' --node-id ' + nodeId + ' --ingest-key ' + d.ingest_key;
+      cmd.textContent = 'python3 codex_collector.py --url ' + location.origin + ' --node-id ' + nodeId + ' --ingest-key ' + d.ingest_key;
       steps.append(step1, dl, step2, cmd);
       resultEl.append(msg, keyBox, steps);
     }

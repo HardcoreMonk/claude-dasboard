@@ -3,7 +3,7 @@ Ingest API + Node management test suite.
 
 Covers: POST /api/nodes, GET /api/nodes, DELETE /api/nodes/{id},
         POST /api/nodes/{id}/rotate-key, POST /api/ingest,
-        removed legacy collector download, auth requirements.
+        Codex collector download, removed legacy download, auth requirements.
 """
 import json
 import sys
@@ -12,8 +12,9 @@ import pytest
 
 
 TEST_PASSWORD = 'ingest-test-pw'
-COLLECTOR_DOWNLOAD_PATH = '/api/collector.py'
-REMOVED_RUNTIME_PATHS = (COLLECTOR_DOWNLOAD_PATH,)
+CODEX_COLLECTOR_DOWNLOAD_PATH = '/api/codex-collector.py'
+LEGACY_COLLECTOR_DOWNLOAD_PATH = '/api/collector.py'
+REMOVED_RUNTIME_PATHS = (LEGACY_COLLECTOR_DOWNLOAD_PATH,)
 
 
 @pytest.fixture()
@@ -36,7 +37,7 @@ def client(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
@@ -74,7 +75,7 @@ def auth_client(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
@@ -254,10 +255,18 @@ def test_ingest_creates_messages(client):
     assert count == 2
 
 
+# ─── Collector download endpoint ─────────────────────────────────────
+
+def test_codex_collector_download(client):
+    r = client.get(CODEX_COLLECTOR_DOWNLOAD_PATH)
+    assert r.status_code == 200
+    assert 'codex_collector.py' in r.text
+
+
 # ─── Removed legacy download endpoint ────────────────────────────────
 
 @pytest.mark.parametrize('path', REMOVED_RUNTIME_PATHS)
-def test_collector_download_removed(client, path):
+def test_legacy_collector_download_removed(client, path):
     r = client.get(path)
     assert r.status_code == 404
 

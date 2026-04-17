@@ -279,17 +279,17 @@ footer a{color:var(--accent);text-decoration:none}
 <!-- ═══ 09 ═══ -->
 <section id="multiserver">
   <h2><span class="badge">09</span> Multi-Server Collection</h2>
-  <p>Collect Claude Code session data from remote servers via HTTP push.</p>
+  <p>Collect Codex session data from remote servers via HTTP push.</p>
   <div class="arch">[Remote Server]                         [Dashboard Server]
-collector.py                            POST /api/ingest
-  ~/.claude/projects/**/*.jsonl           X-Ingest-Key auth
+codex_collector.py                      POST /api/ingest
+  ~/.codex/{sessions,projects,logs}      X-Ingest-Key auth
   watchdog + 5s poll                      parser.process_record(source_node)
   state file tracking                     DB write + WS broadcast
   INGEST_KEY env var                      sessions.source_node = node_id</div>
   <table>
-    <tr><td>Node Registration</td><td>Admin UI: + Add Node button, one-time ingest key, collector command</td></tr>
+    <tr><td>Node Registration</td><td>Admin UI: + Add Node button, one-time ingest key, Codex collector command</td></tr>
     <tr><td>Collector Agent</td><td>stdlib-only Python script, no pip install needed</td></tr>
-    <tr><td>Collector Download</td><td>GET /api/collector.py from dashboard</td></tr>
+    <tr><td>Collector Download</td><td>GET /api/codex-collector.py from dashboard</td></tr>
     <tr><td>Key Rotation</td><td>Rotate ingest key without re-registering</td></tr>
     <tr><td>Node Filter</td><td>Filter sessions/timeline by source_node</td></tr>
     <tr><td>Node Badge</td><td>Cyan badge + left border on remote sessions</td></tr>

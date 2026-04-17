@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Claude Dashboard — Remote Collector Agent.
+Codex Dashboard — Remote Collector Agent.
 
-Lightweight agent that watches ~/.claude/projects/**/*.jsonl on a remote
-server and pushes new records to a central dashboard via POST /api/ingest.
+Lightweight agent that watches Codex JSONL logs on a remote server and pushes
+new records to a central dashboard via POST /api/ingest.
 
 Dependencies: Python 3.9+ stdlib only (no pip install needed).
 
 Usage:
-    python collector.py \
+    python codex_collector.py \
         --url https://dashboard.example.com \
         --node-id server-prod-1 \
         --ingest-key <key-from-POST-/api/nodes>
@@ -29,12 +29,17 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'
-DEFAULT_STATE_FILE = Path.home() / '.claude' / '.collector-state.json'
+CODEX_HOME = Path.home() / '.codex'
+CODEX_ROOTS = (
+    CODEX_HOME / 'sessions',
+    CODEX_HOME / 'projects',
+    CODEX_HOME / 'logs',
+)
+DEFAULT_STATE_FILE = CODEX_HOME / '.collector-state.json'
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s collector: %(message)s',
+    format='%(asctime)s %(levelname)s codex-collector: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
 )
 logger = logging.getLogger(__name__)
@@ -61,11 +66,9 @@ def save_state(path: Path, state: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix('.tmp')
     try:
-        # Clean stale tmp from previous crash
         if tmp.exists():
             tmp.unlink()
         tmp.write_text(json.dumps(state, indent=2))
-        # shutil.move works cross-device; Path.rename does not
         shutil.move(str(tmp), str(path))
     except OSError as e:
         logger.warning("Atomic save failed (%s), falling back to direct write", e)
@@ -78,20 +81,22 @@ def save_state(path: Path, state: dict):
 
 def scan_files(state: dict) -> list[tuple[str, int]]:
     """Return list of (file_path, start_line) for files with new content."""
-    if not CLAUDE_PROJECTS.is_dir():
-        return []
     changed = []
-    for f in CLAUDE_PROJECTS.rglob('*.jsonl'):
-        fp = str(f)
-        try:
-            st = f.stat()
-            mtime, size = st.st_mtime, st.st_size
-        except OSError:
+    for root in CODEX_ROOTS:
+        if not root.is_dir():
             continue
-        prev = state.get(fp, {})
-        if prev.get('mtime') == mtime and prev.get('size') == size:
-            continue
-        changed.append((fp, prev.get('last_line', 0)))
+        pattern = 'rollout-*.jsonl' if root.name == 'sessions' else '*.jsonl'
+        for f in root.rglob(pattern):
+            fp = str(f)
+            try:
+                st = f.stat()
+                mtime, size = st.st_mtime, st.st_size
+            except OSError:
+                continue
+            prev = state.get(fp, {})
+            if prev.get('mtime') == mtime and prev.get('size') == size:
+                continue
+            changed.append((fp, prev.get('last_line', 0)))
     return changed
 
 
@@ -160,7 +165,6 @@ def run_once(url: str, node_id: str, ingest_key: str,
     for file_path, start_line in changed:
         records = read_new_lines(file_path, start_line)
         if not records:
-            # File changed (mtime) but no new parseable lines — update state
             try:
                 st = os.stat(file_path)
                 state[file_path] = {
@@ -172,7 +176,6 @@ def run_once(url: str, node_id: str, ingest_key: str,
                 pass
             continue
 
-        # Send in batches
         for i in range(0, len(records), batch_size):
             batch = records[i:i + batch_size]
             try:
@@ -187,9 +190,8 @@ def run_once(url: str, node_id: str, ingest_key: str,
             except Exception:
                 logger.warning("Failed to send batch for %s — will retry",
                                Path(file_path).name)
-                break  # Don't advance state for this file
+                break
         else:
-            # All batches sent successfully — update state
             last_line = max(r.get('_line_number', 0) for r in records) + 1
             try:
                 st = os.stat(file_path)
@@ -207,7 +209,7 @@ def run_once(url: str, node_id: str, ingest_key: str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Claude Dashboard remote collector agent')
+        description='Codex Dashboard remote collector agent')
     parser.add_argument('--url', required=True,
                         help='Dashboard base URL (e.g. https://dash.example.com)')
     parser.add_argument('--node-id', required=True,
@@ -220,14 +222,13 @@ def main():
                         help='Poll interval in seconds (default: 5)')
     parser.add_argument('--state-file', type=Path,
                         default=DEFAULT_STATE_FILE,
-                        help='State file path (default: ~/.claude/.collector-state.json)')
+                        help='State file path (default: ~/.codex/.collector-state.json)')
     parser.add_argument('--batch-size', type=int, default=200,
                         help='Max records per HTTP request (default: 200)')
     parser.add_argument('--once', action='store_true',
                         help='Run a single scan and exit')
     args = parser.parse_args()
 
-    # Resolve ingest key: env var > file > CLI arg
     ingest_key = os.environ.get('INGEST_KEY') or None
     if not ingest_key and args.ingest_key_file:
         try:
@@ -244,7 +245,8 @@ def main():
 
     logger.info("Collector starting: node=%s url=%s interval=%.0fs",
                 args.node_id, args.url, args.interval)
-    logger.info("Watching: %s", CLAUDE_PROJECTS)
+    logger.info("Watching roots: %s",
+                ', '.join(str(root) for root in CODEX_ROOTS))
     logger.info("State file: %s", args.state_file)
 
     state = load_state(args.state_file)
@@ -262,18 +264,11 @@ def main():
             if sent:
                 logger.info("Cycle complete: %d records sent", sent)
         except KeyboardInterrupt:
-            logger.info("Shutting down")
-            save_state(args.state_file, state)
-            break
+            logger.info("Interrupted; exiting")
+            return
         except Exception:
-            logger.exception("Unexpected error in poll cycle")
-
-        try:
-            time.sleep(args.interval)
-        except KeyboardInterrupt:
-            logger.info("Shutting down")
-            save_state(args.state_file, state)
-            break
+            logger.exception("Collector cycle failed")
+        time.sleep(max(args.interval, 1.0))
 
 
 if __name__ == '__main__':

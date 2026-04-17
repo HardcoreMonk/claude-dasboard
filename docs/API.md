@@ -1,6 +1,6 @@
 # REST API
 
-62 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features` 은 인증 우회.
+62 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/codex-collector.py`, `/login`, `/features` 은 인증 우회.
 현재 대시보드는 Codex 세션 탐색 전용으로 동작한다. legacy Claude/claude.ai 라우트는 데이터 보존과 호환을 위해 남아 있지만, 기본 UI 는 사용하지 않는다.
 
 프로젝트 기준과 문서 우선순위는 `AGENTS.md`를 따른다. 이 문서는 인터페이스 계약과 호출 예시에 집중한다.
@@ -151,8 +151,8 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| POST | `/api/ingest` | 원격 collector 에이전트가 JSONL 레코드 전송. `X-Ingest-Key` 헤더 인증. Body: `{node_id, file_path, records[]}` (인증 우회) |
-| GET | `/api/collector.py` | collector.py 스크립트 다운로드 (원격 서버 설치용, 인증 우회) |
+| POST | `/api/ingest` | 원격 Codex collector 에이전트가 JSONL 레코드 전송. `X-Ingest-Key` 헤더 인증. Body: `{node_id, file_path, records[]}` (인증 우회) |
+| GET | `/api/codex-collector.py` | `codex_collector.py` 스크립트 다운로드 (원격 서버 설치용, 인증 우회) |
 | GET | `/api/nodes` | 등록된 노드 목록 (local 포함) + 세션/메시지 카운트 |
 | POST | `/api/nodes` | 노드 등록. Body: `{node_id, label?}`. 응답에 일회성 `ingest_key` 포함 |
 | DELETE | `/api/nodes/{node_id}` | 노드 등록 해제 (수집된 데이터는 유지) |

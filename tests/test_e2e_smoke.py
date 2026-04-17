@@ -50,7 +50,7 @@ def e2e_client(tmp_path, monkeypatch):
     except Exception:
         pass
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)

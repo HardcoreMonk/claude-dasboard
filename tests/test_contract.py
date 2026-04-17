@@ -38,7 +38,7 @@ def _reload_runtime_modules():
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
 
@@ -58,7 +58,7 @@ def contract_client(tmp_path, monkeypatch):
     except Exception:
         pass
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
@@ -503,7 +503,7 @@ def test_contract_endpoints_accessible_with_auth(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database

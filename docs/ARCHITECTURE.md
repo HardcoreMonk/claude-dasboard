@@ -78,7 +78,7 @@ HTTP routes + 1 WebSocket 을 호스팅.
 | 예측 | `/api/forecast` | MTD 비용 예측, 예산 소진 시간 |
 | 플랜 | `/api/plan/detect`, `/plan/config`, `/plan/usage` | 요금제 감지, 예산 설정 |
 | claude.ai | `/api/claude-ai/conversations`, `/search`, `/stats` | claude.ai export 데이터 |
-| 원격 수집 | `/api/ingest`, `/api/nodes` | 다중 서버 JSONL 수집 (collector.py → POST /api/ingest) |
+| 원격 수집 | `/api/ingest`, `/api/nodes` | 다중 서버 JSONL 수집 (`codex_collector.py` → POST `/api/ingest`) |
 | 관리 | `/api/admin/backup`, `/retention`, `/retention/schedule`, `/db-size`, `/status`, `/audit` | 백업, 보존 + 자동 스케줄러, Codex ingest 상태를 포함한 대시보드 상태, 감사 로그 |
 | 내보내기 | `/api/export/csv` | 세션 CSV 다운로드 |
 | WebSocket | `/ws` | 실시간 메시지 브로드캐스트 |
@@ -90,7 +90,7 @@ HTTP routes + 1 WebSocket 을 호스팅.
 ```
 
 - `metrics`: 모든 요청을 `http_requests_total{method,path,status}` 로 카운트 (라우트 템플릿 기반, cardinality 제어)
-- `auth`: `DASHBOARD_PASSWORD` 설정 시 쿠키 세션 검증 (`dash_session`). `/`, `/static/*`, `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login` 은 우회
+- `auth`: `DASHBOARD_PASSWORD` 설정 시 쿠키 세션 검증 (`dash_session`). `/`, `/static/*`, `/api/health`, `/metrics`, `/api/ingest`, `/api/codex-collector.py`, `/login` 은 우회
 
 ### database.py — SQLite 데이터 계층
 
@@ -435,14 +435,14 @@ python import_claude_ai.py --zip ~/export.zip
 
 ```
 [원격 서버]                        [대시보드 서버]
-collector.py                      POST /api/ingest
+codex_collector.py                POST /api/ingest
   watchdog + poll                   → X-Ingest-Key 인증
   → JSONL 변경 감지                  → parser.process_record(source_node=node_id)
   → POST /api/ingest                → DB 저장 + WS broadcast
 ```
 
-- `collector.py`: stdlib-only 독립 스크립트. 원격 서버의 Codex 로그를 감시하며 변경된 JSONL 레코드를 대시보드 서버로 전송.
-- `GET /api/collector.py`: 대시보드 서버에서 collector 스크립트 다운로드 (원격 서버 설치 편의).
+- `codex_collector.py`: stdlib-only 독립 스크립트. 원격 서버의 Codex 로그를 감시하며 변경된 JSONL 레코드를 대시보드 서버로 전송.
+- `GET /api/codex-collector.py`: 대시보드 서버에서 Codex collector 스크립트 다운로드 (원격 서버 설치 편의).
 - `POST /api/nodes`: 노드 등록 시 일회성 `ingest_key` 발급. `POST /api/nodes/{id}/rotate-key` 로 재발급.
 - `sessions.source_node` 컬럼으로 로컬/원격 세션 구분. `?node=` 필터로 노드별 조회.
 
