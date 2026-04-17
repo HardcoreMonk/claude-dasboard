@@ -1421,6 +1421,50 @@ def get_codex_message_position(session_id: str, message_id: int) -> dict | None:
     return {'position': int(pos or 0), 'total': int(total or 0), 'message_id': message_id}
 
 
+def get_codex_session_delete_preview(session_id: str) -> dict | None:
+    with read_db() as conn:
+        row = conn.execute(
+            '''
+            SELECT
+                s.id AS session_id,
+                p.project_name,
+                s.message_count
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE s.id = ?
+            ''',
+            (session_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_codex_session(session_id: str) -> dict:
+    with write_db() as conn:
+        preview = conn.execute(
+            'SELECT COUNT(*) AS messages_deleted FROM codex_messages WHERE session_id = ?',
+            (session_id,),
+        ).fetchone()
+        deleted = conn.execute(
+            'DELETE FROM codex_sessions WHERE id = ?',
+            (session_id,),
+        ).rowcount
+    close_thread_connections()
+    return {
+        'deleted': deleted > 0,
+        'messages_deleted': int(preview['messages_deleted'] or 0) if preview else 0,
+    }
+
+
+def set_codex_session_pinned(session_id: str, pinned: bool) -> bool:
+    with write_db() as conn:
+        updated = conn.execute(
+            'UPDATE codex_sessions SET pinned = ? WHERE id = ?',
+            (1 if pinned else 0, session_id),
+        ).rowcount
+    close_thread_connections()
+    return updated > 0
+
+
 def get_codex_models(sort: str = 'messages', order: str = 'desc', page: int = 1, per_page: int = 500) -> dict:
     sort_map = {
         'model': 'model',

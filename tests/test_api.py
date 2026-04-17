@@ -898,6 +898,79 @@ def test_codex_message_position_falls_back_without_legacy_rows(api_client):
     assert body == {'position': 1, 'total': 4, 'message_id': 2}
 
 
+def test_session_detail_prefers_codex_when_both_sources_exist(api_client):
+    r = api_client.get('/api/sessions/codex-s1')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['id'] == 'codex-s1'
+    assert body['project_name'] == 'codex-demo'
+    assert body['message_count'] == 4
+
+
+def test_session_messages_prefers_codex_when_both_sources_exist(api_client):
+    r = api_client.get('/api/sessions/codex-s1/messages?limit=10&offset=0')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total'] == 4
+    assert [row['role'] for row in body['messages']] == ['user', 'assistant', 'tool', 'agent']
+
+
+def test_message_position_prefers_codex_when_both_sources_exist(api_client):
+    r = api_client.get('/api/sessions/codex-s1/message-position?message_id=2')
+    assert r.status_code == 200
+    assert r.json() == {'position': 1, 'total': 4, 'message_id': 2}
+
+
+def test_session_delete_preview_counts_codex_rows_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.delete('/api/sessions/codex-s1')
+    assert r.status_code == 200
+    assert r.json() == {
+        'preview': True,
+        'session_id': 'codex-s1',
+        'project_name': 'codex-demo',
+        'message_count': 4,
+    }
+
+
+def test_session_delete_confirm_removes_codex_rows_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.delete('/api/sessions/codex-s1?confirm=true')
+    assert r.status_code == 200
+    assert r.json() == {'deleted': True, 'messages_deleted': 4}
+
+    detail = api_client.get('/api/sessions/codex-s1')
+    assert detail.status_code == 404
+
+
+def test_session_pin_and_unpin_apply_to_codex_sessions(api_client):
+    import database
+
+    r = api_client.post('/api/sessions/codex-s1/pin')
+    assert r.status_code == 200
+
+    with database.read_db() as db:
+        pinned = db.execute(
+            'SELECT pinned FROM codex_sessions WHERE id = ?',
+            ('codex-s1',),
+        ).fetchone()[0]
+    assert pinned == 1
+
+    r = api_client.delete('/api/sessions/codex-s1/pin')
+    assert r.status_code == 200
+
+    with database.read_db() as db:
+        pinned = db.execute(
+            'SELECT pinned FROM codex_sessions WHERE id = ?',
+            ('codex-s1',),
+        ).fetchone()[0]
+    assert pinned == 0
+
+
 def test_codex_sessions_endpoint_returns_replay_launcher_rows(api_client):
     r = api_client.get('/api/codex/sessions')
     assert r.status_code == 200

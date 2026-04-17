@@ -51,6 +51,7 @@ from database import (
     get_codex_models,
     get_codex_projects,
     get_codex_projects_top,
+    get_codex_session_delete_preview,
     get_codex_session_detail_row,
     get_codex_session_messages_page,
     get_codex_session_replay,
@@ -59,9 +60,11 @@ from database import (
     init_db,
     list_codex_sessions,
     list_codex_sessions_table,
+    delete_codex_session,
     purge_legacy_dashboard_data,
     read_db,
     search_codex_messages,
+    set_codex_session_pinned,
     wal_checkpoint,
     write_db,
 )
@@ -2897,6 +2900,14 @@ def api_plan_usage():
 def api_session_delete(session_id: str, confirm: bool = Query(False)):
     """Delete a single session and all its messages."""
     if not confirm:
+        codex_row = get_codex_session_delete_preview(session_id)
+        if codex_row is not None:
+            return {
+                'preview': True,
+                'session_id': session_id,
+                'project_name': codex_row['project_name'],
+                'message_count': codex_row['message_count'],
+            }
         with read_db() as db:
             row = db.execute(
                 'SELECT project_name, message_count FROM sessions WHERE id = ?',
@@ -2906,6 +2917,10 @@ def api_session_delete(session_id: str, confirm: bool = Query(False)):
         return {'preview': True, 'session_id': session_id,
                 'project_name': row['project_name'],
                 'message_count': row['message_count']}
+    codex_result = delete_codex_session(session_id)
+    if codex_result['deleted']:
+        logger.info("Deleted Codex session %s (%d messages)", session_id, codex_result['messages_deleted'])
+        return codex_result
     with write_db() as db:
         msg_del = db.execute(
             'DELETE FROM messages WHERE session_id = ?', (session_id,)).rowcount
@@ -2917,6 +2932,8 @@ def api_session_delete(session_id: str, confirm: bool = Query(False)):
 
 @app.post("/api/sessions/{session_id}/pin")
 def api_session_pin(session_id: str):
+    if set_codex_session_pinned(session_id, True):
+        return {'ok': True}
     with write_db() as db:
         db.execute('UPDATE sessions SET pinned = 1 WHERE id = ?', (session_id,))
     return {'ok': True}
@@ -2924,6 +2941,8 @@ def api_session_pin(session_id: str):
 
 @app.delete("/api/sessions/{session_id}/pin")
 def api_session_unpin(session_id: str):
+    if set_codex_session_pinned(session_id, False):
+        return {'ok': True}
     with write_db() as db:
         db.execute('UPDATE sessions SET pinned = 0 WHERE id = ?', (session_id,))
     return {'ok': True}
@@ -4212,13 +4231,8 @@ def api_metrics():
     # Refresh gauges on scrape so they reflect current state
     try:
         with read_db() as db:
-            codex_sessions = int(db.execute("SELECT COUNT(*) FROM codex_sessions").fetchone()[0] or 0)
-            if codex_sessions > 0:
-                sessions = codex_sessions
-                messages = int(db.execute("SELECT COUNT(*) FROM codex_messages").fetchone()[0] or 0)
-            else:
-                sessions = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-                messages = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            sessions = int(db.execute("SELECT COUNT(*) FROM codex_sessions").fetchone()[0] or 0)
+            messages = int(db.execute("SELECT COUNT(*) FROM codex_messages").fetchone()[0] or 0)
         METRIC_SESSIONS.set(sessions)
         METRIC_MESSAGES.set(messages)
         if DB_PATH.exists():
