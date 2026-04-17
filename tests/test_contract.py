@@ -452,6 +452,15 @@ def test_contract_admin_db_size(contract_client):
     assert body['freelist_count'] >= 0
 
 
+def test_contract_admin_db_compact(contract_client):
+    r = contract_client.post('/api/admin/db-compact')
+    assert r.status_code == 200
+    body = r.json()
+    _require(body, '/api/admin/db-compact', ['before', 'after', 'reclaimed_bytes'])
+    _require(body['before'], '/api/admin/db-compact.before', ['size_bytes', 'free_bytes', 'used_bytes'])
+    _require(body['after'], '/api/admin/db-compact.after', ['size_bytes', 'free_bytes', 'used_bytes'])
+
+
 def test_contract_admin_status_includes_codex_ingest_fields(contract_client):
     r = contract_client.get('/api/admin/status')
     assert r.status_code == 200

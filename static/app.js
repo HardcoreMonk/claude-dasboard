@@ -2486,6 +2486,24 @@ async function createBackup() {
   }
 }
 
+async function runDbCompact() {
+  const label = document.getElementById('compactResult');
+  if (label) label.textContent = 'DB 정리 중…';
+  showToast('DB 정리 실행 중…', { type: 'info', duration: 2000 });
+  try {
+    const r = await fetch('/api/admin/db-compact', { method: 'POST' }).then(r => r.json());
+    if (r.error) throw new Error(r.error);
+    const reclaimed = _fmtBytes(r.reclaimed_bytes || 0);
+    if (label) label.textContent = `완료: ${reclaimed} 회수`;
+    showToast(`DB 정리 완료 — ${reclaimed} 회수`, { type: 'success' });
+    loadDbSize();
+    loadAdminStatus();
+  } catch (e) {
+    if (label) label.textContent = `오류: ${e.message}`;
+    showToast('DB 정리 실패: ' + (e.message || e), { type: 'error' });
+  }
+}
+
 async function runRetention() {
   const days = parseInt(document.getElementById('retentionDays').value) || 90;
   const el = document.getElementById('retentionResult');

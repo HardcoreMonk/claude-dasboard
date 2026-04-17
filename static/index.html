@@ -772,8 +772,12 @@
       <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
         <div class="text-xs font-bold text-white/40 mb-1">백업</div>
         <div class="text-[10px] text-white/20 mb-3">DB 크기: <span id="dbSizeLabel">—</span></div>
-        <button data-action="createBackup" class="rounded-full px-4 py-2 text-xs font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">백업 생성</button>
+        <div class="flex gap-2">
+          <button data-action="createBackup" class="rounded-full px-4 py-2 text-xs font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">백업 생성</button>
+          <button data-action="runDbCompact" class="rounded-full px-4 py-2 text-xs font-semibold bg-white/5 text-white/50 border border-white/[0.07] hover:scale-[1.02] active:scale-[0.98] spring">DB 정리</button>
+        </div>
         <div id="backupResult" class="text-[10px] text-white/20 mt-2"></div>
+        <div id="compactResult" class="text-[10px] text-white/20 mt-1"></div>
       </div>
     </div>
     <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
@@ -883,6 +887,7 @@
           <select id="auditAction" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60">
             <option value="">전체</option>
             <option value="backup">backup</option>
+            <option value="db_compact">db_compact</option>
             <option value="retention">retention</option>
             <option value="retention_scheduled">retention_scheduled</option>
             <option value="retention_schedule_update">retention_schedule_update</option>

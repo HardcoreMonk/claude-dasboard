@@ -3465,6 +3465,40 @@ def _audit(action: str, request: Optional[Request], *, status: str = 'ok', detai
         logger.exception("Audit log insert failed for action=%s", action)
 
 
+def _db_storage_breakdown() -> dict:
+    try:
+        size = DB_PATH.stat().st_size
+        wal_path = DB_PATH.with_suffix(DB_PATH.suffix + '-wal')
+        wal_size = wal_path.stat().st_size if wal_path.exists() else 0
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            page_size = int(conn.execute('PRAGMA page_size').fetchone()[0] or 0)
+            page_count = int(conn.execute('PRAGMA page_count').fetchone()[0] or 0)
+            freelist_count = int(conn.execute('PRAGMA freelist_count').fetchone()[0] or 0)
+        free_bytes = page_size * freelist_count
+        used_bytes = page_size * max(0, page_count - freelist_count)
+        return {
+            'size_bytes': size,
+            'size_mb': round(size / 1048576, 1),
+            'wal_size_bytes': wal_size,
+            'used_bytes': used_bytes,
+            'free_bytes': free_bytes,
+            'page_size': page_size,
+            'page_count': page_count,
+            'freelist_count': freelist_count,
+        }
+    except OSError:
+        return {
+            'size_bytes': 0,
+            'size_mb': 0,
+            'wal_size_bytes': 0,
+            'used_bytes': 0,
+            'free_bytes': 0,
+            'page_size': 0,
+            'page_count': 0,
+            'freelist_count': 0,
+        }
+
+
 def _run_retention(older_than_days: int) -> dict:
     """Core retention delete. Returns counts. Shared by HTTP route + scheduler."""
     cutoff = (datetime.now(_tz.utc) - timedelta(days=older_than_days)).strftime(
@@ -3483,9 +3517,49 @@ def _run_retention(older_than_days: int) -> dict:
             sess_del = db.execute(
                 f'DELETE FROM sessions WHERE id IN ({ph})', sids
             ).rowcount
+        codex_old = db.execute(
+            'SELECT id FROM codex_sessions WHERE updated_at < ?', (cutoff,)
+        ).fetchall()
+        codex_sids = [r['id'] for r in codex_old]
+        codex_msg_del = codex_sess_del = 0
+        if codex_sids:
+            ph = ','.join(['?'] * len(codex_sids))
+            codex_msg_del = db.execute(
+                f'SELECT COUNT(*) FROM codex_messages WHERE session_id IN ({ph})',
+                codex_sids,
+            ).fetchone()[0]
+            codex_sess_del = db.execute(
+                f'DELETE FROM codex_sessions WHERE id IN ({ph})',
+                codex_sids,
+            ).rowcount
+    close_thread_connections()
+    msg_del += int(codex_msg_del or 0)
+    sess_del += int(codex_sess_del or 0)
     logger.info("Retention: deleted %d sessions, %d messages (cutoff=%s)",
                 sess_del, msg_del, cutoff)
     return {'sessions': sess_del, 'messages': msg_del, 'cutoff': cutoff}
+
+
+def _run_db_compaction() -> dict:
+    before = _db_storage_breakdown()
+    close_thread_connections()
+    with _write_lock:
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            conn.execute('PRAGMA busy_timeout=5000')
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            conn.execute('PRAGMA incremental_vacuum')
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        finally:
+            conn.close()
+    close_thread_connections()
+    after = _db_storage_breakdown()
+    reclaimed = max(0, before['size_bytes'] - after['size_bytes'])
+    return {
+        'before': before,
+        'after': after,
+        'reclaimed_bytes': reclaimed,
+    }
 
 
 @app.post("/api/admin/backup")
@@ -3526,10 +3600,13 @@ def api_retention(
     if not confirm:
         # Preview only — show what WOULD be deleted
         with read_db() as db:
-            cnt = db.execute(
+            legacy_cnt = db.execute(
                 'SELECT COUNT(*) FROM sessions WHERE updated_at < ?', (cutoff,)
             ).fetchone()[0]
-        return {'preview': True, 'sessions_to_delete': cnt, 'cutoff': cutoff}
+            codex_cnt = db.execute(
+                'SELECT COUNT(*) FROM codex_sessions WHERE updated_at < ?', (cutoff,)
+            ).fetchone()[0]
+        return {'preview': True, 'sessions_to_delete': legacy_cnt + codex_cnt, 'cutoff': cutoff}
 
     result = _run_retention(older_than_days)
     _audit('retention', request, detail={
@@ -3543,41 +3620,28 @@ def api_retention(
             'cutoff': result['cutoff']}
 
 
+@app.post("/api/admin/db-compact")
+def api_db_compact(request: Request):
+    try:
+        result = _run_db_compaction()
+        _audit('db_compact', request, detail={
+            'before_size_bytes': result['before']['size_bytes'],
+            'after_size_bytes': result['after']['size_bytes'],
+            'reclaimed_bytes': result['reclaimed_bytes'],
+        })
+        return result
+    except Exception as e:
+        _audit('db_compact', request, status='error', detail={'error': str(e)[:200]})
+        logger.exception("DB compaction failed")
+        return JSONResponse({'error': 'db compaction failed', 'detail': 'check server logs'}, status_code=500)
+
+
 @app.get("/api/admin/db-size")
 def api_db_size():
-    try:
-        size = DB_PATH.stat().st_size
-        wal_path = DB_PATH.with_suffix(DB_PATH.suffix + '-wal')
-        wal_size = wal_path.stat().st_size if wal_path.exists() else 0
-        with sqlite3.connect(str(DB_PATH)) as conn:
-            page_size = int(conn.execute('PRAGMA page_size').fetchone()[0] or 0)
-            page_count = int(conn.execute('PRAGMA page_count').fetchone()[0] or 0)
-            freelist_count = int(conn.execute('PRAGMA freelist_count').fetchone()[0] or 0)
-        free_bytes = page_size * freelist_count
-        used_bytes = page_size * max(0, page_count - freelist_count)
-        if _PROMETHEUS_OK:
-            METRIC_DB_SIZE.set(size)
-        return {
-            'size_bytes': size,
-            'size_mb': round(size / 1048576, 1),
-            'wal_size_bytes': wal_size,
-            'used_bytes': used_bytes,
-            'free_bytes': free_bytes,
-            'page_size': page_size,
-            'page_count': page_count,
-            'freelist_count': freelist_count,
-        }
-    except OSError:
-        return {
-            'size_bytes': 0,
-            'size_mb': 0,
-            'wal_size_bytes': 0,
-            'used_bytes': 0,
-            'free_bytes': 0,
-            'page_size': 0,
-            'page_count': 0,
-            'freelist_count': 0,
-        }
+    payload = _db_storage_breakdown()
+    if _PROMETHEUS_OK:
+        METRIC_DB_SIZE.set(payload['size_bytes'])
+    return payload
 
 
 # ─── Audit log retrieval ─────────────────────────────────────────────────────

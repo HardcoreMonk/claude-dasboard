@@ -272,6 +272,89 @@ def test_admin_db_size_reports_storage_breakdown(api_client):
     assert body['used_bytes'] + body['free_bytes'] == body['page_size'] * body['page_count']
 
 
+def test_admin_retention_preview_counts_codex_sessions_without_legacy_rows(api_client):
+    import database
+
+    _clear_legacy_runtime_rows()
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-old-retention',
+        session_name='Old retention session',
+        role='assistant',
+        content='Old retention candidate',
+        content_preview='Old retention candidate',
+        timestamp='2026-04-01T00:00:00Z',
+        message_uuid='codex-old-retention-1',
+        model='gpt-5.4',
+    )
+
+    r = api_client.delete('/api/admin/retention?older_than_days=7')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['preview'] is True
+    assert body['sessions_to_delete'] >= 1
+
+
+def test_admin_retention_confirm_deletes_codex_sessions_without_legacy_rows(api_client):
+    import database
+
+    _clear_legacy_runtime_rows()
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-old-retention',
+        session_name='Old retention session',
+        role='assistant',
+        content='Old retention candidate',
+        content_preview='Old retention candidate',
+        timestamp='2026-04-01T00:00:00Z',
+        message_uuid='codex-old-retention-1',
+        model='gpt-5.4',
+    )
+
+    r = api_client.delete('/api/admin/retention?older_than_days=7&confirm=true')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['preview'] is False
+    assert body['deleted_sessions'] >= 1
+    assert body['deleted_messages'] >= 1
+
+    stats = api_client.get('/api/stats')
+    assert stats.status_code == 200
+    session_ids = [row['id'] for row in api_client.get('/api/sessions?include_subagents=true&per_page=20').json()['sessions']]
+    assert 'codex-old-retention' not in session_ids
+
+
+def test_admin_db_compact_reports_before_after_breakdown(api_client, tmp_path):
+    import sqlite3
+
+    conn = sqlite3.connect(str(tmp_path / 'api.db'))
+    conn.execute('CREATE TABLE IF NOT EXISTS scratch_payload (body TEXT)')
+    conn.executemany(
+        'INSERT INTO scratch_payload(body) VALUES (?)',
+        [('x' * 8192,) for _ in range(128)],
+    )
+    conn.commit()
+    conn.execute('DROP TABLE scratch_payload')
+    conn.commit()
+    conn.close()
+
+    before = api_client.get('/api/admin/db-size').json()
+    assert before['free_bytes'] > 0
+
+    r = api_client.post('/api/admin/db-compact')
+    assert r.status_code == 200
+    body = r.json()
+
+    for key in ['before', 'after', 'reclaimed_bytes']:
+        assert key in body
+    assert body['before']['free_bytes'] >= body['after']['free_bytes']
+    assert body['reclaimed_bytes'] >= 0
+
+
 @pytest.mark.parametrize(
     'path',
     REMOVED_RUNTIME_PATHS,
