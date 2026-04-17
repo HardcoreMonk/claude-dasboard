@@ -2530,7 +2530,9 @@ async function runRetention() {
 async function loadDbSize() {
   try {
     const r = await safeFetch('/api/admin/db-size');
-    document.getElementById('dbSizeLabel').textContent = `${r.size_mb} MB`;
+    const used = _fmtBytes(r.used_bytes || 0);
+    const total = _fmtBytes(r.size_bytes || 0);
+    document.getElementById('dbSizeLabel').textContent = `${used} / ${total}`;
   } catch (e) { /* silent */ }
 }
 
@@ -2575,7 +2577,7 @@ async function loadAdminStatus() {
     grid.append(
       card('가동 시간', _fmtUptime(d.uptime_seconds || 0), 'text-emerald-400/80'),
       card('스키마', 'v' + (d.schema_version || 0), 'text-cyan-400/80'),
-      card('DB 크기', _fmtBytes(d.db?.size_bytes || 0)),
+      card('DB 크기', `${_fmtBytes(d.db?.used_bytes || 0)} / ${_fmtBytes(d.db?.size_bytes || 0)}`),
       card('WAL 크기', _fmtBytes(d.db?.wal_size_bytes || 0), (d.db?.wal_size_bytes > 52428800 ? 'text-amber-400/80' : 'text-white/80')),
       card('Codex 세션', fmtN(indexedSessions), 'text-purple-300/80'),
       card('Codex 메시지', fmtN(indexedMessages), 'text-purple-300/80'),

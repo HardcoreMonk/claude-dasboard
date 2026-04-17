@@ -3234,11 +3234,37 @@ def api_retention(
 def api_db_size():
     try:
         size = DB_PATH.stat().st_size
+        wal_path = DB_PATH.with_suffix(DB_PATH.suffix + '-wal')
+        wal_size = wal_path.stat().st_size if wal_path.exists() else 0
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            page_size = int(conn.execute('PRAGMA page_size').fetchone()[0] or 0)
+            page_count = int(conn.execute('PRAGMA page_count').fetchone()[0] or 0)
+            freelist_count = int(conn.execute('PRAGMA freelist_count').fetchone()[0] or 0)
+        free_bytes = page_size * freelist_count
+        used_bytes = page_size * max(0, page_count - freelist_count)
         if _PROMETHEUS_OK:
             METRIC_DB_SIZE.set(size)
-        return {'size_bytes': size, 'size_mb': round(size / 1048576, 1)}
+        return {
+            'size_bytes': size,
+            'size_mb': round(size / 1048576, 1),
+            'wal_size_bytes': wal_size,
+            'used_bytes': used_bytes,
+            'free_bytes': free_bytes,
+            'page_size': page_size,
+            'page_count': page_count,
+            'freelist_count': freelist_count,
+        }
     except OSError:
-        return {'size_bytes': 0, 'size_mb': 0}
+        return {
+            'size_bytes': 0,
+            'size_mb': 0,
+            'wal_size_bytes': 0,
+            'used_bytes': 0,
+            'free_bytes': 0,
+            'page_size': 0,
+            'page_count': 0,
+            'freelist_count': 0,
+        }
 
 
 # ─── Audit log retrieval ─────────────────────────────────────────────────────
@@ -3416,15 +3442,24 @@ def api_admin_status():
         wal_size = wal_path.stat().st_size if wal_path.exists() else 0
     except OSError:
         wal_size = 0
+    try:
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            page_size = int(conn.execute('PRAGMA page_size').fetchone()[0] or 0)
+            page_count = int(conn.execute('PRAGMA page_count').fetchone()[0] or 0)
+            freelist_count = int(conn.execute('PRAGMA freelist_count').fetchone()[0] or 0)
+        free_bytes = page_size * freelist_count
+        used_bytes = page_size * max(0, page_count - freelist_count)
+    except sqlite3.Error:
+        page_size = page_count = freelist_count = 0
+        free_bytes = used_bytes = 0
 
     with read_db() as db:
         schema_v = db.execute("PRAGMA user_version").fetchone()[0]
+        codex_ingest = get_codex_ingest_status()
         counts = {
-            'sessions': db.execute('SELECT COUNT(*) c FROM sessions').fetchone()['c'],
-            'messages': db.execute('SELECT COUNT(*) c FROM messages').fetchone()['c'],
-            'subagents': db.execute(
-                'SELECT COUNT(*) c FROM sessions WHERE is_subagent = 1'
-            ).fetchone()['c'],
+            'sessions': codex_ingest.get('indexed_sessions', 0),
+            'messages': codex_ingest.get('indexed_messages', 0),
+            'subagents': 0,
             'remote_nodes': db.execute('SELECT COUNT(*) c FROM remote_nodes').fetchone()['c'],
             'audit_entries': db.execute('SELECT COUNT(*) c FROM admin_audit').fetchone()['c'],
         }
@@ -3449,8 +3484,6 @@ def api_admin_status():
             pass
 
     uptime_sec = int(time.time() - _APP_START_TS)
-    codex_ingest = get_codex_ingest_status()
-
     return {
         **codex_ingest,
         'uptime_seconds': uptime_sec,
@@ -3459,6 +3492,11 @@ def api_admin_status():
             'path': str(DB_PATH),
             'size_bytes': db_size,
             'wal_size_bytes': wal_size,
+            'used_bytes': used_bytes,
+            'free_bytes': free_bytes,
+            'page_size': page_size,
+            'page_count': page_count,
+            'freelist_count': freelist_count,
         },
         'counts': counts,
         'watcher': {

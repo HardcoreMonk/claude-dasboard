@@ -244,6 +244,8 @@ def test_admin_ingest_status_reports_codex_counters(api_client):
     assert body['source_kind'] == 'codex'
     assert body['indexed_sessions'] >= 2
     assert body['indexed_messages'] >= 5
+    assert body['counts']['sessions'] == body['indexed_sessions']
+    assert body['counts']['messages'] == body['indexed_messages']
 
 
 def test_admin_db_size_reports_storage_breakdown(api_client):
@@ -267,6 +269,7 @@ def test_admin_db_size_reports_storage_breakdown(api_client):
     assert body['used_bytes'] >= 0
     assert body['free_bytes'] >= 0
     assert body['page_size'] > 0
+    assert body['used_bytes'] + body['free_bytes'] == body['page_size'] * body['page_count']
 
 
 @pytest.mark.parametrize(
