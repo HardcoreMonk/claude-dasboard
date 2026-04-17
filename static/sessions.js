@@ -247,6 +247,7 @@ async function loadSessions(page=getPage()){
     if(af.cost_min)p.set('cost_min',af.cost_min);
     if(af.cost_max)p.set('cost_max',af.cost_max);
     if(af.node)p.set('node',af.node);
+    if(af.ai_tag)p.set('ai_tag',af.ai_tag);
     const d=await safeFetch('/api/sessions?'+p);
     state.totalPages=d.pages||1; // TODO: accessor
     renderSessionsThead();
@@ -278,6 +279,7 @@ function toggleAdvFilters() {
     if (g('advDateTo'))   g('advDateTo').value   = af.date_to || '';
     if (g('advCostMin'))  g('advCostMin').value  = af.cost_min || '';
     if (g('advCostMax'))  g('advCostMax').value  = af.cost_max || '';
+    if (g('advAiTagFilter')) g('advAiTagFilter').value = af.ai_tag || '';
   }
 }
 function applyAdvFilters() {
@@ -288,6 +290,7 @@ function applyAdvFilters() {
     cost_min:  g('advCostMin')?.value || '',
     cost_max:  g('advCostMax')?.value || '',
     node:      g('advNodeFilter')?.value || '',
+    ai_tag:    g('advAiTagFilter')?.value || '',
   });
   savePrefs({ advFilters: getAdvFilters() });
   setPage(1);
@@ -297,7 +300,7 @@ function applyAdvFilters() {
 function clearAdvFilters() {
   setAdvFilters({});
   savePrefs({ advFilters: {} });
-  ['advDateFrom','advDateTo','advCostMin','advCostMax','advNodeFilter'].forEach(id => {
+  ['advDateFrom','advDateTo','advCostMin','advCostMax','advNodeFilter','advAiTagFilter'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -320,6 +323,7 @@ function renderAdvFiltersSummary() {
     if (af.date_from || af.date_to) parts.push(`기간: ${af.date_from || '∞'} ~ ${af.date_to || '∞'}`);
     if (af.cost_min || af.cost_max)  parts.push(`비용: $${af.cost_min || 0} ~ $${af.cost_max || '∞'}`);
     if (af.node)  parts.push(`노드: ${af.node}`);
+    if (af.ai_tag) parts.push(`AI태그: ${af.ai_tag}`);
     sum.textContent = parts.join(' · ');
   }
 }
@@ -377,6 +381,27 @@ function renderSessions(data){
     const tagBadges = tagList.length
       ? tagList.map(t => `<span class="tag-badge">#${esc(t)}</span>`).join(' ')
       : '';
+    let aiTagBadges = '';
+    if (s.ai_tags) {
+      try {
+        const parsed = JSON.parse(s.ai_tags);
+        const aiTags = parsed.tags || [];
+        const AI_TAG_CLS = {
+          permission_loop: 'bg-amber-500/15 text-amber-300/90 border border-amber-500/30',
+          cost_spike:      'bg-red-500/15 text-red-300/90 border border-red-500/30',
+          agent_loop:      'bg-orange-500/15 text-orange-300/90 border border-orange-500/30',
+          task_complete:   'bg-emerald-500/15 text-emerald-300/90 border border-emerald-500/30',
+          task_abandoned:  'bg-white/10 text-white/40 border border-white/10',
+          error_recovery:  'bg-cyan-500/15 text-cyan-300/90 border border-cyan-500/30',
+        };
+        const conf = parsed.confidence ? ` (${Math.round(parsed.confidence * 100)}%)` : '';
+        const tip = parsed.summary ? esc(parsed.summary) : '';
+        aiTagBadges = aiTags.map(t => {
+          const cls = AI_TAG_CLS[t] || 'bg-white/10 text-white/40 border border-white/10';
+          return `<span class="inline-block text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${cls}" title="AI${conf}: ${tip || esc(t)}">✦ ${esc(t.replace(/_/g,' '))}</span>`;
+        }).join(' ');
+      } catch(e) {}
+    }
     const isRemote = s.source_node && s.source_node !== 'local';
     const nodeBadge = isRemote
       ? `<span class="node-badge" style="display:inline-block;font-size:9px;padding:2px 7px;border-radius:9999px;background:rgba(34,211,238,.18);color:#67e8f9;border:1px solid rgba(34,211,238,.4);font-weight:700" title="\uC6D0\uACA9 \uB178\uB4DC: ${esc(s.source_node)}">${esc(s.source_node)}</span>`
@@ -396,6 +421,7 @@ function renderSessions(data){
           ${nodeBadge}
           ${s.is_subagent?'<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400/70">subagent</span>':''}
           ${tagBadges}
+          ${aiTagBadges}
           ${subBadge}
         </div>
       </td>

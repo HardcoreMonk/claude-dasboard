@@ -35,6 +35,13 @@ try:
 except ImportError:
     _PROMETHEUS_OK = False
 
+try:
+    import anthropic as _anthropic_sdk
+    _ANTHROPIC_OK = True
+except ImportError:
+    _anthropic_sdk = None  # type: ignore
+    _ANTHROPIC_OK = False
+
 from database import (
     read_db, write_db, init_db, check_integrity, DB_PATH, _write_lock,
     close_thread_connections, wal_checkpoint,
@@ -58,6 +65,8 @@ if 'DASHBOARD_SECRET' not in os.environ:
 _SESSION_COOKIE = 'dash_session'
 _SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
 _COOKIE_SECURE = os.environ.get('DASHBOARD_SECURE', '').lower() not in ('0', 'false', '')
+_ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+_analyze_semaphore = asyncio.Semaphore(5)
 
 
 def _sign_session() -> str:
@@ -219,7 +228,14 @@ async def lifespan(app: FastAPI):
     if DB_PATH.exists() and not check_integrity():
         logger.error("DATABASE INTEGRITY CHECK FAILED — consider restoring from backup")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    watcher = ClaudeFileWatcher(manager.broadcast, metrics=_make_watcher_metrics())
+    async def _broadcast_with_analyze(update: dict) -> None:
+        await manager.broadcast(update)
+        if update.get('type') == 'batch_update':
+            for rec in update.get('records', []):
+                if rec.get('stop_reason') == 'end_turn' and not rec.get('is_subagent'):
+                    asyncio.create_task(_analyze_session(rec['session_id']))
+
+    watcher = ClaudeFileWatcher(_broadcast_with_analyze, metrics=_make_watcher_metrics())
     await watcher.start_async()
     _sched_task = asyncio.create_task(_retention_scheduler_loop())
     yield
@@ -433,7 +449,12 @@ def api_health():
     with read_db() as db:
         n_msg = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         n_sess = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-    return {"ok": True, "messages": n_msg, "sessions": n_sess}
+    return {
+        "ok": True,
+        "messages": n_msg,
+        "sessions": n_sess,
+        "ai_tagging": "enabled" if (_ANTHROPIC_API_KEY and _ANTHROPIC_OK) else "disabled",
+    }
 
 
 # ─── Auth: login / logout / me ────────────────────────────────────────────────
@@ -685,6 +706,7 @@ def api_sessions(
     cost_max: Optional[float] = Query(None, ge=0),
     tag: Optional[str] = Query(None, max_length=80),
     node: Optional[str] = Query(None, max_length=64),
+    ai_tag: Optional[str] = Query(None, max_length=40),
 ):
     """List parent sessions. Subagents are excluded by default — use
     ``?include_subagents=true`` or the dedicated ``/api/subagents`` endpoint.
@@ -737,6 +759,15 @@ def api_sessions(
                 "(',' || COALESCE(tags, '') || ',') LIKE ? ESCAPE '\\'"
             )
             params.append(f"%,{_esc_like(tag)},%")
+        if ai_tag:
+            if ai_tag not in _AI_TAGS:
+                return JSONResponse(
+                    {'error': 'invalid ai_tag', 'valid': list(_AI_TAGS)}, 400)
+            conds.append(
+                "EXISTS (SELECT 1 FROM json_each(json_extract(ai_tags, '$.tags'))"
+                " WHERE value = ?)"
+            )
+            params.append(ai_tag)
         where = "WHERE " + " AND ".join(conds) if conds else ""
         total = db.execute(f"SELECT COUNT(*) FROM sessions {where}", params).fetchone()[0]
         offset = (page - 1) * per_page
@@ -750,6 +781,7 @@ def api_sessions(
                    s.is_subagent, s.parent_session_id,
                    s.agent_type, s.agent_description, s.version,
                    s.final_stop_reason, s.tags,
+                   s.ai_tags, s.ai_tags_status,
                    s.turn_duration_ms, s.source_node,
                    {_DURATION_SQL} AS duration_seconds,
                    (SELECT COUNT(*) FROM sessions c
@@ -843,6 +875,24 @@ def api_message_position(session_id: str, message_id: int = Query(...)):
             (session_id,),
         ).fetchone()[0]
     return {'position': pos, 'total': total, 'message_id': message_id}
+
+
+@app.post("/api/sessions/{session_id}/analyze")
+async def api_session_analyze(session_id: str, request: Request):
+    """Manually trigger AI tagging for a session. Resets status to re-analyze."""
+    if not _ANTHROPIC_API_KEY or not _ANTHROPIC_OK:
+        return JSONResponse({'error': 'AI tagging not configured (ANTHROPIC_API_KEY not set)'}, 503)
+    with read_db() as db:
+        row = db.execute('SELECT id FROM sessions WHERE id = ?', (session_id,)).fetchone()
+    if not row:
+        return JSONResponse({'error': 'Not found'}, 404)
+    with write_db() as db:
+        db.execute(
+            "UPDATE sessions SET ai_tags_status = NULL WHERE id = ?", (session_id,)
+        )
+    _audit('session_analyze', request, detail={'session_id': session_id})
+    asyncio.create_task(_analyze_session(session_id))
+    return {'status': 'queued', 'session_id': session_id}
 
 
 @app.get("/api/sessions/{session_id}")
@@ -2276,6 +2326,9 @@ async def api_ingest(payload: IngestPayload, request: Request):
     if new_records:
         await manager.broadcast(
             {'type': 'batch_update', 'records': new_records})
+        for rec in new_records:
+            if rec.get('stop_reason') == 'end_turn' and not rec.get('is_subagent'):
+                asyncio.create_task(_analyze_session(rec['session_id']))
 
     return {
         'accepted': len(new_records),
@@ -2375,6 +2428,123 @@ def _client_ip(request: Optional[Request]) -> str:
     if not request or not request.client:
         return 'local'
     return request.client.host or 'local'
+
+
+_AI_TAGS = ('permission_loop', 'cost_spike', 'agent_loop',
+            'task_complete', 'task_abandoned', 'error_recovery')
+
+_ANALYZE_PROMPT = """\
+You are analyzing a Claude Code session. Based on the data below, assign tags and write a one-sentence summary.
+
+RULES:
+- permission_loop: 3+ tool_use messages with "permission" or "bash" denied in tool_result
+- cost_spike: cost_usd > 3x the typical session cost (flag if cost_usd > 0.05)
+- agent_loop: same tool called 4+ times with the same input pattern
+- task_complete: session ended with stop_reason end_turn and no errors
+- task_abandoned: session ended mid-way (user_message_count > 0, stop_reason != end_turn)
+- error_recovery: tool_result errors followed by successful retry
+
+Respond ONLY with valid JSON matching this schema:
+{"tags": ["tag1", "tag2"], "confidence": 0.85, "summary": "one sentence"}
+
+SESSION DATA:
+{data}"""
+
+
+def _do_analyze_sync(session_id: str) -> None:
+    """Run in asyncio.to_thread — uses sync Anthropic client."""
+    if not _ANTHROPIC_API_KEY or not _ANTHROPIC_OK:
+        return
+    try:
+        with read_db() as db:
+            sess = db.execute(
+                'SELECT id, project_name, final_stop_reason, agent_type, '
+                '       cost_micro*1.0/1000000 AS cost_usd, message_count, '
+                '       user_message_count, task_prompt '
+                'FROM sessions WHERE id = ?', (session_id,)
+            ).fetchone()
+            if not sess:
+                return
+            msgs = db.execute(
+                '''SELECT role, content_preview, model FROM messages
+                   WHERE session_id = ? ORDER BY id DESC LIMIT 20''',
+                (session_id,)
+            ).fetchall()
+            tool_errors = db.execute(
+                '''SELECT COUNT(*) AS c FROM messages
+                   WHERE session_id = ? AND role = "tool"
+                     AND content_preview LIKE "%error%"''',
+                (session_id,)
+            ).fetchone()['c']
+
+        data = {
+            'project': sess['project_name'],
+            'stop_reason': sess['final_stop_reason'],
+            'agent_type': sess['agent_type'],
+            'cost_usd': round(sess['cost_usd'], 4),
+            'message_count': sess['message_count'],
+            'user_message_count': sess['user_message_count'],
+            'task_prompt': (sess['task_prompt'] or '')[:300],
+            'tool_errors': tool_errors,
+            'last_messages': [
+                {'role': r['role'], 'preview': r['content_preview']}
+                for r in reversed(msgs)
+            ],
+        }
+        client = _anthropic_sdk.Anthropic(api_key=_ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=256,
+            messages=[{
+                'role': 'user',
+                'content': _ANALYZE_PROMPT.format(
+                    data=json.dumps(data, ensure_ascii=False)),
+            }],
+        )
+        raw = resp.content[0].text.strip()
+        parsed = json.loads(raw)
+        tags = [t for t in parsed.get('tags', []) if t in _AI_TAGS]
+        result = {
+            'tags': tags,
+            'confidence': float(parsed.get('confidence', 0.7)),
+            'summary': str(parsed.get('summary', ''))[:200],
+            'analyzed_at': datetime.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        }
+        with write_db() as db:
+            db.execute(
+                'UPDATE sessions SET ai_tags = ?, ai_tags_status = ? WHERE id = ?',
+                (json.dumps(result, ensure_ascii=False), 'done', session_id),
+            )
+        logger.info("AI tagged session %s: %s", session_id, tags)
+    except Exception as e:
+        logger.warning("AI tagging failed for session %s: %s", session_id, e)
+        try:
+            with write_db() as db:
+                db.execute(
+                    "UPDATE sessions SET ai_tags_status = 'error' WHERE id = ?",
+                    (session_id,),
+                )
+        except Exception:
+            pass
+
+
+async def _analyze_session(session_id: str) -> None:
+    """Schedule AI tagging for a completed parent session. Idempotent."""
+    if not _ANTHROPIC_API_KEY or not _ANTHROPIC_OK:
+        return
+    with read_db() as db:
+        row = db.execute(
+            'SELECT ai_tags_status FROM sessions WHERE id = ?', (session_id,)
+        ).fetchone()
+    if row and row['ai_tags_status'] in ('done', 'pending'):
+        return
+    with write_db() as db:
+        db.execute(
+            "UPDATE sessions SET ai_tags_status = 'pending' WHERE id = ?",
+            (session_id,),
+        )
+    async with _analyze_semaphore:
+        await asyncio.to_thread(_do_analyze_sync, session_id)
 
 
 def _audit(action: str, request: Optional[Request], *, status: str = 'ok', detail: Optional[dict] = None) -> None:

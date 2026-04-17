@@ -10,3 +10,4 @@ python-multipart==0.0.26      # form parsing (FastAPI dep)
 
 prometheus_client>=0.20.0     # /metrics endpoint
 watchdog>=4.0.0               # inotify-based file watching (polling fallback if missing)
+anthropic>=0.40.0             # AI session tagging (optional — tagging disabled if ANTHROPIC_API_KEY unset)

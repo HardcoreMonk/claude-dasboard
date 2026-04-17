@@ -1553,6 +1553,12 @@ state.convMessages = null;   // messages array of the open session
 state.convSession = null;    // session object of the open session
 let _convLoading = false;    // guard against concurrent load more / WS tail
 let _convFocusIdx = -1;      // keyboard-navigated message index
+
+// Reasoning Trace Explorer state
+state.convTraceMode = false;
+state.convTraceSteps = [];   // DOM elements with [data-trace-step]
+state.convTraceIdx = -1;
+let _convTracePlayTimer = null;
 let _convSearchMatches = []; // inline search match elements
 let _convSearchIdx = -1;
 let _convSearchTimer = null;
@@ -1613,6 +1619,83 @@ function renderConvStats(msgs, session) {
   }
 }
 
+// ─── Reasoning Trace Explorer ────────────────────────────────────────────
+function convToggleTrace() {
+  state.convTraceMode = !state.convTraceMode;
+  const bar = document.getElementById('convTraceBar');
+  const btn = document.getElementById('convTraceToggle');
+  if (!state.convTraceMode) {
+    if (bar) bar.classList.add('hidden');
+    if (btn) btn.classList.remove('bg-purple-500/20','text-purple-300','border-purple-400/50');
+    _convTraceClearHighlight();
+    return;
+  }
+  const c = document.getElementById('convMessages');
+  state.convTraceSteps = c ? [...c.querySelectorAll('[data-trace-step]')] : [];
+  if (!state.convTraceSteps.length) {
+    showToast('Trace \uC2A4\uD15D \uC5C6\uC74C \u2014 tool_use \uBA54\uC2DC\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4');
+    state.convTraceMode = false;
+    return;
+  }
+  if (bar) bar.classList.remove('hidden');
+  if (btn) btn.classList.add('bg-purple-500/20','text-purple-300','border-purple-400/50');
+  convTraceStep(0);
+}
+function _convTraceClearHighlight() {
+  if (_convTracePlayTimer) { clearInterval(_convTracePlayTimer); _convTracePlayTimer = null; }
+  const playBtn = document.getElementById('convTracePlayBtn');
+  if (playBtn) playBtn.textContent = '\u25B6';
+  const c = document.getElementById('convMessages');
+  if (c) c.querySelectorAll('[data-trace-step]').forEach(el => {
+    el.classList.remove('trace-current','trace-dim');
+  });
+  state.convTraceIdx = -1;
+  const counter = document.getElementById('convTraceCounter');
+  if (counter) counter.textContent = '0 / 0';
+}
+function convTraceStep(n) {
+  const steps = state.convTraceSteps;
+  if (!steps.length) return;
+  const idx = Math.max(0, Math.min(n, steps.length - 1));
+  state.convTraceIdx = idx;
+  steps.forEach((el, i) => {
+    el.classList.toggle('trace-current', i === idx);
+    el.classList.toggle('trace-dim', i !== idx);
+  });
+  steps[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const counter = document.getElementById('convTraceCounter');
+  if (counter) counter.textContent = `${idx + 1} / ${steps.length}`;
+}
+function convTracePrev() {
+  if (!state.convTraceMode || !state.convTraceSteps.length) return;
+  convTraceStep(state.convTraceIdx - 1);
+}
+function convTraceNext() {
+  if (!state.convTraceMode || !state.convTraceSteps.length) return;
+  convTraceStep(state.convTraceIdx + 1);
+}
+function convTracePlay() {
+  if (!state.convTraceMode) return;
+  const playBtn = document.getElementById('convTracePlayBtn');
+  if (_convTracePlayTimer) {
+    clearInterval(_convTracePlayTimer);
+    _convTracePlayTimer = null;
+    if (playBtn) playBtn.textContent = '\u25B6';
+    return;
+  }
+  if (playBtn) playBtn.textContent = '\u23F8';
+  _convTracePlayTimer = setInterval(() => {
+    const next = state.convTraceIdx + 1;
+    if (next >= state.convTraceSteps.length) {
+      clearInterval(_convTracePlayTimer);
+      _convTracePlayTimer = null;
+      if (playBtn) playBtn.textContent = '\u25B6';
+      return;
+    }
+    convTraceStep(next);
+  }, 800);
+}
+
 // Render a single conversation message bubble into the container.
 // Used by both the initial load and "load more" pagination. All dynamic
 // values are fed through esc()/fmtTok()/fmt$() — no raw user input in
@@ -1621,6 +1704,15 @@ function _renderSingleMessage(container, m, allMsgs, prevBr) {
   const w = document.createElement('div');
   w.dataset.msgRole = m.role;
   w.className = 'flex flex-col ' + (m.role === 'user' ? 'items-end' : 'items-start');
+  // Mark assistant messages with tool_use blocks as trace steps
+  if (m.role === 'assistant') {
+    try {
+      const parsed = JSON.parse(m.content || 'null');
+      if (Array.isArray(parsed) && parsed.some(b => b.type === 'tool_use')) {
+        w.setAttribute('data-trace-step', '');
+      }
+    } catch(e) {}
+  }
   const b = document.createElement('div');
   b.className = 'max-w-[92%] px-4 py-3 rounded-2xl text-[12px] leading-relaxed ' + (m.role === 'user' ? 'bg-accent/10 ring-1 ring-accent/20 text-white/85' : 'bg-white/[0.04] ring-1 ring-white/[0.06] text-white/75');
   b.innerHTML = renderContent(m);  // renderContent returns sanitised HTML
@@ -1651,6 +1743,17 @@ function _renderSingleMessage(container, m, allMsgs, prevBr) {
 async function openConversation(sid,session,listItem){
   document.querySelectorAll('#convListBody > div').forEach(i=>i.classList.remove('bg-accent/5','border-l-2','border-accent'));
   if(listItem){listItem.classList.add('bg-accent/5','border-l-2','border-accent');}
+  // Reset trace mode on new session open
+  if (state.convTraceMode) {
+    state.convTraceMode = false;
+    const _tb = document.getElementById('convTraceBar');
+    const _tt = document.getElementById('convTraceToggle');
+    if (_tb) _tb.classList.add('hidden');
+    if (_tt) _tt.classList.remove('bg-purple-500/20','text-purple-300','border-purple-400/50');
+    if (_convTracePlayTimer) { clearInterval(_convTracePlayTimer); _convTracePlayTimer = null; }
+  }
+  state.convTraceSteps = [];
+  state.convTraceIdx = -1;
   state.currentSession=sid;
   const isSub = !!session.is_subagent;
   // Subagent sessions: show their lineage (parent tool_use id + task prompt)
@@ -1692,6 +1795,30 @@ async function openConversation(sid,session,listItem){
         ${promptExcerpt}
       </div>`;
   }
+  let aiTagsBlock = '';
+  if (session.ai_tags) {
+    try {
+      const _atp = JSON.parse(session.ai_tags);
+      const _atags = _atp.tags || [];
+      if (_atags.length) {
+        const _AT_CLS = {
+          permission_loop: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+          cost_spike:      'bg-red-500/15 text-red-300 border-red-500/30',
+          agent_loop:      'bg-orange-500/15 text-orange-300 border-orange-500/30',
+          task_complete:   'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+          task_abandoned:  'bg-white/10 text-white/40 border-white/10',
+          error_recovery:  'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+        };
+        const _badges = _atags.map(t => {
+          const _cls = _AT_CLS[t] || 'bg-white/10 text-white/40 border-white/10';
+          return `<span class="inline-block text-[9px] px-1.5 py-0.5 rounded-full border font-semibold ${_cls}">\u2746 ${esc(t.replace(/_/g,' '))}</span>`;
+        }).join(' ');
+        const _conf = _atp.confidence ? `<span class="text-white/25">${Math.round(_atp.confidence * 100)}%</span>` : '';
+        const _sum = _atp.summary ? `<div class="mt-1 text-white/40">${esc(_atp.summary)}</div>` : '';
+        aiTagsBlock = `<div class="mt-2 p-2 rounded-lg bg-purple-500/[0.04] ring-1 ring-purple-500/10 text-[10px]"><div class="flex items-center gap-2 flex-wrap"><iconify-icon icon="solar:tag-linear" width="12" class="text-purple-300/60"></iconify-icon><span class="font-bold text-purple-300/70">AI Analysis</span>${_badges}${_conf}</div>${_sum}</div>`;
+      }
+    } catch(e) {}
+  }
   document.getElementById('convViewerHeader').innerHTML=`
     <div>
       <div class="text-sm font-bold text-white/90">${esc(session.project_name||'—')}</div>
@@ -1703,6 +1830,7 @@ async function openConversation(sid,session,listItem){
         <span class="text-white/35">비용 <span class="text-amber-400/85 font-bold tabular-nums">${fmt$(session.total_cost_usd)}</span></span>
       </div>
       ${lineageBlock}
+      ${aiTagsBlock}
       <div id="convSubagentsSlot" class="mt-3"></div>
     </div>`;
   // Parent sessions get their spawned-subagents list; subagent sessions
@@ -3385,6 +3513,11 @@ document.addEventListener('keydown', (e) => {
 
   // Conversation viewer: j/k message navigation, Ctrl+F inline search
   if (location.hash.startsWith('#/conversations') && state.currentSession) {
+    // Trace mode: ← → navigate tool_use steps
+    if (state.convTraceMode) {
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); convTracePrev(); return; }
+      if (e.key === 'ArrowRight') { e.preventDefault(); convTraceNext(); return; }
+    }
     if (e.key === 'j' || e.key === 'ArrowDown') {
       e.preventDefault(); convFocusMessage(_convFocusIdx + 1); return;
     }
