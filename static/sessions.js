@@ -1,4 +1,4 @@
-// Claude Dashboard — sessions module.
+// Codex Dashboard — sessions module.
 // Extracted from app.js. Contains: filter presets, bulk operations,
 // loadSessions/renderSessions, advanced filter UI, session delete/pin/tag
 // management, tag edit modal.

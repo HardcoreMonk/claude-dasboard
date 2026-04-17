@@ -8,7 +8,7 @@
 // worker, so there's nothing to unregister here.
 
 // ─── Persisted preferences (localStorage) ─────────────────────────────
-const PREFS_KEY = 'claude-dashboard-prefs-v1';
+const PREFS_KEY = 'codex-dashboard-prefs-v1';
 function loadPrefs() {
   try {
     return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {};
@@ -1061,7 +1061,7 @@ bus.on('refresh', () => {
 
 // ─── Idle chime (Web Audio API) ───────────────────────────────────────
 // Short two-note chime (C5 → G5 perfect fifth, ~300ms) played on end_turn
-// detection so the user notices "Claude is idle" even without looking at the
+// detection so the user notices the assistant is idle even without looking at the
 // dashboard tab. Uses Web Audio API — no external MP3/OGG file, no network,
 // no CORS issues. Respects _prefs.idleNotify (same toggle as the badge).
 let _audioCtx = null;
@@ -1130,8 +1130,8 @@ function _playIdleChime() {
 // When an assistant message with stop_reason === end_turn arrives, mark the
 // project as "idle, awaiting user input". The TOP 5 renderer picks this up
 // and prepends a small toast-style pill badge to the LEFT of the project
-// name. When a subsequent non-end_turn message arrives (tool_use means Claude
-// is working again, user means user replied), clear the badge.
+// name. When a subsequent non-end_turn message arrives (tool_use means the
+// assistant is working again, user means user replied), clear the badge.
 //
 // NO global toasts, OS notifications, or title flashes — the signal lives
 // inline with the project row.
@@ -1141,8 +1141,8 @@ function _idleKey(p) {
   return (p.project_name || '') + '|' + (p.project_path || '');
 }
 
-// Per-project timers for pending tool_use messages. When Claude calls a
-// tool (especially Bash with command_substitution), Claude Code may show
+// Per-project timers for pending tool_use messages. When the assistant calls a
+// tool (especially Bash with command_substitution), the upstream client may show
 // the user a "Do you want to proceed?" permission prompt. From the
 // dashboard's view, all we see is an assistant message with stop_reason=
 // 'tool_use' followed by silence — there's no explicit marker. We use a
@@ -1178,7 +1178,7 @@ function notifyIdleFromBatch(records) {
     if (!key) continue;
 
     // Any new message for this project cancels a previously-scheduled
-    // tool_use idle timer — Claude (or a subagent) is still active.
+    // tool_use idle timer — the assistant (or a subagent) is still active.
     _cancelPendingToolUse(key);
 
     if (r.stop_reason === 'end_turn') {
@@ -1304,7 +1304,7 @@ function handleWsMessage(msg) {
     // Track how many new records arrived since the user last viewed
     state.newDataCounts.sessions += (msg.records?.length || 1);
     renderNewDataBadge();
-    // Detect assistant messages that reached end_turn — Claude is idle and
+    // Detect assistant messages that reached end_turn — the assistant is idle and
     // waiting for user input. Notify once per project per burst.
     notifyIdleFromBatch(msg.records || []);
     // Check if any record belongs to the currently open session
@@ -2712,7 +2712,7 @@ function refreshAudit() { loadAuditLog(); }
 async function exportCSV() {
   const a = document.createElement('a');
   a.href = '/api/export/csv';
-  a.download = 'claude-usage.csv';
+  a.download = 'codex-usage.csv';
   a.click();
   showToast('CSV 다운로드 시작됨', { type: 'success', duration: 2000 });
 }

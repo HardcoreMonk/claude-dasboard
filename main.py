@@ -268,7 +268,7 @@ async def lifespan(app: FastAPI):
     close_thread_connections()
 
 
-app = FastAPI(title="Claude Usage Dashboard", lifespan=lifespan)
+app = FastAPI(title="Codex Dashboard", lifespan=lifespan)
 
 # CORS — restricted by default; set DASHBOARD_CORS_ORIGINS to allow specific origins.
 # Example: DASHBOARD_CORS_ORIGINS=https://dash.example.com,http://localhost:3000
@@ -2832,7 +2832,7 @@ def api_export_csv():
                 yield buf.getvalue()
     return StreamingResponse(
         _generate(), media_type='text/csv',
-        headers={'Content-Disposition': 'attachment; filename="claude-usage.csv"'},
+        headers={'Content-Disposition': 'attachment; filename="codex-usage.csv"'},
     )
 
 

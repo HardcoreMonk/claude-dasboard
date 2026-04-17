@@ -1,4 +1,4 @@
-// Claude Dashboard — plan/budget module.
+// Codex Dashboard — plan/budget module.
 // Extracted from app.js. Loaded as a regular (non-module) script after app.js;
 // all functions become window.* globals so inline onclick="openPlanSettings()"
 // handlers in index.html continue to resolve.

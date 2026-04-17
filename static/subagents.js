@@ -1,4 +1,4 @@
-// Claude Dashboard — subagent analysis module.
+// Codex Dashboard — subagent analysis module.
 // Extracted from app.js. Powers the #/subagents view (heatmap +
 // success matrix). Loaded as a regular script after app.js.
 //
@@ -16,7 +16,7 @@ function _ensureSubagentModeControls(hasCodexData) {
     wrap.innerHTML = `
       <button data-mode="auto" class="px-2.5 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Auto</button>
       <button data-mode="codex" class="px-2.5 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Codex Agents</button>
-      <button data-mode="legacy" class="px-2.5 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Claude Subagents</button>
+      <button data-mode="legacy" class="px-2.5 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Legacy Subagents</button>
     `;
     wrap.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => {

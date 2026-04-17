@@ -1,4 +1,4 @@
-# Claude Usage Dashboard runtime dependencies.
+# Codex Dashboard runtime dependencies.
 # Tests need additional: pytest, httpx (for FastAPI TestClient).
 
 fastapi==0.135.3              # web framework + Pydantic v2

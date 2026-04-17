@@ -1,4 +1,4 @@
-// Claude Dashboard — chart module.
+// Codex Dashboard — chart module.
 // Extracted from app.js for modularity. This file is loaded as a regular
 // (non-module) script after app.js, so top-level `function foo(){}`
 // declarations become window.foo. It depends on these globals defined in

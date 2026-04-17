@@ -1,6 +1,6 @@
 // Codex-only override for the subagent surface.
 // This script is loaded after the bundle so it can replace any legacy
-// Claude fallback behavior without rewriting the older module in place.
+// legacy fallback behavior without rewriting the older module in place.
 
 function _renderCodexSubagentEmptyState() {
   const ids = [
@@ -25,7 +25,7 @@ function _renderCodexSubagentMode() {
   wrap.className = 'mb-3 flex items-center gap-2 text-[10px] text-white/45';
   wrap.innerHTML = `
     <span class="px-2.5 py-1 rounded-full border border-accent/20 bg-accent/10 text-accent font-semibold">Codex Agents</span>
-    <span>Claude fallback disabled</span>
+    <span>Legacy fallback disabled</span>
   `;
   view.prepend(wrap);
 }

@@ -1,4 +1,4 @@
-// Claude Dashboard — overview module.
+// Codex Dashboard — overview module.
 // Extracted from app.js. Contains:
 //   1. loadStats + renderStats (hero + secondary cost chips)
 //   2. loadPeriods + renderPeriod (day/week/month cards)

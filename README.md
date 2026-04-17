@@ -59,7 +59,7 @@ sudo cp codex-web-dashboard.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now codex-web-dashboard
 
-# Claude Usage Dashboard
+# Legacy Claude Dashboard
 sudo cp claude-dashboard.service /etc/systemd/system/
 sudo systemctl enable --now claude-dashboard
 ```

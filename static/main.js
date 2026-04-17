@@ -1,5 +1,5 @@
 /**
- * Claude Dashboard — ES module entry point.
+ * Codex Dashboard — ES module entry point.
  *
  * esbuild bundles this into static/bundle.js.
  * Load order matters: app.js defines core globals (state, bus, utils),

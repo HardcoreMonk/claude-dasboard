@@ -198,7 +198,7 @@ curl -b cookies.txt -s 'http://localhost:8617/api/sessions?per_page=10&pinned_on
 curl -s 'http://localhost:8617/api/forecast?days=14' | jq .
 curl -s 'http://localhost:8617/api/subagents/stats' | jq '.by_type_and_stop_reason'
 curl -s 'http://localhost:8617/api/sessions/<sid>/chain?depth=4' | jq .
-curl -o claude-usage.csv http://localhost:8617/api/export/csv
+curl -o codex-usage.csv http://localhost:8617/api/export/csv
 curl -s http://localhost:8617/metrics | grep dashboard_
 
 # claude.ai export 엔드포인트

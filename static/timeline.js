@@ -1,4 +1,4 @@
-// Claude Dashboard — work timeline (Gantt) module (v2).
+// Codex Dashboard — work timeline (Gantt) module (v2).
 // Loaded as a plain script after app.js + charts.js.
 // Depends on: state, safeFetch, reportError, reportSuccess, fmt$, fmtN,
 //   fmtDurationSec, fmtTime, shortModel, showView, openConversation,
@@ -34,7 +34,7 @@ function _ensureTimelineModeControls(hasCodexData) {
     wrap.innerHTML = `
       <button data-mode="auto" class="px-2 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Auto</button>
       <button data-mode="codex" class="px-2 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Codex</button>
-      <button data-mode="legacy" class="px-2 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Claude</button>
+      <button data-mode="legacy" class="px-2 py-1 rounded-full text-[10px] font-semibold spring border border-white/[0.07]">Legacy</button>
     `;
     wrap.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -143,7 +143,7 @@ function _clearTimelineCanvasMessage(canvasId, noteId) {
 function _renderCodexTimelineSecondary(summary, dateFrom, dateTo) {
   const label = `${dateFrom} → ${dateTo}`;
   _setTimelinePanelMessage('tlHeatmapWrap', `Codex 모드에서는 선택 범위(${label})의 이벤트 요약만 제공합니다. 최근 ${fmtN(summary.total || 0)}개 이벤트를 보고 있습니다.`);
-  _setTimelineCanvasMessage('chartTrend', 'codexTrendNote', `Codex 모드에서는 주간 Claude 비용 비교 대신 ${fmtN(summary.sessions || 0)}개 세션의 이벤트 흐름을 사용합니다.`);
+  _setTimelineCanvasMessage('chartTrend', 'codexTrendNote', `Codex 모드에서는 주간 비용 비교 대신 ${fmtN(summary.sessions || 0)}개 세션의 이벤트 흐름을 사용합니다.`);
   _setTimelineCanvasMessage('chartHourlyStacked', 'codexHourlyNote', `Codex 모드에서는 시간대 stacked chart 대신 세션 replay와 이벤트 스트림을 사용합니다.`);
   const hourlyLegend = document.getElementById('tlHourlyLegend');
   if (hourlyLegend) hourlyLegend.textContent = 'Codex mode active';
