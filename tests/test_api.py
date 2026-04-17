@@ -41,6 +41,85 @@ def _clear_codex_runtime_rows():
             pass
 
 
+def _seed_legacy_chain_collision():
+    import database
+
+    with database.write_db() as db:
+        db.execute('''
+            INSERT INTO sessions
+                (id, project_name, project_path, cwd, model, created_at, updated_at,
+                 total_input_tokens, total_output_tokens, cost_micro, message_count,
+                 is_subagent, parent_session_id, agent_type, agent_description)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            'codex-s1', 'legacy-shadow', '/tmp/legacy-shadow', '/tmp/legacy-shadow',
+            'claude-opus-4-6', '2026-04-16T09:00:00Z', '2026-04-16T09:30:00Z',
+            10, 5, 1000, 1, 0, None, '', 'Legacy shadow root',
+        ))
+        db.execute('''
+            INSERT INTO sessions
+                (id, project_name, project_path, cwd, model, created_at, updated_at,
+                 total_input_tokens, total_output_tokens, cost_micro, message_count,
+                 is_subagent, parent_session_id, agent_type, agent_description)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            'legacy-shadow-child', 'legacy-shadow', '/tmp/legacy-shadow', '/tmp/legacy-shadow',
+            'claude-haiku-4-5', '2026-04-16T09:31:00Z', '2026-04-16T09:40:00Z',
+            5, 3, 500, 1, 1, 'codex-s1', 'ShadowAgent', 'Shadow child',
+        ))
+        db.execute('''
+            INSERT INTO sessions
+                (id, project_name, project_path, cwd, model, created_at, updated_at,
+                 total_input_tokens, total_output_tokens, cost_micro, message_count,
+                 is_subagent, parent_session_id, agent_type, agent_description)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            'legacy-shadow-grandchild', 'legacy-shadow', '/tmp/legacy-shadow', '/tmp/legacy-shadow',
+            'claude-haiku-4-5', '2026-04-16T09:41:00Z', '2026-04-16T09:50:00Z',
+            5, 3, 500, 1, 1, 'legacy-shadow-child', 'ShadowGrandchild', 'Shadow grandchild',
+        ))
+        db.execute('''
+            INSERT INTO messages
+                (session_id, message_uuid, role, content, content_preview,
+                 input_tokens, output_tokens, cost_micro, model, timestamp)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            'codex-s1', 'legacy-shadow-msg-1', 'assistant',
+            '[{"type":"tool_use","name":"Agent","input":{"description":"Shadow child"}}]',
+            'shadow child', 1, 1, 100, 'claude-opus-4-6', '2026-04-16T09:00:01Z',
+        ))
+        db.execute('''
+            INSERT INTO messages
+                (session_id, message_uuid, role, content, content_preview,
+                 input_tokens, output_tokens, cost_micro, model, timestamp)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            'legacy-shadow-child', 'legacy-shadow-msg-2', 'assistant',
+            '[{"type":"tool_use","name":"Task","input":{"description":"Shadow grandchild"}}]',
+            'shadow grandchild', 1, 1, 100, 'claude-haiku-4-5', '2026-04-16T09:31:01Z',
+        ))
+        db.execute('''
+            INSERT INTO messages
+                (session_id, message_uuid, role, content, content_preview,
+                 input_tokens, output_tokens, cost_micro, model, timestamp)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            'legacy-shadow-grandchild', 'legacy-shadow-msg-3', 'assistant',
+            '{"type":"text","text":"leaf"}',
+            'leaf', 1, 1, 100, 'claude-haiku-4-5', '2026-04-16T09:41:01Z',
+        ))
+        try:
+            db.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+        except Exception:
+            pass
+
+
 def _reload_runtime_modules():
     try:
         from prometheus_client import REGISTRY
@@ -259,6 +338,37 @@ def test_metrics_reflect_codex_counts_when_both_sources_exist(api_client):
 
     assert re.search(r'^dashboard_sessions_total\s+2(?:\.0+)?$', txt, re.MULTILINE)
     assert re.search(r'^dashboard_messages_total\s+5(?:\.0+)?$', txt, re.MULTILINE)
+
+
+def test_session_chain_prefers_codex_root_and_direct_agent_children(api_client):
+    _seed_legacy_chain_collision()
+
+    r = api_client.get('/api/sessions/codex-s1/chain?depth=3')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['root'] == 'codex-s1'
+    assert body['count'] == 2
+    assert [node['id'] for node in body['nodes']] == ['codex-s1', 'agent-run-4']
+    assert body['nodes'][0]['level'] == 0
+    assert body['nodes'][0]['agent_description'] == 'Codex search session'
+    assert body['nodes'][1]['level'] == 1
+    assert body['nodes'][1]['parent_session_id'] == 'codex-s1'
+    assert body['nodes'][1]['agent_type'] == 'planner'
+    assert body['nodes'][1]['agent_description'] == 'planner completed'
+
+
+def test_session_chain_does_not_invent_unproven_recursive_children(api_client):
+    _seed_legacy_chain_collision()
+
+    r = api_client.get('/api/sessions/codex-s1/chain?depth=5')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['root'] == 'codex-s1'
+    assert [node['id'] for node in body['nodes']] == ['codex-s1', 'agent-run-4']
+    assert all(node['level'] in (0, 1) for node in body['nodes'])
+    assert body['nodes'][1]['parent_session_id'] == 'codex-s1'
 
 
 def test_admin_ingest_status_reports_codex_counters(api_client):

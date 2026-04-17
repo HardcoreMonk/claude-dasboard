@@ -1820,8 +1820,11 @@ def _codex_chain_payload(session_id: str, depth: int) -> dict:
             return {'root': session_id, 'nodes': [], 'count': 0}
         nodes.append({**dict(root), 'level': 0})
     if depth > 1:
-        children = _codex_agent_run_rows(parent_session_id=session_id)
-        for child in children[:max(0, depth - 1)]:
+        children = sorted(
+            _codex_agent_run_rows(parent_session_id=session_id),
+            key=lambda row: (row['created_at'], row['id']),
+        )
+        for child in children:
             nodes.append({
                 'id': child['id'],
                 'agent_type': child['agent_type'],
@@ -3323,66 +3326,7 @@ def api_subagents_stats():
 
 @app.get("/api/sessions/{session_id}/chain")
 def api_session_chain(session_id: str, depth: int = Query(3, ge=1, le=5)):
-    """Walk the subagent dispatch chain rooted at ``session_id``.
-
-    A 'compact' or 'general-purpose' subagent can issue ``Agent`` tool_use
-    blocks of its own. We follow those by matching ``input.description`` to
-    other subagent rows, building a tree up to ``depth`` levels deep.
-
-    Used by the frontend chain visualisation in the conversation viewer.
-    """
-    visited: set[str] = set()
-    nodes: list[dict] = []
-
-    with read_db() as db:
-        def _walk(sid: str, level: int):
-            if level >= depth or sid in visited:
-                return
-            visited.add(sid)
-            row = db.execute('''
-                SELECT id, agent_type, agent_description,
-                       cost_micro*1.0/1000000 AS cost_usd,
-                       message_count, parent_session_id,
-                       project_path, is_subagent
-                FROM sessions WHERE id = ?
-            ''', (sid,)).fetchone()
-            if not row:
-                return
-            nodes.append({**dict(row), 'level': level})
-            ctx = db.execute('''
-                SELECT content FROM messages
-                WHERE session_id = ? AND role = 'assistant'
-                  AND content IS NOT NULL
-                  AND (content LIKE '%"Agent"%' OR content LIKE '%"Task"%')
-            ''', (sid,)).fetchall()
-            child_descriptions: list[str] = []
-            for c in ctx:
-                try:
-                    blocks = json.loads(c['content'] or '')
-                except Exception:
-                    continue
-                if not isinstance(blocks, list):
-                    continue
-                for b in blocks:
-                    if isinstance(b, dict) and b.get('type') == 'tool_use' \
-                       and b.get('name') in ('Agent', 'Task'):
-                        desc = (b.get('input') or {}).get('description', '')
-                        if desc:
-                            child_descriptions.append(desc)
-            if child_descriptions:
-                placeholders = ','.join(['?'] * len(child_descriptions))
-                children = db.execute(f'''
-                    SELECT id FROM sessions
-                    WHERE is_subagent = 1
-                      AND agent_description IN ({placeholders})
-                ''', child_descriptions).fetchall()
-                for ch in children:
-                    _walk(ch['id'], level + 1)
-
-        _walk(session_id, 0)
-    if not nodes:
-        return _codex_chain_payload(session_id, depth)
-    return {'root': session_id, 'nodes': nodes, 'count': len(nodes)}
+    return _codex_chain_payload(session_id, depth)
 
 
 @app.get("/api/subagents/heatmap")
