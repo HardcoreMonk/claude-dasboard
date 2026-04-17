@@ -654,6 +654,30 @@ def test_timeline_endpoint_falls_back_to_codex_sessions(api_client):
     assert {row['project_name'] for row in body['sessions']} == {'codex-demo'}
 
 
+def test_timeline_endpoint_prefers_codex_sessions_when_legacy_rows_overlap(api_client, tmp_path):
+    import sqlite3
+
+    conn = sqlite3.connect(str(tmp_path / 'api.db'))
+    conn.execute('''INSERT INTO sessions
+        (id, project_name, project_path, cwd, model, created_at, updated_at,
+         total_input_tokens, total_output_tokens, cost_micro, message_count,
+         is_subagent, parent_session_id, agent_type, agent_description)
+        VALUES
+        ('legacy-overlap', 'legacy-demo', '/tmp/legacy-demo', '/tmp/legacy-demo', 'claude-opus-4-6',
+         '2026-04-16T10:30:00Z', '2026-04-16T10:45:00Z',
+         100, 50, 12345, 1, 0, NULL, '', '')''')
+    conn.commit()
+    conn.close()
+
+    r = api_client.get('/api/timeline?date_from=2026-04-16&date_to=2026-04-16')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total'] == 2
+    assert [row['id'] for row in body['sessions']] == ['codex-s1', 'codex-s2']
+    assert {row['project_name'] for row in body['sessions']} == {'codex-demo'}
+
+
 def test_timeline_hourly_endpoint_falls_back_to_codex_messages(api_client):
     r = api_client.get('/api/timeline/hourly?date=2026-04-16')
     assert r.status_code == 200
@@ -666,7 +690,76 @@ def test_timeline_hourly_endpoint_falls_back_to_codex_messages(api_client):
     assert by_hour['20']['projects']['codex-demo']['message_count'] == 1
 
 
+def test_timeline_hourly_endpoint_prefers_codex_messages_when_legacy_rows_overlap(api_client, tmp_path):
+    import sqlite3
+
+    conn = sqlite3.connect(str(tmp_path / 'api.db'))
+    conn.execute('''INSERT INTO sessions
+        (id, project_name, project_path, cwd, model, created_at, updated_at,
+         total_input_tokens, total_output_tokens, cost_micro, message_count,
+         is_subagent, parent_session_id, agent_type, agent_description)
+        VALUES
+        ('legacy-hourly', 'legacy-demo', '/tmp/legacy-demo', '/tmp/legacy-demo', 'claude-opus-4-6',
+         '2026-04-16T10:30:00Z', '2026-04-16T10:45:00Z',
+         100, 50, 12345, 1, 0, NULL, '', '')''')
+    conn.execute('''INSERT INTO messages
+        (session_id, message_uuid, role, content, content_preview,
+         input_tokens, output_tokens, cost_micro, model, timestamp)
+        VALUES
+        ('legacy-hourly', 'legacy-hourly-msg', 'assistant', '{"type":"text","text":"legacy"}',
+         'legacy overlap', 100, 50, 12345, 'claude-opus-4-6', '2026-04-16T10:15:00Z')''')
+    try:
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+    conn.close()
+
+    r = api_client.get('/api/timeline/hourly?date=2026-04-16')
+    assert r.status_code == 200
+    body = r.json()
+
+    by_hour = {row['hour']: row for row in body['hours']}
+    assert by_hour['19']['message_count'] == 1
+    assert by_hour['20']['message_count'] == 1
+    assert 'legacy-demo' not in by_hour['19']['projects']
+    assert 'legacy-demo' not in by_hour['20']['projects']
+
+
 def test_timeline_heatmap_endpoint_falls_back_to_codex_messages(api_client):
+    r = api_client.get('/api/timeline/heatmap?days=90')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['cells']['4_19']['count'] == 1
+    assert body['cells']['4_20']['count'] == 1
+
+
+def test_timeline_heatmap_endpoint_prefers_codex_messages_when_legacy_rows_overlap(api_client, tmp_path):
+    import sqlite3
+
+    conn = sqlite3.connect(str(tmp_path / 'api.db'))
+    conn.execute('''INSERT INTO sessions
+        (id, project_name, project_path, cwd, model, created_at, updated_at,
+         total_input_tokens, total_output_tokens, cost_micro, message_count,
+         is_subagent, parent_session_id, agent_type, agent_description)
+        VALUES
+        ('legacy-heatmap', 'legacy-demo', '/tmp/legacy-demo', '/tmp/legacy-demo', 'claude-opus-4-6',
+         '2026-04-16T10:30:00Z', '2026-04-16T10:45:00Z',
+         100, 50, 12345, 1, 0, NULL, '', '')''')
+    conn.execute('''INSERT INTO messages
+        (session_id, message_uuid, role, content, content_preview,
+         input_tokens, output_tokens, cost_micro, model, timestamp)
+        VALUES
+        ('legacy-heatmap', 'legacy-heatmap-msg', 'assistant', '{"type":"text","text":"legacy"}',
+         'legacy overlap', 100, 50, 12345, 'claude-opus-4-6', '2026-04-16T10:15:00Z')''')
+    try:
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+    conn.close()
+
     r = api_client.get('/api/timeline/heatmap?days=90')
     assert r.status_code == 200
     body = r.json()

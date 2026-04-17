@@ -1714,57 +1714,42 @@ def api_timeline(
     # Normalise date_to to end-of-day if only a date was supplied
     dt = date_to if len(date_to) > 10 else date_to + 'T23:59:59Z'
     sub_filter = '' if include_subagents else 'AND is_subagent = 0'
-    node_filter = ''
-    node_params: list = []
-    if node:
-        node_filter = 'AND source_node = ?'
-        node_params = [node]
+    if node and node != 'local':
+        with read_db() as db:
+            off = _tz_offset(db)
+        return {
+            'sessions': [],
+            'total': 0,
+            'truncated': False,
+            'timezone_offset': off,
+        }
     with read_db() as db:
         off = _tz_offset(db)
-        rows = db.execute(f'''
-            SELECT id, project_name, project_path, created_at, updated_at,
-                   cost_micro * 1.0 / 1000000 AS cost_usd,
-                   model, is_subagent, parent_session_id, source_node,
-                   {_DURATION_SQL} AS duration_seconds
-            FROM sessions
-            WHERE created_at >= ? AND created_at <= ?
-              AND created_at != '' AND updated_at != ''
-              {sub_filter} {node_filter}
-            ORDER BY project_name, created_at
+        rows = db.execute('''
+            SELECT s.id,
+                   p.project_name,
+                   s.project_path,
+                   s.created_at,
+                   s.updated_at,
+                   0.0 AS cost_usd,
+                   s.model,
+                   0 AS is_subagent,
+                   NULL AS parent_session_id,
+                   'local' AS source_node,
+                   (julianday(COALESCE(NULLIF(s.updated_at,''), s.created_at)) - julianday(s.created_at)) * 86400.0 AS duration_seconds
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            WHERE s.created_at >= ? AND s.created_at <= ?
+              AND s.created_at != '' AND s.updated_at != ''
+            ORDER BY p.project_name, s.created_at
             LIMIT ?
-        ''', (date_from, dt, *node_params, limit)).fetchall()
-        total = db.execute(f'''
-            SELECT COUNT(*) FROM sessions
+        ''', (date_from, dt, limit)).fetchall()
+        total = db.execute('''
+            SELECT COUNT(*)
+            FROM codex_sessions
             WHERE created_at >= ? AND created_at <= ?
               AND created_at != '' AND updated_at != ''
-              {sub_filter} {node_filter}
-        ''', (date_from, dt, *node_params)).fetchone()[0]
-        if total == 0:
-            rows = db.execute(f'''
-                SELECT s.id,
-                       p.project_name,
-                       s.project_path,
-                       s.created_at,
-                       s.updated_at,
-                       0.0 AS cost_usd,
-                       s.model,
-                       0 AS is_subagent,
-                       NULL AS parent_session_id,
-                       'local' AS source_node,
-                       (julianday(COALESCE(NULLIF(s.updated_at,''), s.created_at)) - julianday(s.created_at)) * 86400.0 AS duration_seconds
-                FROM codex_sessions s
-                JOIN codex_projects p ON p.project_path = s.project_path
-                WHERE s.created_at >= ? AND s.created_at <= ?
-                  AND s.created_at != '' AND s.updated_at != ''
-                ORDER BY p.project_name, s.created_at
-                LIMIT ?
-            ''', (date_from, dt, limit)).fetchall()
-            total = db.execute('''
-                SELECT COUNT(*)
-                FROM codex_sessions
-                WHERE created_at >= ? AND created_at <= ?
-                  AND created_at != '' AND updated_at != ''
-            ''', (date_from, dt)).fetchone()[0]
+        ''', (date_from, dt)).fetchone()[0]
     return {
         'sessions': [dict(r) for r in rows],
         'total': total,
@@ -1779,81 +1764,43 @@ def api_timeline_hourly(
     include_subagents: bool = Query(False),
 ):
     """Hourly breakdown for a single day: messages, cost, tokens per hour per project/session."""
-    sub_filter = '' if include_subagents else 'AND s.is_subagent = 0'
     with read_db() as db:
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
-        # Per-hour per-project aggregation
-        rows = db.execute(f'''
+        rows = db.execute('''
             SELECT strftime('%H', m.timestamp, ?) AS hour,
-                   s.project_name,
-                   COUNT(*)                        AS message_count,
-                   SUM(m.cost_micro)*1.0/1000000   AS cost_usd,
-                   SUM(m.input_tokens)             AS input_tokens,
-                   SUM(m.output_tokens)            AS output_tokens,
-                   COUNT(DISTINCT m.session_id)    AS session_count
-            FROM messages m
-            JOIN sessions s ON m.session_id = s.id
+                   p.project_name,
+                   COUNT(*) AS message_count,
+                   0.0 AS cost_usd,
+                   0 AS input_tokens,
+                   0 AS output_tokens,
+                   COUNT(DISTINCT m.session_id) AS session_count
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
             WHERE m.role = 'assistant'
               AND m.timestamp >= ? AND m.timestamp < ?
-              {sub_filter}
-            GROUP BY hour, s.project_name
-            ORDER BY hour, cost_usd DESC
+            GROUP BY hour, p.project_name
+            ORDER BY hour, message_count DESC
         ''', (off_sql, date + 'T00:00:00Z', date + 'T24:00:00Z')).fetchall()
-        # Per-hour per-session detail
-        detail_rows = db.execute(f'''
+        detail_rows = db.execute('''
             SELECT strftime('%H', m.timestamp, ?) AS hour,
                    m.session_id,
-                   s.project_name,
+                   p.project_name,
                    s.model,
-                   s.is_subagent,
-                   COUNT(*)                        AS message_count,
-                   SUM(m.cost_micro)*1.0/1000000   AS cost_usd,
-                   SUM(m.input_tokens)             AS input_tokens,
-                   SUM(m.output_tokens)            AS output_tokens
-            FROM messages m
-            JOIN sessions s ON m.session_id = s.id
+                   0 AS is_subagent,
+                   COUNT(*) AS message_count,
+                   0.0 AS cost_usd,
+                   0 AS input_tokens,
+                   0 AS output_tokens
+            FROM codex_messages m
+            JOIN codex_sessions s ON s.id = m.session_id
+            JOIN codex_projects p ON p.project_path = s.project_path
             WHERE m.role = 'assistant'
               AND m.timestamp >= ? AND m.timestamp < ?
-              {sub_filter}
             GROUP BY hour, m.session_id
-            ORDER BY hour, cost_usd DESC
+            ORDER BY hour, message_count DESC
         ''', (off_sql, date + 'T00:00:00Z', date + 'T24:00:00Z')).fetchall()
-        if not rows and not detail_rows:
-            rows = db.execute('''
-                SELECT strftime('%H', m.timestamp, ?) AS hour,
-                       p.project_name,
-                       COUNT(*) AS message_count,
-                       0.0 AS cost_usd,
-                       0 AS input_tokens,
-                       0 AS output_tokens,
-                       COUNT(DISTINCT m.session_id) AS session_count
-                FROM codex_messages m
-                JOIN codex_sessions s ON s.id = m.session_id
-                JOIN codex_projects p ON p.project_path = s.project_path
-                WHERE m.role = 'assistant'
-                  AND m.timestamp >= ? AND m.timestamp < ?
-                GROUP BY hour, p.project_name
-                ORDER BY hour, message_count DESC
-            ''', (off_sql, date + 'T00:00:00Z', date + 'T24:00:00Z')).fetchall()
-            detail_rows = db.execute('''
-                SELECT strftime('%H', m.timestamp, ?) AS hour,
-                       m.session_id,
-                       p.project_name,
-                       s.model,
-                       0 AS is_subagent,
-                       COUNT(*) AS message_count,
-                       0.0 AS cost_usd,
-                       0 AS input_tokens,
-                       0 AS output_tokens
-                FROM codex_messages m
-                JOIN codex_sessions s ON s.id = m.session_id
-                JOIN codex_projects p ON p.project_path = s.project_path
-                WHERE m.role = 'assistant'
-                  AND m.timestamp >= ? AND m.timestamp < ?
-                GROUP BY hour, m.session_id
-                ORDER BY hour, message_count DESC
-            ''', (off_sql, date + 'T00:00:00Z', date + 'T24:00:00Z')).fetchall()
     # Build hourly map
     hours: dict[str, dict] = {}
     for h in range(24):
@@ -1898,16 +1845,6 @@ def api_timeline_heatmap(days: int = Query(90, ge=7, le=365)):
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
         rows = db.execute('''
-            SELECT CAST(strftime('%w', timestamp, ?) AS INTEGER) AS dow,
-                   CAST(strftime('%H', timestamp, ?) AS INTEGER) AS hour,
-                   COUNT(*) AS count,
-                   SUM(cost_micro) * 1.0 / 1000000 AS cost_usd
-            FROM messages
-            WHERE role = 'assistant'
-              AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
-            GROUP BY dow, hour
-        ''', (off_sql, off_sql, f'-{days} days')).fetchall()
-        codex_rows = db.execute('''
             SELECT CAST(strftime('%w', m.timestamp, ?) AS INTEGER) AS dow,
                    CAST(strftime('%H', m.timestamp, ?) AS INTEGER) AS hour,
                    COUNT(*) AS count,
@@ -1923,13 +1860,6 @@ def api_timeline_heatmap(days: int = Query(90, ge=7, le=365)):
         cells[key] = {
             'count': r['count'],
             'cost': round(r['cost_usd'] or 0, 4),
-        }
-    for r in codex_rows:
-        key = f"{r['dow']}_{r['hour']}"
-        prev = cells.get(key, {'count': 0, 'cost': 0.0})
-        cells[key] = {
-            'count': prev['count'] + (r['count'] or 0),
-            'cost': round(prev['cost'] + (r['cost_usd'] or 0), 4),
         }
     return {'cells': cells, 'days': days, 'timezone_offset': off}
 
