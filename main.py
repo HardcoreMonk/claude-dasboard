@@ -1309,8 +1309,7 @@ def _codex_project_sql(project_name: str, path: Optional[str]) -> tuple[str, lis
     return 'p.project_name = ?', [project_name]
 
 
-@app.get("/api/codex/projects/{project_name}/stats")
-def api_codex_project_stats(project_name: str, path: Optional[str] = Query(None)):
+def _codex_project_stats_payload(project_name: str, path: Optional[str]) -> Optional[dict]:
     where, params = _codex_project_sql(project_name, path)
     with read_db() as db:
         summary = db.execute(
@@ -1333,7 +1332,7 @@ def api_codex_project_stats(project_name: str, path: Optional[str] = Query(None)
             params,
         ).fetchone()
         if not summary or summary['sessions'] == 0:
-            return JSONResponse({'error': 'Not found'}, status_code=404)
+            return None
         models = db.execute(
             f'''
             SELECT
@@ -1395,15 +1394,13 @@ def api_codex_project_stats(project_name: str, path: Optional[str] = Query(None)
     }
 
 
-@app.get("/api/codex/projects/{project_name}/messages")
-def api_codex_project_messages(
+def _codex_project_messages_payload(
     project_name: str,
-    path: Optional[str] = Query(None),
-    limit: int = Query(300, ge=1, le=5000),
-    offset: int = Query(0, ge=0),
-    order: str = Query('asc'),
-):
-    order_sql = 'DESC' if str(order).lower() == 'desc' else 'ASC'
+    path: Optional[str],
+    limit: int,
+    offset: int,
+    order_sql: str,
+) -> dict:
     where, params = _codex_project_sql(project_name, path)
     with read_db() as db:
         total = db.execute(
@@ -1449,6 +1446,91 @@ def api_codex_project_messages(
         'offset': offset,
         'order': order_sql.lower(),
     }
+
+
+def _codex_project_delete_preview(project_name: str, path: Optional[str]) -> Optional[dict]:
+    where, params = _codex_project_sql(project_name, path)
+    with read_db() as db:
+        row = db.execute(
+            f'''
+            SELECT
+                COUNT(DISTINCT s.id) AS sessions,
+                COUNT(m.id) AS messages,
+                0.0 AS cost
+            FROM codex_projects p
+            JOIN codex_sessions s ON s.project_path = p.project_path
+            LEFT JOIN codex_messages m ON m.session_id = s.id
+            WHERE {where}
+            ''',
+            params,
+        ).fetchone()
+    if not row or row['sessions'] == 0:
+        return None
+    return {
+        'preview': True,
+        'project_name': project_name,
+        'path': path,
+        'sessions': row['sessions'],
+        'messages': row['messages'],
+        'cost': row['cost'],
+    }
+
+
+def _codex_project_delete(project_name: str, path: Optional[str]) -> dict:
+    where, params = _codex_project_sql(project_name, path)
+    with write_db() as db:
+        preview = db.execute(
+            f'''
+            SELECT
+                COUNT(DISTINCT s.id) AS sessions,
+                COUNT(m.id) AS messages
+            FROM codex_projects p
+            JOIN codex_sessions s ON s.project_path = p.project_path
+            LEFT JOIN codex_messages m ON m.session_id = s.id
+            WHERE {where}
+            ''',
+            params,
+        ).fetchone()
+        paths = db.execute(
+            f'''
+            SELECT p.project_path
+            FROM codex_projects p
+            WHERE {where}
+            ''',
+            params,
+        ).fetchall()
+        if not paths:
+            return {'deleted_sessions': 0, 'deleted_messages': 0}
+        placeholders = ','.join(['?'] * len(paths))
+        db.execute(
+            f'DELETE FROM codex_projects WHERE project_path IN ({placeholders})',
+            [row['project_path'] for row in paths],
+        )
+    close_thread_connections()
+    return {
+        'deleted_sessions': int(preview['sessions'] or 0),
+        'deleted_messages': int(preview['messages'] or 0),
+    }
+
+
+@app.get("/api/codex/projects/{project_name}/stats")
+def api_codex_project_stats(project_name: str, path: Optional[str] = Query(None)):
+    payload = _codex_project_stats_payload(project_name, path)
+    if payload is None:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return payload
+
+
+@app.get("/api/codex/projects/{project_name}/messages")
+def api_codex_project_messages(
+    project_name: str,
+    path: Optional[str] = Query(None),
+    limit: int = Query(300, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    order: str = Query('asc'),
+):
+    order_sql = 'DESC' if str(order).lower() == 'desc' else 'ASC'
+    return _codex_project_messages_payload(project_name, path, limit, offset, order_sql)
 
 
 @app.get("/api/codex/sessions/table")
@@ -2512,9 +2594,15 @@ def api_project_delete(
                        COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost
                 FROM sessions WHERE {where}
             ''', params).fetchone()
+        if row and row['sessions'] > 0:
+            return {'preview': True, 'project_name': project_name, 'path': path,
+                    'sessions': row['sessions'], 'messages': row['messages'],
+                    'cost': row['cost']}
+        payload = _codex_project_delete_preview(project_name, path)
+        if payload is not None:
+            return payload
         return {'preview': True, 'project_name': project_name, 'path': path,
-                'sessions': row['sessions'], 'messages': row['messages'],
-                'cost': row['cost']}
+                'sessions': 0, 'messages': 0, 'cost': 0.0}
     with write_db() as db:
         sids = [r['id'] for r in db.execute(
             f'SELECT id FROM sessions WHERE {where}', params).fetchall()]
@@ -2525,6 +2613,12 @@ def api_project_delete(
                 f'DELETE FROM messages WHERE session_id IN ({ph})', sids).rowcount
             sess_del = db.execute(
                 f'DELETE FROM sessions WHERE id IN ({ph})', sids).rowcount
+    if sess_del == 0 and msg_del == 0:
+        codex_deleted = _codex_project_delete(project_name, path)
+        sess_del = codex_deleted['deleted_sessions']
+        msg_del = codex_deleted['deleted_messages']
+    elif sess_del > 0 or msg_del > 0:
+        close_thread_connections()
     logger.info("Deleted project '%s' (path=%s): %d sessions, %d messages",
                 project_name, path, sess_del, msg_del)
     return {'deleted_sessions': sess_del, 'deleted_messages': msg_del}
@@ -2549,7 +2643,10 @@ def api_project_stats(project_name: str, path: Optional[str] = Query(None)):
             FROM sessions WHERE {where}
         ''', params).fetchone()
         if not summary or summary['sessions'] == 0:
-            return JSONResponse({'error': 'Not found'}, status_code=404)
+            payload = _codex_project_stats_payload(project_name, path)
+            if payload is None:
+                return JSONResponse({'error': 'Not found'}, status_code=404)
+            return payload
         # Models breakdown — aggregate from MESSAGES (C1 fix)
         models = db.execute(f'''
             SELECT m.model,
@@ -2909,6 +3006,8 @@ def api_project_messages(
             ORDER BY m.timestamp {order_sql}, m.id {order_sql}
             LIMIT ? OFFSET ?
         ''', [*params, limit, offset]).fetchall()
+    if total == 0:
+        return _codex_project_messages_payload(project_name, path, limit, offset, order_sql)
     return {
         'messages': [dict(r) for r in rows],
         'total': total, 'limit': limit, 'offset': offset,

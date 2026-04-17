@@ -28,6 +28,7 @@ CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'
 _write_lock = threading.Lock()
 _read_local = threading.local()   # per-thread cached read connection
 _READ_CONN_TTL = 300              # seconds before recycling a cached read connection
+_READ_EPOCH = 0                   # incremented after writes so readers reopen snapshots
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
 SCHEMA_VERSION = 16               # bump on every schema change
@@ -64,7 +65,12 @@ def read_db():
     to prevent stale WAL snapshots from accumulating indefinitely.
     """
     conn = getattr(_read_local, 'conn', None)
-    if conn is None or (time.time() - getattr(_read_local, 'conn_time', 0)) > _READ_CONN_TTL:
+    conn_epoch = getattr(_read_local, 'conn_epoch', -1)
+    if (
+        conn is None
+        or conn_epoch != _READ_EPOCH
+        or (time.time() - getattr(_read_local, 'conn_time', 0)) > _READ_CONN_TTL
+    ):
         if conn is not None:
             try:
                 conn.close()
@@ -73,6 +79,7 @@ def read_db():
         conn = _new_connection()
         _read_local.conn = conn
         _read_local.conn_time = time.time()
+        _read_local.conn_epoch = _READ_EPOCH
     try:
         yield conn
     except sqlite3.Error:
@@ -81,6 +88,7 @@ def read_db():
         except Exception:
             pass
         _read_local.conn = None
+        _read_local.conn_epoch = -1
         raise
 
 
@@ -88,12 +96,14 @@ def read_db():
 def write_db():
     """Single-writer context. Always opens a fresh connection to avoid
     interleaving with any read connection cached on the same thread."""
+    global _READ_EPOCH
     with _write_lock:
         conn = _new_connection()
         try:
             conn.execute("BEGIN IMMEDIATE")
             yield conn
             conn.commit()
+            _READ_EPOCH += 1
         except Exception:
             conn.rollback()
             raise

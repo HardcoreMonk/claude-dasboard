@@ -346,6 +346,67 @@ def test_projects_top_shows_subagent_count(api_client):
     assert any(p['subagent_count'] > 0 for p in r.json()['projects'])
 
 
+def test_project_stats_falls_back_to_codex_by_path(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/projects/codex-demo/stats?path=/tmp/codex-demo')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['summary']['sessions'] == 2
+    assert body['summary']['messages'] == 5
+    assert body['summary']['cost'] == 0.0
+    assert body['summary']['canonical_path'] == '/tmp/codex-demo'
+    assert [row['id'] for row in body['sessions']] == ['codex-s2', 'codex-s1']
+
+
+def test_project_messages_fall_back_to_codex_by_path(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/projects/codex-demo/messages?path=/tmp/codex-demo&order=asc')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total'] == 5
+    assert [row['role'] for row in body['messages']] == ['user', 'assistant', 'tool', 'agent', 'assistant']
+    assert body['messages'][1]['content_preview'] == 'I will change the search UI first.'
+    assert body['messages'][1]['git_branch'] == ''
+
+
+def test_project_delete_preview_counts_codex_rows_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.delete('/api/projects/codex-demo?path=/tmp/codex-demo')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body == {
+        'preview': True,
+        'project_name': 'codex-demo',
+        'path': '/tmp/codex-demo',
+        'sessions': 2,
+        'messages': 5,
+        'cost': 0.0,
+    }
+
+
+def test_project_delete_confirm_removes_codex_rows_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.delete('/api/projects/codex-demo?path=/tmp/codex-demo&confirm=true')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body == {'deleted_sessions': 2, 'deleted_messages': 5}
+
+    top = api_client.get('/api/projects/top?limit=5')
+    assert top.status_code == 200
+    assert all(
+        row['project_name'] != 'codex-demo'
+        for row in top.json()['projects']
+    )
+
+
 # ─── Sessions listing ───────────────────────────────────────────────────
 
 def test_sessions_excludes_subagents_by_default(api_client):
