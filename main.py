@@ -64,8 +64,8 @@ from database import (
     wal_checkpoint,
     write_db,
 )
-from parser import process_record
-from watcher import ClaudeFileWatcher, WatcherMetrics
+from codex_parser import process_record
+from codex_watcher import CodexFileWatcher, WatcherMetrics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -192,7 +192,7 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
-watcher: Optional[ClaudeFileWatcher] = None
+watcher: Optional[CodexFileWatcher] = None
 
 
 # ─── Prometheus metrics ──────────────────────────────────────────────────────
@@ -220,7 +220,7 @@ if _PROMETHEUS_OK:
 
 
 def _make_watcher_metrics() -> "WatcherMetrics":
-    """Build the metric bundle injected into ClaudeFileWatcher.
+    """Build the metric bundle injected into CodexFileWatcher.
 
     Kept separate so tests can instantiate a watcher with empty metrics.
     Also pre-creates zero-valued label series so Prometheus can distinguish
@@ -253,7 +253,7 @@ async def lifespan(app: FastAPI):
     if DB_PATH.exists() and not check_integrity():
         logger.error("DATABASE INTEGRITY CHECK FAILED — consider restoring from backup")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    watcher = ClaudeFileWatcher(manager.broadcast, metrics=_make_watcher_metrics())
+    watcher = CodexFileWatcher(manager.broadcast, metrics=_make_watcher_metrics())
     await watcher.start_async()
     _sched_task = asyncio.create_task(_retention_scheduler_loop())
     yield

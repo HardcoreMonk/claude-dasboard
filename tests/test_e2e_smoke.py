@@ -26,10 +26,11 @@ from pathlib import Path
 import pytest
 
 
-REMOVED_RUNTIME_PATHS = (
+COLLECTOR_DOWNLOAD_PATH = '/api/collector.py'
+REMOVED_CLAUDE_API_PATHS = (
     '/api/claude-ai/stats',
-    '/api/collector.py',
 )
+REMOVED_RUNTIME_PATHS = REMOVED_CLAUDE_API_PATHS + (COLLECTOR_DOWNLOAD_PATH,)
 
 
 @pytest.fixture()
@@ -49,12 +50,12 @@ def e2e_client(tmp_path, monkeypatch):
     except Exception:
         pass
     for name in list(sys.modules):
-        if name in ('database', 'parser', 'watcher', 'main'):
+        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
     monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
-    import parser as app_parser
+    import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
     import main  # noqa: F401
 

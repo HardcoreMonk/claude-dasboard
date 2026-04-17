@@ -1,10 +1,10 @@
-"""Unit tests for watcher.py — state lock, metric injection, retry accounting."""
+"""Unit tests for codex_watcher.py — state lock, metric injection, retry accounting."""
 import sqlite3
 import threading
 from pathlib import Path
 
 import database
-import watcher
+import codex_watcher as watcher
 
 # ─── WatcherMetrics dependency injection ─────────────────────────────────
 
@@ -82,7 +82,7 @@ def test_watcher_module_has_no_direct_main_import():
 # ─── State lock on _retry_queue / _file_mtimes ───────────────────────────
 
 def test_state_lock_exists_and_is_a_lock():
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
     assert hasattr(w, '_state_lock')
     # threading.Lock instances have 'acquire'/'release' methods
     assert callable(w._state_lock.acquire)
@@ -92,7 +92,7 @@ def test_state_lock_exists_and_is_a_lock():
 def test_retry_queue_concurrent_mutation_safe():
     """Stress: many threads hammering _retry_queue via the lock shouldn't
     raise RuntimeError / leave the dict in a torn state."""
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
 
     def bump():
         for i in range(500):
@@ -117,12 +117,12 @@ def test_constructor_accepts_metrics_injection():
         new_messages=_FakeCounter(),
         retries=_FakeLabeledCounter(),
     )
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None, metrics=m)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None, metrics=m)
     assert w._metrics is m
 
 
 def test_constructor_defaults_to_noop_metrics():
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
     assert isinstance(w._metrics, watcher.WatcherMetrics)
     # all fields should be None (no-op)
     assert w._metrics.scan_files is None
@@ -169,7 +169,7 @@ def test_start_observer_schedules_codex_roots(tmp_path, monkeypatch):
     monkeypatch.setattr(watcher.Path, 'home', lambda: home)
     monkeypatch.setattr(watcher.asyncio, 'get_running_loop', lambda: object())
 
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
     w._event_queue = object()
     w._start_observer()
 
@@ -191,7 +191,7 @@ def test_process_file_recovers_after_truncation(tmp_path, monkeypatch):
         encoding='utf-8',
     )
 
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
 
     first = w._process_file(str(file_path))
     assert first is not None
@@ -237,7 +237,7 @@ def test_process_file_routes_codex_logs_to_codex_storage(tmp_path, monkeypatch):
         encoding='utf-8',
     )
 
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
 
     batch = w._process_file(str(codex_log))
 
@@ -291,7 +291,7 @@ def test_process_file_uses_rollout_session_meta_for_project_tool_and_agent(tmp_p
         encoding='utf-8',
     )
 
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
 
     batch = w._process_file(str(rollout_log))
 
@@ -337,7 +337,7 @@ def test_process_file_routes_codex_history_log_to_codex_storage(tmp_path, monkey
         encoding='utf-8',
     )
 
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
     batch = w._process_file(str(history_log))
 
     assert batch is not None
@@ -383,7 +383,7 @@ def test_process_file_skips_incomplete_codex_records(tmp_path, monkeypatch):
         encoding='utf-8',
     )
 
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
 
     batch = w._process_file(str(codex_log))
 
@@ -418,7 +418,7 @@ def test_process_file_attributes_codex_sessions_file_without_project_path(tmp_pa
         encoding='utf-8',
     )
 
-    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w = watcher.CodexFileWatcher(broadcast=lambda _: None)
 
     batch = w._process_file(str(codex_log))
 

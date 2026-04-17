@@ -1,10 +1,10 @@
-"""Unit tests for parser.py — the cost/ingestion critical path."""
+"""Unit tests for codex_parser.py — the cost/ingestion critical path."""
 import json
 import sqlite3
 
 import pytest
 
-import parser as p
+import codex_parser as p
 
 
 # ─── Pricing ────────────────────────────────────────────────────────────────
@@ -90,10 +90,10 @@ def test_calculate_cost_micro_rounds():
 
 def test_project_info_from_cwd_preserves_dashes():
     """The original bug: dashes in the path were lost in decoding.
-    This test pins the fix: we preserve ``claude-dashboard`` as-is."""
-    path, name = p.project_info_from_cwd('/home/user/projects/claude-dashboard')
-    assert path == '/home/user/projects/claude-dashboard'
-    assert name == 'claude-dashboard'
+    This test pins the fix: we preserve ``codex-dashboard`` as-is."""
+    path, name = p.project_info_from_cwd('/home/user/projects/codex-dashboard')
+    assert path == '/home/user/projects/codex-dashboard'
+    assert name == 'codex-dashboard'
 
 
 def test_project_info_from_cwd_keeps_multi_segment_name():
@@ -148,6 +148,10 @@ def test_extract_content_text_caps_at_2000():
 def test_safe_json_content_small_passes_through():
     data = {'foo': 'bar'}
     assert p._safe_json_content(data) == json.dumps(data)
+
+
+def test_safe_json_content_none_becomes_empty_string():
+    assert p._safe_json_content(None) == ''
 
 
 def test_safe_json_content_large_falls_back():
@@ -264,6 +268,18 @@ def test_process_assistant_stop_reason_is_sticky(mem_db):
     p.process_record(rec2, '/tmp/fake.jsonl', mem_db)
     sess = mem_db.execute("SELECT final_stop_reason FROM sessions WHERE id='s1'").fetchone()
     assert sess['final_stop_reason'] == 'max_tokens', 'empty stop_reason must not overwrite'
+
+
+def test_process_assistant_none_content_stores_empty_string(mem_db):
+    rec = _assistant_record()
+    rec['message']['content'] = None
+    p.process_record(rec, '/tmp/fake.jsonl', mem_db)
+    row = mem_db.execute(
+        'SELECT content, content_preview FROM messages WHERE message_uuid = ?',
+        ('u1',),
+    ).fetchone()
+    assert row['content'] == ''
+    assert row['content_preview'] == ''
 
 
 # ─── Subagent file handling (F9 + earlier v5 fix) ───────────────────────

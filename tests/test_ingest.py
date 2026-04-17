@@ -12,9 +12,8 @@ import pytest
 
 
 TEST_PASSWORD = 'ingest-test-pw'
-REMOVED_RUNTIME_PATHS = (
-    '/api/collector.py',
-)
+COLLECTOR_DOWNLOAD_PATH = '/api/collector.py'
+REMOVED_RUNTIME_PATHS = (COLLECTOR_DOWNLOAD_PATH,)
 
 
 @pytest.fixture()
@@ -37,13 +36,13 @@ def client(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'parser', 'watcher', 'main'):
+        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
     monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
-    import parser as app_parser
+    import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
 
     import main  # noqa: F401
@@ -75,13 +74,13 @@ def auth_client(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'parser', 'watcher', 'main'):
+        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
     monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
-    import parser as app_parser
+    import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
 
     import main

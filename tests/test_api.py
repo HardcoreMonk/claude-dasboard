@@ -28,7 +28,7 @@ def _reload_runtime_modules():
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'parser', 'watcher', 'main'):
+        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
 
@@ -72,14 +72,14 @@ def _boot_api_client(tmp_path, monkeypatch, dashboard_password=None):
 
     # Drop any cached modules so the new DB_PATH / CLAUDE_PROJECTS stick
     for name in list(sys.modules):
-        if name in ('database', 'parser', 'watcher', 'main'):
+        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
     monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_claude_projects)
 
-    import parser as app_parser
+    import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_claude_projects)
 
     import sqlite3
@@ -1061,13 +1061,13 @@ def test_api_works_with_auth_cookie(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'parser', 'watcher', 'main'):
+        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
     monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
-    import parser as app_parser
+    import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
     import main
     monkeypatch.setattr(main, '_AUTH_PW', _AUTH_PASSWORD)

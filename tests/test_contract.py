@@ -38,7 +38,7 @@ def _reload_runtime_modules():
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'parser', 'watcher', 'main'):
+        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
 
@@ -58,12 +58,12 @@ def contract_client(tmp_path, monkeypatch):
     except Exception:
         pass
     for name in list(sys.modules):
-        if name in ('database', 'parser', 'watcher', 'main'):
+        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
     monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
-    import parser as app_parser
+    import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
     import main  # noqa: F401
 
@@ -503,13 +503,13 @@ def test_contract_endpoints_accessible_with_auth(tmp_path, monkeypatch):
         pass
 
     for name in list(sys.modules):
-        if name in ('database', 'parser', 'watcher', 'main'):
+        if name in ('database', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
     monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
-    import parser as app_parser
+    import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
     import main
     monkeypatch.setattr(main, '_AUTH_PW', _AUTH_PASSWORD)
