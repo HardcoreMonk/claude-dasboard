@@ -199,7 +199,7 @@ async function _srchOpenResult(sid, msgId, cardEl) {
     }
 
     const msgCount = document.getElementById('srch-convMsgCount');
-    if (msgCount) msgCount.textContent = allMsgs.length + '개 메시지 (offset ' + targetOffset + ')';
+    if (msgCount) msgCount.textContent = allMsgs.length + '개 메시지';
     if (nav) nav.classList.remove('hidden');
 
     setTimeout(() => {
@@ -208,7 +208,9 @@ async function _srchOpenResult(sid, msgId, cardEl) {
       const target = allEls[localIdx];
       if (target) {
         target.classList.add('conv-msg-focused');
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const cRect = msgs.getBoundingClientRect();
+        const tRect = target.getBoundingClientRect();
+        msgs.scrollTop += tRect.top - cRect.top - cRect.height / 2 + target.offsetHeight / 2;
       }
     }, 80);
 
