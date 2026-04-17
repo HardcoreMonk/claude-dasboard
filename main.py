@@ -622,20 +622,10 @@ def api_stats():
 def _get_stats() -> dict:
     with read_db() as db:
         today_utc = _today_start_utc(db)
-
-        row = db.execute('''
-            SELECT COUNT(*) AS total_sessions,
-                   COALESCE(SUM(total_input_tokens), 0) AS input_tokens,
-                   COALESCE(SUM(total_output_tokens), 0) AS output_tokens,
-                   COALESCE(SUM(total_cache_creation_tokens), 0) AS cache_creation_tokens,
-                   COALESCE(SUM(total_cache_read_tokens), 0) AS cache_read_tokens,
-                   COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost_usd,
-                   COALESCE(SUM(message_count), 0) AS messages
-            FROM sessions
-        ''').fetchone()
-
-        total_sessions = int(row['total_sessions'] or 0) if row else 0
-        if total_sessions == 0:
+        codex_total_sessions = int(
+            db.execute('SELECT COUNT(*) FROM codex_sessions').fetchone()[0] or 0
+        )
+        if codex_total_sessions > 0:
             row = db.execute('''
                 SELECT COUNT(*) AS total_sessions,
                        0 AS input_tokens,
@@ -646,18 +636,6 @@ def _get_stats() -> dict:
                        COALESCE((SELECT COUNT(*) FROM codex_messages), 0) AS messages
                 FROM codex_sessions
             ''').fetchone()
-
-        today = db.execute('''
-            SELECT COALESCE(SUM(total_input_tokens), 0) AS input_tokens,
-                   COALESCE(SUM(total_output_tokens), 0) AS output_tokens,
-                   COALESCE(SUM(total_cache_creation_tokens), 0) AS cache_creation_tokens,
-                   COALESCE(SUM(total_cache_read_tokens), 0) AS cache_read_tokens,
-                   COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost_usd,
-                   COALESCE(SUM(message_count), 0) AS messages,
-                   COUNT(*) AS sessions
-            FROM sessions WHERE updated_at >= ?
-        ''', (today_utc,)).fetchone()
-        if total_sessions == 0:
             today = db.execute('''
                 SELECT 0 AS input_tokens,
                        0 AS output_tokens,
@@ -674,20 +652,6 @@ def _get_stats() -> dict:
                 FROM codex_sessions
                 WHERE updated_at >= ?
             ''', (today_utc, today_utc)).fetchone()
-
-        # Unified model aggregation: cost + cache in a single scan
-        model_rows = db.execute('''
-            SELECT model,
-                   COUNT(DISTINCT session_id) AS cnt,
-                   SUM(cost_micro)*1.0/1000000 AS cost,
-                   SUM(input_tokens) AS input_tokens,
-                   SUM(cache_read_tokens) AS cache_read_tokens,
-                   SUM(cache_creation_tokens) AS cache_creation_tokens
-            FROM messages
-            WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
-            GROUP BY model ORDER BY cost DESC
-        ''').fetchall()
-        if total_sessions == 0:
             model_rows = db.execute('''
                 SELECT model,
                        COUNT(DISTINCT session_id) AS cnt,
@@ -699,6 +663,51 @@ def _get_stats() -> dict:
                 WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
                 GROUP BY model ORDER BY cnt DESC, model ASC
             ''').fetchall()
+            stop_reasons = db.execute('''
+                SELECT '(unknown)' AS stop_reason,
+                       COUNT(*) AS count,
+                       0.0 AS cost
+                FROM codex_sessions
+            ''').fetchall()
+        else:
+            row = db.execute('''
+                SELECT COUNT(*) AS total_sessions,
+                       COALESCE(SUM(total_input_tokens), 0) AS input_tokens,
+                       COALESCE(SUM(total_output_tokens), 0) AS output_tokens,
+                       COALESCE(SUM(total_cache_creation_tokens), 0) AS cache_creation_tokens,
+                       COALESCE(SUM(total_cache_read_tokens), 0) AS cache_read_tokens,
+                       COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost_usd,
+                       COALESCE(SUM(message_count), 0) AS messages
+                FROM sessions
+            ''').fetchone()
+            today = db.execute('''
+                SELECT COALESCE(SUM(total_input_tokens), 0) AS input_tokens,
+                       COALESCE(SUM(total_output_tokens), 0) AS output_tokens,
+                       COALESCE(SUM(total_cache_creation_tokens), 0) AS cache_creation_tokens,
+                       COALESCE(SUM(total_cache_read_tokens), 0) AS cache_read_tokens,
+                       COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost_usd,
+                       COALESCE(SUM(message_count), 0) AS messages,
+                       COUNT(*) AS sessions
+                FROM sessions WHERE updated_at >= ?
+            ''', (today_utc,)).fetchone()
+            model_rows = db.execute('''
+                SELECT model,
+                       COUNT(DISTINCT session_id) AS cnt,
+                       SUM(cost_micro)*1.0/1000000 AS cost,
+                       SUM(input_tokens) AS input_tokens,
+                       SUM(cache_read_tokens) AS cache_read_tokens,
+                       SUM(cache_creation_tokens) AS cache_creation_tokens
+                FROM messages
+                WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
+                GROUP BY model ORDER BY cost DESC
+            ''').fetchall()
+            stop_reasons = db.execute('''
+                SELECT COALESCE(NULLIF(final_stop_reason, ''), '(unknown)') AS stop_reason,
+                       COUNT(*) AS count,
+                       SUM(cost_micro)*1.0/1000000 AS cost
+                FROM sessions
+                GROUP BY stop_reason ORDER BY count DESC
+            ''').fetchall()
 
         models = [{'model': m['model'], 'cnt': m['cnt'], 'cost': m['cost']}
                   for m in model_rows]
@@ -707,22 +716,6 @@ def _get_stats() -> dict:
                         'cache_read_tokens': m['cache_read_tokens'],
                         'cache_creation_tokens': m['cache_creation_tokens']}
                        for m in model_rows]
-
-        # Stop reason distribution
-        stop_reasons = db.execute('''
-            SELECT COALESCE(NULLIF(final_stop_reason, ''), '(unknown)') AS stop_reason,
-                   COUNT(*) AS count,
-                   SUM(cost_micro)*1.0/1000000 AS cost
-            FROM sessions
-            GROUP BY stop_reason ORDER BY count DESC
-        ''').fetchall()
-        if total_sessions == 0:
-            stop_reasons = db.execute('''
-                SELECT '(unknown)' AS stop_reason,
-                       COUNT(*) AS count,
-                       0.0 AS cost
-                FROM codex_sessions
-            ''').fetchall()
 
     return {
         'all_time': dict(row) if row else {},
@@ -780,6 +773,107 @@ def api_sessions(
     sort_col = _SESSIONS_SORT_MAP.get(sort, 'updated_at')
     order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
     with read_db() as db:
+        codex_total = int(db.execute('SELECT COUNT(*) FROM codex_sessions').fetchone()[0] or 0)
+        if codex_total > 0:
+            codex_conds: list[str] = []
+            codex_params: list = []
+            codex_sort_map = {
+                'updated_at': 's.updated_at',
+                'created_at': 's.created_at',
+                'cost_micro': 'total_cost_usd',
+                'message_count': 's.message_count',
+                'project_name': 'p.project_name',
+                'model': 's.model',
+                'total_input_tokens': 'total_input_tokens',
+                'total_output_tokens': 'total_output_tokens',
+                'total_cache_read_tokens': 'total_cache_read_tokens',
+            }
+            codex_order = codex_sort_map.get(sort_col, 's.updated_at')
+            if node:
+                codex_conds.append("COALESCE(NULLIF(s.source_node, ''), 'local') = ?")
+                codex_params.append(node)
+            if pinned_only:
+                codex_conds.append("s.pinned = 1")
+            if project:
+                codex_conds.append("p.project_name = ?")
+                codex_params.append(project)
+            if model:
+                codex_conds.append("s.model LIKE ? ESCAPE '\\'")
+                codex_params.append(f"%{_esc_like(model)}%")
+            if search:
+                s = f"%{_esc_like(search)}%"
+                codex_conds.append("(p.project_name LIKE ? ESCAPE '\\' OR COALESCE(s.cwd, '') LIKE ? ESCAPE '\\')")
+                codex_params.extend([s, s])
+            if date_from:
+                if not re.match(r'^\d{4}-\d{2}-\d{2}', date_from):
+                    return JSONResponse({'error': 'invalid date format', 'field': 'date_from'}, status_code=400)
+                codex_conds.append("s.updated_at >= ?")
+                codex_params.append(date_from)
+            if date_to:
+                if not re.match(r'^\d{4}-\d{2}-\d{2}', date_to):
+                    return JSONResponse({'error': 'invalid date format', 'field': 'date_to'}, status_code=400)
+                codex_conds.append("s.updated_at <= ?")
+                codex_params.append(date_to + "T23:59:59Z" if len(date_to) == 10 else date_to)
+            if cost_min is not None:
+                codex_conds.append("0 >= ?")
+                codex_params.append(cost_min)
+            if cost_max is not None:
+                codex_conds.append("0 <= ?")
+                codex_params.append(cost_max)
+            if tag:
+                codex_conds.append(
+                    "(',' || COALESCE(s.tags, '') || ',') LIKE ? ESCAPE '\\'"
+                )
+                codex_params.append(f"%,{_esc_like(tag)},%")
+            codex_where = "WHERE " + " AND ".join(codex_conds) if codex_conds else ""
+            total = db.execute(f'''
+                SELECT COUNT(*)
+                FROM codex_sessions s
+                JOIN codex_projects p ON p.project_path = s.project_path
+                {codex_where}
+            ''', codex_params).fetchone()[0]
+            offset = (page - 1) * per_page
+            rows = db.execute(f'''
+                SELECT s.id,
+                       p.project_name,
+                       s.project_path,
+                       s.cwd,
+                       s.model,
+                       s.created_at,
+                       s.updated_at,
+                       0 AS total_input_tokens,
+                       0 AS total_output_tokens,
+                       0 AS total_cache_creation_tokens,
+                       0 AS total_cache_read_tokens,
+                       0.0 AS total_cost_usd,
+                       s.message_count,
+                       s.user_message_count,
+                       s.pinned,
+                       0 AS is_subagent,
+                       NULL AS parent_session_id,
+                       '' AS agent_type,
+                       '' AS agent_description,
+                       '' AS version,
+                       COALESCE(NULLIF(s.final_stop_reason, ''), '') AS final_stop_reason,
+                       COALESCE(NULLIF(s.tags, ''), '') AS tags,
+                       0 AS turn_duration_ms,
+                       COALESCE(NULLIF(s.source_node, ''), 'local') AS source_node,
+                       (julianday(COALESCE(NULLIF(s.updated_at,''), s.created_at)) - julianday(s.created_at)) * 86400.0 AS duration_seconds,
+                       0 AS subagent_count,
+                       0.0 AS subagent_cost
+                FROM codex_sessions s
+                JOIN codex_projects p ON p.project_path = s.project_path
+                {codex_where}
+                ORDER BY s.pinned DESC, {codex_order} {order_sql}
+                LIMIT ? OFFSET ?
+            ''', codex_params + [per_page, offset]).fetchall()
+            return {
+                'sessions': [dict(r) for r in rows],
+                'total': total, 'page': page, 'per_page': per_page,
+                'pages': max(1, -(-total // per_page)),
+                'sort': sort, 'order': order_sql.lower(),
+            }
+
         conds: list[str] = []
         params: list = []
         if node:
@@ -844,94 +938,6 @@ def api_sessions(
             ORDER BY s.pinned DESC, s.{sort_col} {order_sql}
             LIMIT ? OFFSET ?
         ''', params + [per_page, offset]).fetchall()
-        if total == 0:
-            codex_conds: list[str] = []
-            codex_params: list = []
-            codex_sort_map = {
-                'updated_at': 's.updated_at',
-                'created_at': 's.created_at',
-                'cost_micro': 'total_cost_usd',
-                'message_count': 's.message_count',
-                'project_name': 'p.project_name',
-                'model': 's.model',
-                'total_input_tokens': 'total_input_tokens',
-                'total_output_tokens': 'total_output_tokens',
-                'total_cache_read_tokens': 'total_cache_read_tokens',
-            }
-            codex_order = codex_sort_map.get(sort_col, 's.updated_at')
-            if node:
-                if node != 'local':
-                    codex_conds.append("1 = 0")
-                else:
-                    codex_conds.append("'local' = ?")
-                    codex_params.append(node)
-            if pinned_only:
-                codex_conds.append("s.pinned = 1")
-            if project:
-                codex_conds.append("p.project_name = ?")
-                codex_params.append(project)
-            if model:
-                codex_conds.append("s.model LIKE ? ESCAPE '\\'")
-                codex_params.append(f"%{_esc_like(model)}%")
-            if search:
-                s = f"%{_esc_like(search)}%"
-                codex_conds.append("(p.project_name LIKE ? ESCAPE '\\' OR COALESCE(s.cwd, '') LIKE ? ESCAPE '\\')")
-                codex_params.extend([s, s])
-            if date_from:
-                codex_conds.append("s.updated_at >= ?")
-                codex_params.append(date_from)
-            if date_to:
-                codex_conds.append("s.updated_at <= ?")
-                codex_params.append(date_to + "T23:59:59Z" if len(date_to) == 10 else date_to)
-            if cost_min is not None:
-                codex_conds.append("0 >= ?")
-                codex_params.append(cost_min)
-            if cost_max is not None:
-                codex_conds.append("0 <= ?")
-                codex_params.append(cost_max)
-            if tag:
-                codex_conds.append("1 = 0")
-            codex_where = "WHERE " + " AND ".join(codex_conds) if codex_conds else ""
-            total = db.execute(f'''
-                SELECT COUNT(*)
-                FROM codex_sessions s
-                JOIN codex_projects p ON p.project_path = s.project_path
-                {codex_where}
-            ''', codex_params).fetchone()[0]
-            rows = db.execute(f'''
-                SELECT s.id,
-                       p.project_name,
-                       s.project_path,
-                       s.cwd,
-                       s.model,
-                       s.created_at,
-                       s.updated_at,
-                       0 AS total_input_tokens,
-                       0 AS total_output_tokens,
-                       0 AS total_cache_creation_tokens,
-                       0 AS total_cache_read_tokens,
-                       0.0 AS total_cost_usd,
-                       s.message_count,
-                       s.user_message_count,
-                       s.pinned,
-                       0 AS is_subagent,
-                       NULL AS parent_session_id,
-                       '' AS agent_type,
-                       '' AS agent_description,
-                       '' AS version,
-                       '' AS final_stop_reason,
-                       '' AS tags,
-                       0 AS turn_duration_ms,
-                       'local' AS source_node,
-                       (julianday(COALESCE(NULLIF(s.updated_at,''), s.created_at)) - julianday(s.created_at)) * 86400.0 AS duration_seconds,
-                       0 AS subagent_count,
-                       0.0 AS subagent_cost
-                FROM codex_sessions s
-                JOIN codex_projects p ON p.project_path = s.project_path
-                {codex_where}
-                ORDER BY s.pinned DESC, {codex_order} {order_sql}
-                LIMIT ? OFFSET ?
-            ''', codex_params + [per_page, offset]).fetchall()
     return {
         'sessions': [dict(r) for r in rows],
         'total': total, 'page': page, 'per_page': per_page,
@@ -960,6 +966,22 @@ def api_session_search_messages(
     """Full-text search across message previews using SQLite FTS5."""
     fts_query = _build_fts_query(q)
     with read_db() as db:
+        codex_total = int(db.execute('SELECT COUNT(*) FROM codex_messages').fetchone()[0] or 0)
+        if codex_total > 0:
+            rows = [
+                {
+                    'id': row['message_id'],
+                    'session_id': row['session_id'],
+                    'role': row['role'],
+                    'content_preview': row['content_preview'],
+                    'timestamp': row['created_at'],
+                    'cost_usd': 0.0,
+                    'project_name': row['project_name'],
+                    'project_path': row['project_path'],
+                }
+                for row in search_codex_messages(q, limit=limit)
+            ]
+            return {'results': rows, 'query': q, 'fts': bool(fts_query)}
         if fts_query:
             try:
                 rows = db.execute('''
@@ -2809,12 +2831,21 @@ class SessionTagsBody(BaseModel):
 def api_session_set_tags(session_id: str, body: SessionTagsBody):
     """Store a comma-separated tag list on a session. The frontend trims
     and normalises, the backend just stores the string."""
+    tags = body.tags.strip()
     with write_db() as db:
-        cur = db.execute(
+        legacy_cur = db.execute(
             'UPDATE sessions SET tags = ? WHERE id = ?',
-            (body.tags.strip(), session_id),
+            (tags, session_id),
         )
-    return {'ok': True, 'updated': cur.rowcount > 0, 'tags': body.tags.strip()}
+        codex_cur = db.execute(
+            'UPDATE codex_sessions SET tags = ? WHERE id = ?',
+            (tags, session_id),
+        )
+    return {
+        'ok': True,
+        'updated': (legacy_cur.rowcount + codex_cur.rowcount) > 0,
+        'tags': tags,
+    }
 
 
 @app.get("/api/tags")
@@ -2825,9 +2856,15 @@ def api_tags_list(
     """Return every distinct tag across all sessions with its session count."""
     counts: dict[str, int] = {}
     with read_db() as db:
-        rows = db.execute(
-            "SELECT tags FROM sessions WHERE tags IS NOT NULL AND tags != ''"
-        ).fetchall()
+        codex_total = int(db.execute('SELECT COUNT(*) FROM codex_sessions').fetchone()[0] or 0)
+        if codex_total > 0:
+            rows = db.execute(
+                "SELECT tags FROM codex_sessions WHERE tags IS NOT NULL AND tags != ''"
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT tags FROM sessions WHERE tags IS NOT NULL AND tags != ''"
+            ).fetchall()
     for r in rows:
         for t in (r['tags'] or '').split(','):
             t = t.strip()
@@ -4069,8 +4106,13 @@ def api_metrics():
     # Refresh gauges on scrape so they reflect current state
     try:
         with read_db() as db:
-            sessions = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-            messages = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            codex_sessions = int(db.execute("SELECT COUNT(*) FROM codex_sessions").fetchone()[0] or 0)
+            if codex_sessions > 0:
+                sessions = codex_sessions
+                messages = int(db.execute("SELECT COUNT(*) FROM codex_messages").fetchone()[0] or 0)
+            else:
+                sessions = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                messages = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         METRIC_SESSIONS.set(sessions)
         METRIC_MESSAGES.set(messages)
         if DB_PATH.exists():

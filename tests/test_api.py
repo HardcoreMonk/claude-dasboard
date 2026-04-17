@@ -28,6 +28,19 @@ def _clear_legacy_runtime_rows():
             pass
 
 
+def _clear_codex_runtime_rows():
+    import database
+
+    with database.write_db() as db:
+        db.execute('DELETE FROM codex_messages')
+        db.execute('DELETE FROM codex_sessions')
+        db.execute('DELETE FROM codex_projects')
+        try:
+            db.execute("INSERT INTO codex_messages_fts(codex_messages_fts) VALUES('rebuild')")
+        except Exception:
+            pass
+
+
 def _reload_runtime_modules():
     try:
         from prometheus_client import REGISTRY
@@ -237,6 +250,17 @@ def test_metrics_endpoint(api_client):
     assert 'dashboard_messages_total' in txt
 
 
+def test_metrics_reflect_codex_counts_when_both_sources_exist(api_client):
+    import re
+
+    r = api_client.get('/metrics')
+    assert r.status_code == 200
+    txt = r.text
+
+    assert re.search(r'^dashboard_sessions_total\s+2(?:\.0+)?$', txt, re.MULTILINE)
+    assert re.search(r'^dashboard_messages_total\s+5(?:\.0+)?$', txt, re.MULTILINE)
+
+
 def test_admin_ingest_status_reports_codex_counters(api_client):
     r = api_client.get('/api/admin/status')
     assert r.status_code == 200
@@ -412,6 +436,16 @@ def test_stats_are_derived_from_codex_sessions_only(api_client):
     assert 'gpt-5.4-mini' in models
 
 
+def test_stats_prefer_codex_sessions_when_both_sources_exist(api_client):
+    r = api_client.get('/api/stats')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['all_time']['total_sessions'] == 2
+    assert body['all_time']['messages'] == 5
+    assert {row['model'] for row in body['models']} == {'gpt-5.4', 'gpt-5.4-mini'}
+
+
 def test_projects_separates_parent_and_subagent_counts(api_client):
     r = api_client.get('/api/projects?sort=name&order=asc')
     assert r.status_code == 200
@@ -498,17 +532,15 @@ def test_sessions_excludes_subagents_by_default(api_client):
     data = r.json()
     ids = [s['id'] for s in data['sessions']]
     assert 'agent-1a' not in ids and 'agent-1b' not in ids
-    assert 'parent-A' in ids and 'parent-B' in ids
-    # Parent-A should report its subagent tally on the row
-    parent_a = next(s for s in data['sessions'] if s['id'] == 'parent-A')
-    assert parent_a['subagent_count'] == 2
-    assert parent_a['subagent_cost'] == pytest.approx(0.01, rel=0.01)
+    assert ids == ['codex-s2', 'codex-s1']
+    assert all(s['subagent_count'] == 0 for s in data['sessions'])
+    assert all(s['subagent_cost'] == 0.0 for s in data['sessions'])
 
 
 def test_sessions_include_subagents_flag(api_client):
     r = api_client.get('/api/sessions?include_subagents=true&per_page=20')
     ids = [s['id'] for s in r.json()['sessions']]
-    assert 'agent-1a' in ids and 'agent-1b' in ids
+    assert ids == ['codex-s2', 'codex-s1']
 
 
 def test_sessions_endpoint_lists_codex_sessions_without_legacy_rows(api_client):
@@ -528,6 +560,18 @@ def test_sessions_endpoint_lists_codex_sessions_without_legacy_rows(api_client):
     assert first['is_subagent'] in (False, 0)
     assert first['message_count'] == 1
     assert first['total_cost_usd'] == 0.0
+
+
+def test_sessions_prefer_codex_rows_when_both_sources_exist(api_client):
+    r = api_client.get('/api/sessions?per_page=20')
+    assert r.status_code == 200
+    body = r.json()
+
+    ids = [row['id'] for row in body['sessions']]
+    assert 'codex-s2' in ids
+    assert 'codex-s1' in ids
+    assert body['total'] >= 2
+    assert 'parent-A' not in ids
 
 
 # ─── Subagent endpoints ─────────────────────────────────────────────────
@@ -653,6 +697,30 @@ def test_sessions_search_is_backed_by_codex_search_index(api_client):
     assert 'codex-s1' in session_ids
     assert all(row['project_name'] == 'codex-demo' for row in body['results'])
     assert any('Search' in (row['content_preview'] or '') for row in body['results'])
+
+
+def test_sessions_search_prefers_codex_results_when_both_sources_exist(api_client):
+    import database
+
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s3',
+        session_name='Hello Codex session',
+        role='assistant',
+        content='hello from codex primary',
+        content_preview='hello from codex primary',
+        timestamp='2026-04-16T12:00:00Z',
+        message_uuid='codex-msg-hello',
+        model='gpt-5.4',
+    )
+
+    r = api_client.get('/api/sessions/search?q=hello')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert [row['session_id'] for row in body['results']] == ['codex-s3']
+    assert body['results'][0]['project_name'] == 'codex-demo'
 
 
 def test_project_stats_by_path(api_client):
@@ -1259,35 +1327,32 @@ def test_messages_endpoint_returns_stop_reason(api_client):
 
 def test_sessions_list_exposes_duration_and_stop_reason(api_client, tmp_path):
     """/api/sessions rows must include duration_seconds and final_stop_reason."""
-    import sqlite3
-    conn = sqlite3.connect(str(tmp_path / 'api.db'))
-    conn.execute("""UPDATE sessions SET
-        created_at='2026-04-01T00:00:00Z',
-        updated_at='2026-04-01T00:30:00Z',
-        final_stop_reason='end_turn'
-        WHERE id='parent-A'""")
-    conn.commit()
-    conn.close()
+    import database
+
+    with database.write_db() as db:
+        db.execute("""UPDATE codex_sessions SET
+            created_at='2026-04-16T10:00:00Z',
+            updated_at='2026-04-16T10:30:00Z',
+            final_stop_reason='end_turn'
+            WHERE id='codex-s1'""")
     r = api_client.get('/api/sessions')
     assert r.status_code == 200
-    parent = next(s for s in r.json()['sessions'] if s['id'] == 'parent-A')
-    assert parent['final_stop_reason'] == 'end_turn'
+    session = next(s for s in r.json()['sessions'] if s['id'] == 'codex-s1')
+    assert session['final_stop_reason'] == 'end_turn'
     # 30 minutes = 1800 seconds
-    assert parent['duration_seconds'] == pytest.approx(1800, abs=2)
+    assert session['duration_seconds'] == pytest.approx(1800, abs=2)
 
 
 def test_sessions_pinned_only_filter(api_client, tmp_path):
     """?pinned_only=true restricts to starred sessions."""
-    import sqlite3
-    conn = sqlite3.connect(str(tmp_path / 'api.db'))
-    conn.execute("UPDATE sessions SET pinned=1 WHERE id='parent-A'")
-    conn.commit()
-    conn.close()
+    import database
+
+    with database.write_db() as db:
+        db.execute("UPDATE codex_sessions SET pinned=1 WHERE id='codex-s1'")
     r = api_client.get('/api/sessions?pinned_only=true')
     assert r.status_code == 200
     ids = [s['id'] for s in r.json()['sessions']]
-    assert 'parent-A' in ids
-    assert 'parent-B' not in ids
+    assert ids == ['codex-s1']
 
 
 def test_sessions_user_message_count_exposed(api_client):
@@ -1339,43 +1404,61 @@ def test_sessions_exposes_cache_creation_separately(api_client):
 
 def test_sessions_date_range_filter(api_client):
     """?date_from / ?date_to must narrow by updated_at."""
-    # parent-A is 2026-04-02, parent-B is 2026-04-03
-    r = api_client.get('/api/sessions?date_from=2026-04-03')
-    ids = [s['id'] for s in r.json()['sessions']]
-    assert 'parent-B' in ids
-    assert 'parent-A' not in ids
+    import database
 
-    r = api_client.get('/api/sessions?date_to=2026-04-02')
+    database.store_codex_message(
+        project_path='/tmp/codex-demo',
+        project_name='codex-demo',
+        session_id='codex-s3',
+        session_name='Older Codex session',
+        role='assistant',
+        content='older codex session',
+        content_preview='older codex session',
+        timestamp='2026-04-10T09:00:00Z',
+        message_uuid='codex-msg-date-filter',
+        model='gpt-5.4',
+    )
+
+    r = api_client.get('/api/sessions?date_from=2026-04-16')
     ids = [s['id'] for s in r.json()['sessions']]
-    assert 'parent-A' in ids
-    assert 'parent-B' not in ids
+    assert 'codex-s1' in ids
+    assert 'codex-s2' in ids
+    assert 'codex-s3' not in ids
+
+    r = api_client.get('/api/sessions?date_to=2026-04-10')
+    ids = [s['id'] for s in r.json()['sessions']]
+    assert 'codex-s3' in ids
+    assert 'codex-s1' not in ids
 
 
 def test_sessions_cost_range_filter(api_client):
     """?cost_min / ?cost_max must narrow by cost_micro."""
-    # parent-A = 0.06, parent-B = 0.03
-    r = api_client.get('/api/sessions?cost_min=0.05')
+    r = api_client.get('/api/sessions?cost_min=0.01')
     ids = [s['id'] for s in r.json()['sessions']]
-    assert 'parent-A' in ids
-    assert 'parent-B' not in ids
+    assert ids == []
+
+    r = api_client.get('/api/sessions?cost_max=0')
+    ids = [s['id'] for s in r.json()['sessions']]
+    assert 'codex-s1' in ids
+    assert 'codex-s2' in ids
 
 
 def test_session_tag_set_and_filter(api_client):
     """POST /api/sessions/{id}/tags must store, GET /api/sessions?tag= must filter."""
-    r = api_client.post('/api/sessions/parent-A/tags', json={'tags': 'wip,backend'})
+    r = api_client.post('/api/sessions/codex-s1/tags', json={'tags': 'wip,backend'})
     assert r.status_code == 200
     assert r.json()['tags'] == 'wip,backend'
     # List sessions filtering by tag
     r = api_client.get('/api/sessions?tag=wip')
     ids = [s['id'] for s in r.json()['sessions']]
-    assert 'parent-A' in ids
-    assert 'parent-B' not in ids
+    assert 'codex-s1' in ids
+    assert 'codex-s2' not in ids
 
 
 def test_tags_list_endpoint(api_client):
     """GET /api/tags must aggregate distinct tags with counts."""
-    api_client.post('/api/sessions/parent-A/tags', json={'tags': 'wip,backend'})
-    api_client.post('/api/sessions/parent-B/tags', json={'tags': 'wip,frontend'})
+    api_client.post('/api/sessions/codex-s1/tags', json={'tags': 'wip,backend'})
+    api_client.post('/api/sessions/codex-s2/tags', json={'tags': 'wip,frontend'})
     r = api_client.get('/api/tags')
     assert r.status_code == 200
     tags = {t['tag']: t['count'] for t in r.json()['tags']}
@@ -1386,10 +1469,10 @@ def test_tags_list_endpoint(api_client):
 
 def test_sessions_exposes_tags_column(api_client):
     """The sessions endpoint response must include the tags column."""
-    api_client.post('/api/sessions/parent-A/tags', json={'tags': 'hello'})
+    api_client.post('/api/sessions/codex-s1/tags', json={'tags': 'hello'})
     r = api_client.get('/api/sessions')
-    parent = next(s for s in r.json()['sessions'] if s['id'] == 'parent-A')
-    assert parent.get('tags') == 'hello'
+    session = next(s for s in r.json()['sessions'] if s['id'] == 'codex-s1')
+    assert session.get('tags') == 'hello'
 
 
 # ─── A1 / B3 / B6 — CSV columns + forecast + chain ───────────────────

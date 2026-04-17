@@ -31,7 +31,7 @@ _READ_CONN_TTL = 300              # seconds before recycling a cached read conne
 _READ_EPOCH = 0                   # incremented after writes so readers reopen snapshots
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 17               # bump on every schema change
+SCHEMA_VERSION = 18               # bump on every schema change
 _CODEX_FTS_TOKEN_RE = re.compile(r'[\w가-힣]+', re.UNICODE)
 
 
@@ -247,6 +247,8 @@ CREATE TABLE IF NOT EXISTS codex_sessions (
     cwd TEXT,
     source_node TEXT DEFAULT 'local',
     pinned INTEGER DEFAULT 0,
+    final_stop_reason TEXT DEFAULT '',
+    tags TEXT DEFAULT '',
     message_count INTEGER DEFAULT 0,
     user_message_count INTEGER DEFAULT 0
 );
@@ -1285,11 +1287,11 @@ def list_codex_sessions_table(
                 '' AS agent_type,
                 '' AS agent_description,
                 '' AS version,
-                '' AS final_stop_reason,
-                '' AS tags,
+                COALESCE(NULLIF(s.final_stop_reason, ''), '') AS final_stop_reason,
+                COALESCE(NULLIF(s.tags, ''), '') AS tags,
                 0 AS turn_duration_ms,
                 COALESCE(NULLIF(s.source_node, ''), 'local') AS source_node,
-                0 AS duration_seconds,
+                (julianday(COALESCE(NULLIF(s.updated_at,''), s.created_at)) - julianday(s.created_at)) * 86400.0 AS duration_seconds,
                 0 AS subagent_count,
                 0.0 AS subagent_cost,
                 COALESCE(NULLIF(s.session_name, ''), s.id) AS session_title
@@ -1338,11 +1340,11 @@ def get_codex_session_detail_row(session_id: str) -> dict | None:
                 '' AS agent_type,
                 '' AS agent_description,
                 '' AS version,
-                '' AS final_stop_reason,
-                '' AS tags,
+                COALESCE(NULLIF(s.final_stop_reason, ''), '') AS final_stop_reason,
+                COALESCE(NULLIF(s.tags, ''), '') AS tags,
                 0 AS turn_duration_ms,
                 COALESCE(NULLIF(s.source_node, ''), 'local') AS source_node,
-                0 AS duration_seconds,
+                (julianday(COALESCE(NULLIF(s.updated_at,''), s.created_at)) - julianday(s.created_at)) * 86400.0 AS duration_seconds,
                 0 AS subagent_count,
                 0.0 AS subagent_cost,
                 COALESCE(NULLIF(s.session_name, ''), s.id) AS session_title
@@ -1796,6 +1798,11 @@ def init_db() -> None:
                 )
                 conn.execute("UPDATE codex_sessions SET source_node = 'local' WHERE source_node IS NULL OR source_node = ''")
                 current = _commit_migration(conn, 17)
+            if current < 18:
+                logger.info("Migrating schema v%d → 18 (codex_sessions metadata)", current)
+                _ensure_column(conn, 'codex_sessions', 'final_stop_reason', "TEXT DEFAULT ''")
+                _ensure_column(conn, 'codex_sessions', 'tags', "TEXT DEFAULT ''")
+                current = _commit_migration(conn, 18)
             # One-time VACUUM to activate auto_vacuum=INCREMENTAL on legacy databases
             av = conn.execute('PRAGMA auto_vacuum').fetchone()[0]
             if av != 2:  # 2 = INCREMENTAL
