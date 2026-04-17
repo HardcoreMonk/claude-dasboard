@@ -1365,6 +1365,35 @@ def get_codex_session_messages_page(session_id: str, limit: int = 500, offset: i
     return {'messages': [dict(r) for r in rows], 'total': int(total or 0), 'limit': limit, 'offset': offset}
 
 
+def get_codex_message_position(session_id: str, message_id: int) -> dict | None:
+    with read_db() as conn:
+        current = conn.execute(
+            '''
+            SELECT id, timestamp
+            FROM codex_messages
+            WHERE id = ? AND session_id = ?
+            ''',
+            (message_id, session_id),
+        ).fetchone()
+        if not current:
+            return None
+
+        pos = conn.execute(
+            '''
+            SELECT COUNT(*)
+            FROM codex_messages
+            WHERE session_id = ?
+              AND (timestamp < ? OR (timestamp = ? AND id < ?))
+            ''',
+            (session_id, current['timestamp'], current['timestamp'], current['id']),
+        ).fetchone()[0]
+        total = conn.execute(
+            'SELECT COUNT(*) FROM codex_messages WHERE session_id = ?',
+            (session_id,),
+        ).fetchone()[0]
+    return {'position': int(pos or 0), 'total': int(total or 0), 'message_id': message_id}
+
+
 def get_codex_models(sort: str = 'messages', order: str = 'desc', page: int = 1, per_page: int = 500) -> dict:
     sort_map = {
         'model': 'model',

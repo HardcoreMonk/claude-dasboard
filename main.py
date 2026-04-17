@@ -47,6 +47,7 @@ from database import (
     get_codex_agents_summary,
     get_codex_ingest_status,
     get_codex_message_context,
+    get_codex_message_position,
     get_codex_models,
     get_codex_projects,
     get_codex_projects_top,
@@ -1053,6 +1054,10 @@ def api_message_position(session_id: str, message_id: int = Query(...)):
             f'SELECT COUNT(*) FROM messages WHERE session_id = ? {side_filter}',
             (session_id,),
         ).fetchone()[0]
+        if total == 0:
+            payload = get_codex_message_position(session_id, message_id)
+            if payload is not None:
+                return payload
     return {'position': pos, 'total': total, 'message_id': message_id}
 
 
@@ -1061,7 +1066,10 @@ def api_session_detail(session_id: str):
     with read_db() as db:
         row = db.execute('SELECT * FROM sessions WHERE id = ?', (session_id,)).fetchone()
     if not row:
-        return JSONResponse({'error': 'Not found'}, status_code=404)
+        codex_row = get_codex_session_detail_row(session_id)
+        if codex_row is None:
+            return JSONResponse({'error': 'Not found'}, status_code=404)
+        return codex_row
     return dict(row)
 
 
@@ -1098,6 +1106,8 @@ def api_session_messages(
             f'SELECT COUNT(*) FROM messages WHERE session_id = ? {side_filter}',
             (session_id,),
         ).fetchone()[0]
+        if total == 0:
+            return get_codex_session_messages_page(session_id, limit=limit, offset=offset)
     return {'messages': [dict(r) for r in rows], 'total': total, 'limit': limit, 'offset': offset}
 
 

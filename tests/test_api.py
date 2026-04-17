@@ -515,6 +515,43 @@ def test_codex_session_replay_returns_replay_payload(api_client):
     assert body['events'][3]['payload']['status'] == 'completed'
 
 
+def test_codex_session_detail_falls_back_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/sessions/codex-s1')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['id'] == 'codex-s1'
+    assert body['project_name'] == 'codex-demo'
+    assert body['session_title'] == 'Codex search session'
+    assert body['source_node'] == 'local'
+    assert body['message_count'] == 4
+
+
+def test_codex_session_messages_fall_back_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/sessions/codex-s1/messages?limit=10&offset=0')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['total'] == 4
+    assert [row['role'] for row in body['messages']] == ['user', 'assistant', 'tool', 'agent']
+    assert body['messages'][0]['content_preview'] == 'Need to rework the search structure'
+    assert body['messages'][1]['model'] == 'gpt-5.4'
+
+
+def test_codex_message_position_falls_back_without_legacy_rows(api_client):
+    _clear_legacy_runtime_rows()
+
+    r = api_client.get('/api/sessions/codex-s1/message-position?message_id=2')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body == {'position': 1, 'total': 4, 'message_id': 2}
+
+
 def test_codex_sessions_endpoint_returns_replay_launcher_rows(api_client):
     r = api_client.get('/api/codex/sessions')
     assert r.status_code == 200
