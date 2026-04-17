@@ -314,6 +314,13 @@ body.theme-light .bg-white\/20        { background: rgba(0,0,0,.12); }
 body.theme-light .border-white\/\[0\.04\] { border-color: rgba(0,0,0,.06); }
 body.theme-light .border-white\/\[0\.08\] { border-color: rgba(0,0,0,.11); }
 body.theme-light .border-white\/\[0\.10\] { border-color: rgba(0,0,0,.13); }
+body.theme-light .border-white\/10       { border-color: rgba(0,0,0,.10); }
+
+/* ── Input placeholder light mappings ── */
+body.theme-light .placeholder-white\/25::placeholder  { color: rgba(0,0,0,.35); }
+body.theme-light .placeholder\:text-white\/25::placeholder { color: rgba(0,0,0,.35); }
+body.theme-light .placeholder\:text-white\/20::placeholder { color: rgba(0,0,0,.30); }
+body.theme-light .placeholder\:text-white\/15::placeholder { color: rgba(0,0,0,.25); }
 
 /* ── Missing ring-white/* light mappings ── */
 body.theme-light .ring-white\/\[0\.12\] { --tw-ring-color: rgba(0,0,0,.15); }
