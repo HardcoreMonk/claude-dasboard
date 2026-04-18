@@ -292,6 +292,86 @@ body.theme-light {
   color: rgba(0,0,0,.82);
 }
 body.theme-light .bg-base { background: #f6f7f9; }
+body.theme-light .overview-region {
+  border-color: rgba(15,23,42,.08);
+  background:
+    radial-gradient(circle at top right, rgba(16,185,129,.10), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,.72));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.72),
+    0 20px 48px rgba(15,23,42,.06);
+}
+body.theme-light .overview-region-kicker,
+body.theme-light .overview-kpi-label,
+body.theme-light .overview-alert-card__label,
+body.theme-light .overview-flow-card__label,
+body.theme-light .overview-stat-chip__label,
+body.theme-light .overview-flow-band__label,
+body.theme-light .overview-project-meta,
+body.theme-light .overview-project-preview,
+body.theme-light .overview-entry-shell__sub,
+body.theme-light .overview-flow-source,
+body.theme-light .overview-alert-feed__detail {
+  color: rgba(15,23,42,.54);
+}
+body.theme-light .overview-region-title,
+body.theme-light .overview-kpi-value,
+body.theme-light .overview-alert-card__value,
+body.theme-light .overview-stat-chip__value,
+body.theme-light .overview-flow-band__value,
+body.theme-light .overview-project-name,
+body.theme-light .overview-project-cost,
+body.theme-light .overview-entry-shell__title,
+body.theme-light .overview-alert-feed__value {
+  color: rgba(15,23,42,.92);
+}
+body.theme-light .overview-region-chip {
+  color: rgba(15,23,42,.72);
+  background: rgba(15,23,42,.05);
+  border-color: rgba(15,23,42,.08);
+}
+body.theme-light .overview-kpi-card,
+body.theme-light .overview-alert-card,
+body.theme-light .overview-flow-card,
+body.theme-light .overview-stat-chip,
+body.theme-light .overview-entry-shell,
+body.theme-light .overview-alert-feed__row,
+body.theme-light .overview-project-row {
+  border-color: rgba(15,23,42,.08);
+  background: rgba(255,255,255,.72);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.84);
+}
+body.theme-light .overview-kpi-card--primary {
+  background:
+    radial-gradient(circle at top right, rgba(16,185,129,.14), transparent 28%),
+    rgba(255,255,255,.76);
+}
+body.theme-light .overview-meter,
+body.theme-light .overview-project-bar {
+  background: rgba(15,23,42,.08);
+}
+body.theme-light .overview-flow-path__pill,
+body.theme-light .overview-project-peek {
+  color: rgba(15,23,42,.72);
+  border-color: rgba(15,23,42,.08);
+  background: rgba(255,255,255,.78);
+}
+body.theme-light .overview-flow-path__pill--active,
+body.theme-light .overview-flow-path__pill:hover {
+  color: #047857;
+  border-color: rgba(16,185,129,.28);
+  background: rgba(16,185,129,.12);
+}
+body.theme-light #overviewAxisGrid,
+body.theme-light #overviewActionGrid,
+body.theme-light #overviewOpsSummary,
+body.theme-light #overviewProductivitySummary,
+body.theme-light #overviewReportingSummary,
+body.theme-light #overviewOpsPreview,
+body.theme-light #overviewProductivityPreview,
+body.theme-light #overviewReportingPreview {
+  border-color: rgba(15,23,42,.08);
+}
 body.theme-light nav.fixed {
   background: rgba(255,255,255,.82) !important;
   border-color: rgba(0,0,0,.08) !important;
