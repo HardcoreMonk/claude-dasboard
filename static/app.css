@@ -1470,6 +1470,35 @@ body.theme-light .search-context-item.current {
   background: rgba(16,185,129,.10);
   border-color: rgba(16,185,129,.32);
 }
+body.theme-light .explore-shell-head {
+  border-color: rgba(15,23,42,.08);
+  background:
+    radial-gradient(circle at top right, rgba(59,130,246,.08), transparent 28%),
+    rgba(255,255,255,.78);
+}
+body.theme-light .explore-shell-kicker,
+body.theme-light .explore-tab-summary {
+  color: rgba(15,23,42,.54);
+}
+body.theme-light .explore-shell-title {
+  color: rgba(15,23,42,.92);
+}
+body.theme-light .explore-shell-copy {
+  color: rgba(15,23,42,.64);
+}
+body.theme-light .explore-shell-action,
+body.theme-light .explore-tab {
+  color: rgba(15,23,42,.72);
+  background: rgba(255,255,255,.76);
+  border-color: rgba(15,23,42,.08);
+}
+body.theme-light .explore-shell-action:hover,
+body.theme-light .explore-tab:hover,
+body.theme-light .explore-tab.is-active {
+  color: #047857;
+  border-color: rgba(16,185,129,.28);
+  background: rgba(16,185,129,.12);
+}
 
 @media (max-width: 1024px) {
   .search-shell {
