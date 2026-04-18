@@ -1,10 +1,443 @@
 // Codex Dashboard — overview module.
-// Extracted from app.js. Contains:
-//   1. loadStats + renderStats (hero + secondary cost chips)
-//   2. loadPeriods + renderPeriod (day/week/month cards)
-//   3. loadForecast + burn-rate (hero 3 + secondary burn-out)
-//   4. loadTopProjects (TOP 5 list with drill-down)
-//   5. drill helpers (drillToSessionsToday/Week)
+// Owns the overview ops-console shell and the renderers that populate it.
+// Dependencies from app.js: state, safeFetch, reportError, reportSuccess,
+// markUpdated, set, esc, fmt$, fmtN, fmtTok, savePrefs, showView,
+// showProjectDetail, loadPlanUsage (for the cost view only).
+
+function overviewRegion(id) {
+  return document.getElementById(id);
+}
+
+function overviewSetHtml(id, html) {
+  const el = overviewRegion(id);
+  if (el) el.innerHTML = html;
+  return el;
+}
+
+function overviewPct(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  return `${value.toFixed(1)}%`;
+}
+
+function overviewDurationLabel(seconds) {
+  if (!seconds || seconds <= 0) return '만료';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}일 ${h}시간`;
+  if (h > 0) return `${h}시간 ${m}분`;
+  return `${m}분`;
+}
+
+function overviewResetLabel(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }) +
+    ' ' + d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function overviewRelativeTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const delta = Date.now() - d.getTime();
+  if (delta < 5_000) return '방금';
+  if (delta < 60_000) return `${Math.floor(delta / 1_000)}초 전`;
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}분 전`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}시간 전`;
+  return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+}
+
+function renderOverviewShell() {
+  overviewSetHtml('overviewKpiBody', `
+    <div class="overview-skeleton-grid">
+      <div class="overview-skeleton-card"></div>
+      <div class="overview-skeleton-card"></div>
+      <div class="overview-skeleton-card"></div>
+    </div>
+    <div class="overview-skeleton-strip">
+      <div class="overview-skeleton-pill"></div>
+      <div class="overview-skeleton-pill"></div>
+      <div class="overview-skeleton-pill"></div>
+      <div class="overview-skeleton-pill"></div>
+    </div>`);
+  overviewSetHtml('overviewAlertBody', `
+    <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+      <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+      <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+    </div>`);
+  overviewSetHtml('overviewFlowBody', `
+    <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+      <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+      <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+    </div>`);
+  overviewSetHtml('overviewEntryBody', `
+    <div class="overview-entry-shell">
+      <div class="overview-entry-shell__head">
+        <div>
+          <div class="overview-entry-shell__title">Top projects</div>
+          <div class="overview-entry-shell__sub">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</div>
+        </div>
+        <button data-action="openCommandPalette" class="overview-entry-shell__action">명령 팔레트</button>
+      </div>
+      <div id="topProjectsList" class="overview-project-list">
+        <div class="overview-project-empty dots">로딩 중</div>
+      </div>
+    </div>`);
+}
+
+const overviewState = {
+  stats: null,
+  periods: null,
+  forecast: null,
+  plan: null,
+  usage: null,
+  projects: [],
+};
+
+function overviewStatValue(path, fallback = null) {
+  const parts = path.split('.');
+  let cur = overviewState;
+  for (const part of parts) {
+    cur = cur?.[part];
+    if (cur == null) return fallback;
+  }
+  return cur;
+}
+
+function overviewPlanPct(block) {
+  return block ? overviewPct(block.percentage || 0) : '—';
+}
+
+function overviewStatusTone(pct) {
+  if (!Number.isFinite(pct)) return 'muted';
+  if (pct >= 90) return 'danger';
+  if (pct >= 75) return 'warning';
+  if (pct >= 50) return 'notice';
+  return 'ok';
+}
+
+function overviewToneClass(tone) {
+  if (tone === 'danger') return 'overview-tone overview-tone--danger';
+  if (tone === 'warning') return 'overview-tone overview-tone--warning';
+  if (tone === 'notice') return 'overview-tone overview-tone--notice';
+  return 'overview-tone overview-tone--ok';
+}
+
+function overviewStatRows() {
+  const stats = overviewState.stats || {};
+  const today = stats.today || {};
+  const all = stats.all_time || {};
+  const periods = overviewState.periods || {};
+  const forecast = overviewState.forecast || {};
+  const plan = overviewState.plan || {};
+  const usage = overviewState.usage || {};
+  const daily = plan.daily || {};
+  const weekly = plan.weekly || {};
+  const rows = [
+    { label: '오늘 비용', value: fmt$(today.cost_usd), detail: `${fmtN(today.sessions || 0)}세션 · ${fmtTok((today.input_tokens || 0) + (today.output_tokens || 0))}` },
+    { label: '일일 예산', value: overviewPlanPct(daily), detail: `${fmt$(daily.used_cost || 0)} / ${fmt$(daily.limit_cost || 0)} · 남은 ${overviewDurationLabel(daily.remaining_seconds)}` },
+    { label: '주간 예산', value: overviewPlanPct(weekly), detail: `${fmt$(weekly.used_cost || 0)} / ${fmt$(weekly.limit_cost || 0)} · 재설정 ${overviewResetLabel(weekly.reset_at)}` },
+    { label: '월말 예측', value: fmt$(forecast.projected_eom_cost), detail: `14일 평균 ${fmt$(forecast.avg_cost_per_day || 0)} · ${forecast.days_left_in_month || 0}일 남음` },
+    { label: '전체 비용', value: fmt$(all.cost_usd), detail: `${fmtN(all.total_sessions || 0)}세션 · ${fmtN(all.messages || 0)}메시지` },
+    { label: '캐시 효율', value: `${((all.input_tokens || 0) + (all.cache_read_tokens || 0)) > 0 ? (((all.cache_read_tokens || 0) / ((all.input_tokens || 0) + (all.cache_read_tokens || 0))) * 100).toFixed(1) : '0.0'}%`, detail: `${fmtTok(all.cache_read_tokens || 0)} 읽기 · ${fmtTok(all.cache_creation_tokens || 0)} 생성` },
+  ];
+  if (usage.sessions != null) {
+    rows.push({ label: '사용량', value: `${fmtN(usage.sessions || 0)}세션`, detail: `${fmtN(usage.messages || 0)}메시지 · ${overviewRelativeTime(usage.latest_activity_at)}` });
+  } else if (periods.day) {
+    rows.push({ label: '오늘 요약', value: fmt$(periods.day.cost), detail: `${fmtN(periods.day.messages || 0)}메시지 · 캐시 ${fmtTok(periods.day.cache_read_tokens || 0)}` });
+  }
+  return rows.slice(0, 6);
+}
+
+function renderOverviewKpi() {
+  const stats = overviewState.stats || {};
+  const today = stats.today || {};
+  const all = stats.all_time || {};
+  const forecast = overviewState.forecast || {};
+  const plan = overviewState.plan || {};
+  const daily = plan.daily || {};
+  const weekly = plan.weekly || {};
+  const usage = overviewState.usage || {};
+  const rows = overviewStatRows();
+  const topSession = (usage.top_sessions || [])[0];
+  const severity = overviewStatusTone(daily.percentage || 0);
+  const forecastSeverity = overviewStatusTone(
+    forecast.projected_eom_cost && daily.limit_cost ? ((forecast.projected_eom_cost / daily.limit_cost) * 100) : 0,
+  );
+  const burnoutLabel = forecast.daily_budget_burnout_seconds != null
+    ? `${overviewDurationLabel(forecast.daily_budget_burnout_seconds)} 후`
+    : '예산 미설정';
+  overviewSetHtml('overviewKpiBody', `
+    <div class="overview-kpi-grid">
+      <article class="overview-kpi-card overview-kpi-card--primary">
+        <div class="overview-kpi-head">
+          <div>
+            <div class="overview-kpi-label">Today</div>
+            <div class="overview-kpi-value">${fmt$(today.cost_usd)}</div>
+          </div>
+          <span class="overview-chip">live</span>
+        </div>
+        <div class="overview-kpi-meta">${fmtN(today.sessions || 0)}세션 · ${fmtTok((today.input_tokens || 0) + (today.output_tokens || 0))}</div>
+        <div class="overview-kpi-sub">${fmtN(today.messages || 0)}메시지 · ${overviewRelativeTime(usage.latest_activity_at || today.last_activity_at)}</div>
+      </article>
+
+      <article class="overview-kpi-card ${overviewToneClass(severity)}">
+        <div class="overview-kpi-head">
+          <div>
+            <div class="overview-kpi-label">Daily budget</div>
+            <div class="overview-kpi-value">${overviewPlanPct(daily)}</div>
+          </div>
+          <span class="overview-chip overview-chip--amber">budget</span>
+        </div>
+        <div class="overview-meter">
+          <div class="overview-meter__fill" style="width:${Math.min(daily.percentage || 0, 100)}%;"></div>
+        </div>
+        <div class="overview-kpi-meta">${fmt$(daily.used_cost || 0)} / ${fmt$(daily.limit_cost || 0)}</div>
+        <div class="overview-kpi-sub">남은 ${overviewDurationLabel(daily.remaining_seconds)} · 재설정 ${overviewResetLabel(daily.reset_at)}</div>
+      </article>
+
+      <article class="overview-kpi-card ${overviewToneClass(forecastSeverity)}">
+        <div class="overview-kpi-head">
+          <div>
+            <div class="overview-kpi-label">Forecast</div>
+            <div class="overview-kpi-value">${fmt$(forecast.projected_eom_cost)}</div>
+          </div>
+          <span class="overview-chip overview-chip--cyan">14d</span>
+        </div>
+        <div class="overview-kpi-meta">일평균 ${fmt$(forecast.avg_cost_per_day || 0)}</div>
+        <div class="overview-kpi-sub">남은 ${forecast.days_left_in_month || 0}일 · burn-out ${burnoutLabel}</div>
+      </article>
+    </div>
+    <div class="overview-kpi-strip">
+      ${rows.map((row) => `
+        <div class="overview-stat-chip">
+          <div class="overview-stat-chip__label">${esc(row.label)}</div>
+          <div class="overview-stat-chip__value">${row.value}</div>
+          <div class="overview-stat-chip__detail">${esc(row.detail)}</div>
+        </div>
+      `).join('')}
+      <div class="overview-stat-chip overview-stat-chip--wide">
+        <div class="overview-stat-chip__label">Top session</div>
+        <div class="overview-stat-chip__value">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
+        <div class="overview-stat-chip__detail">${esc(topSession ? `${topSession.project_name || '—'} · ${fmtN(topSession.message_count || 0)} messages` : 'usage summary unavailable')}</div>
+      </div>
+    </div>`);
+}
+
+function renderOverviewAlerts() {
+  const plan = overviewState.plan || {};
+  const usage = overviewState.usage || {};
+  const forecast = overviewState.forecast || {};
+  const daily = plan.daily || {};
+  const weekly = plan.weekly || {};
+  const byRole = usage.by_role || {};
+  const topSession = (usage.top_sessions || [])[0];
+  const dailyTone = overviewStatusTone(daily.percentage || 0);
+  const weeklyTone = overviewStatusTone(weekly.percentage || 0);
+  const forecastTone = overviewStatusTone(
+    forecast.projected_eom_cost && weekly.limit_cost ? ((forecast.projected_eom_cost / weekly.limit_cost) * 100) : 0,
+  );
+  const alertRows = [
+    { label: 'Daily spend', tone: dailyTone, value: overviewPlanPct(daily), detail: `${fmt$(daily.used_cost || 0)} / ${fmt$(daily.limit_cost || 0)} · 남은 ${overviewDurationLabel(daily.remaining_seconds)}` },
+    { label: 'Weekly spend', tone: weeklyTone, value: overviewPlanPct(weekly), detail: `${fmt$(weekly.used_cost || 0)} / ${fmt$(weekly.limit_cost || 0)} · 재설정 ${overviewResetLabel(weekly.reset_at)}` },
+    { label: 'Forecast risk', tone: forecastTone, value: fmt$(forecast.projected_eom_cost), detail: `${forecast.days_left_in_month || 0}일 남음 · ${fmt$(forecast.avg_cost_per_day || 0)}/day` },
+  ];
+  overviewSetHtml('overviewAlertBody', `
+    <div class="overview-alert-grid">
+      <article class="overview-alert-card ${overviewToneClass(dailyTone)}">
+        <div class="overview-alert-card__head">
+          <span class="overview-alert-card__label">Budget watch</span>
+          <span class="overview-chip overview-chip--amber">${overviewPlanPct(daily)}</span>
+        </div>
+        <div class="overview-alert-card__value">${fmt$(daily.used_cost || 0)} / ${fmt$(daily.limit_cost || 0)}</div>
+        <div class="overview-alert-card__detail">남은 ${overviewDurationLabel(daily.remaining_seconds)} · ${fmtN(daily.messages || 0)}건</div>
+      </article>
+
+      <article class="overview-alert-card ${overviewToneClass(weeklyTone)}">
+        <div class="overview-alert-card__head">
+          <span class="overview-alert-card__label">Weekly watch</span>
+          <span class="overview-chip overview-chip--cyan">${overviewPlanPct(weekly)}</span>
+        </div>
+        <div class="overview-alert-card__value">${fmt$(weekly.used_cost || 0)} / ${fmt$(weekly.limit_cost || 0)}</div>
+        <div class="overview-alert-card__detail">재설정 ${overviewResetLabel(weekly.reset_at)} · ${fmtN(weekly.messages || 0)}건</div>
+      </article>
+    </div>
+    <div class="overview-alert-feed">
+      ${alertRows.map((row) => `
+        <div class="overview-alert-feed__row ${overviewToneClass(row.tone)}">
+          <div class="overview-alert-feed__label">${esc(row.label)}</div>
+          <div class="overview-alert-feed__value">${row.value}</div>
+          <div class="overview-alert-feed__detail">${esc(row.detail)}</div>
+        </div>
+      `).join('')}
+      <div class="overview-alert-feed__row">
+        <div class="overview-alert-feed__label">Role mix</div>
+        <div class="overview-alert-feed__value">${fmtN(usage.sessions || 0)}세션</div>
+        <div class="overview-alert-feed__detail">user ${fmtN(byRole.user || 0)} · assistant ${fmtN(byRole.assistant || 0)} · tool ${fmtN(byRole.tool || 0)} · agent ${fmtN(byRole.agent || 0)}</div>
+      </div>
+      <div class="overview-alert-feed__row">
+        <div class="overview-alert-feed__label">Latest active</div>
+        <div class="overview-alert-feed__value">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
+        <div class="overview-alert-feed__detail">${esc(topSession ? `${topSession.project_name || '—'} · ${fmtN(topSession.message_count || 0)} messages` : 'no recent sessions')}</div>
+      </div>
+    </div>`);
+}
+
+function renderOverviewFlow() {
+  const stats = overviewState.stats || {};
+  const forecast = overviewState.forecast || {};
+  const plan = overviewState.plan || {};
+  const usage = overviewState.usage || {};
+  const lastUpdated = state.lastUpdated || {};
+  overviewSetHtml('overviewFlowBody', `
+    <div class="overview-flow-grid">
+      <article class="overview-flow-card">
+        <div class="overview-flow-card__head">
+          <span class="overview-flow-card__label">Navigation path</span>
+          <span class="overview-chip overview-chip--emerald">default</span>
+        </div>
+        <div class="overview-flow-path">
+          <button data-action="showView" data-arg="overview" class="overview-flow-path__pill overview-flow-path__pill--active">overview</button>
+          <span>→</span>
+          <button data-action="showView" data-arg="explore" class="overview-flow-path__pill">explore</button>
+          <span>→</span>
+          <button data-action="showView" data-arg="analysis" class="overview-flow-path__pill">analysis</button>
+          <span>→</span>
+          <button data-action="showView" data-arg="admin" class="overview-flow-path__pill">admin</button>
+        </div>
+        <div class="overview-flow-card__detail">개요가 기본 진입점이고 하위 화면은 같은 데이터 소스 위에서 분화됩니다.</div>
+      </article>
+
+      <article class="overview-flow-card">
+        <div class="overview-flow-card__head">
+          <span class="overview-flow-card__label">Refresh sources</span>
+          <span class="overview-chip overview-chip--cyan">${overviewRelativeTime(new Date(lastUpdated.stats || Date.now()).toISOString())}</span>
+        </div>
+        <div class="overview-flow-source-list">
+          <div class="overview-flow-source">stats <span>${overviewRelativeTime(lastUpdated.stats ? new Date(lastUpdated.stats).toISOString() : null)}</span></div>
+          <div class="overview-flow-source">periods <span>${overviewRelativeTime(lastUpdated.periods ? new Date(lastUpdated.periods).toISOString() : null)}</span></div>
+          <div class="overview-flow-source">forecast <span>${overviewRelativeTime(lastUpdated.forecast ? new Date(lastUpdated.forecast).toISOString() : null)}</span></div>
+          <div class="overview-flow-source">projects <span>${overviewRelativeTime(lastUpdated.topProjects ? new Date(lastUpdated.topProjects).toISOString() : null)}</span></div>
+        </div>
+        <div class="overview-flow-card__detail">API: /api/codex/stats, /api/codex/usage/periods, /api/codex/forecast, /api/codex/projects/top</div>
+      </article>
+    </div>
+    <div class="overview-flow-band">
+      <div class="overview-flow-band__cell">
+        <span class="overview-flow-band__label">Forecast</span>
+        <span class="overview-flow-band__value">${fmt$(forecast.projected_eom_cost || 0)}</span>
+      </div>
+      <div class="overview-flow-band__cell">
+        <span class="overview-flow-band__label">Daily</span>
+        <span class="overview-flow-band__value">${fmt$(plan.daily?.used_cost || 0)} / ${fmt$(plan.daily?.limit_cost || 0)}</span>
+      </div>
+      <div class="overview-flow-band__cell">
+        <span class="overview-flow-band__label">Usage</span>
+        <span class="overview-flow-band__value">${fmtN(usage.sessions || 0)}세션</span>
+      </div>
+      <div class="overview-flow-band__cell">
+        <span class="overview-flow-band__label">Today</span>
+        <span class="overview-flow-band__value">${fmt$(stats.today?.cost_usd || 0)}</span>
+      </div>
+    </div>`);
+}
+
+function renderTopProjects(projects) {
+  const c = document.getElementById('topProjectsList');
+  if (!c) return;
+  if (!projects.length) {
+    c.innerHTML = '<div class="overview-project-empty">데이터 없음</div>';
+    return;
+  }
+  const mx = Math.max(...projects.map(p => p.total_cost || 0), 1);
+  c.textContent = '';
+  projects.forEach((p, i) => {
+    const row = document.createElement('article');
+    const pct = ((p.total_cost || 0) / mx * 100).toFixed(1);
+    const tone = i === 0 ? 'overview-project-row--first' : i === 1 ? 'overview-project-row--second' : i === 2 ? 'overview-project-row--third' : '';
+    row.className = `overview-project-row ${tone}`;
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.title = '클릭하여 프로젝트 상세 보기';
+    row.dataset.projectName = p.project_name || '';
+    row.dataset.projectPath = p.project_path || '';
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        row.click();
+      }
+    });
+    const lm = p.last_message;
+    const cleaned = lm ? (lm.summary_line || lm.preview || '') : '';
+    const idleKey = (p.project_name || '') + '|' + (p.project_path || '');
+    const idleEntry = (state.idleProjects && state.idleProjects[idleKey]) || null;
+    const idleBadge = idleEntry ? `<span class="overview-project-badge">${esc(idleEntry.preview || idleEntry.reason || 'idle')}</span>` : '';
+    const liveBadge = p.is_active ? '<span class="overview-project-live">LIVE</span>' : '';
+    row.innerHTML = `
+      <div class="overview-project-rank">#${i + 1}</div>
+      <div class="overview-project-main">
+        <div class="overview-project-main__head">
+          <div class="overview-project-name">${idleBadge}${esc(p.project_name || '—')}${liveBadge}</div>
+          <div class="overview-project-cost">${fmt$(p.total_cost)}</div>
+        </div>
+        <div class="overview-project-bar"><span style="width:${pct}%;"></span></div>
+        <div class="overview-project-meta">${fmtTok(p.total_tokens || 0)} · ${fmtN(p.session_count || 0)}세션 · ${overviewRelativeTime(p.last_activity_at)}</div>
+        ${cleaned ? `<div class="overview-project-preview" title="${esc(lm?.preview || '')}">${esc(cleaned)}</div>` : '<div class="overview-project-preview overview-project-preview--empty">assistant 메시지 없음</div>'}
+      </div>
+      <button data-peek-btn type="button" class="overview-project-peek" title="마지막 대화 미리보기" aria-label="마지막 대화 미리보기">미리보기</button>
+    `;
+    row.addEventListener('click', (ev) => {
+      if (ev.target.closest('[data-peek-btn]')) return;
+      showProjectDetail(p.project_name, p.project_path);
+    });
+    const peekBtn = row.querySelector('[data-peek-btn]');
+    if (peekBtn) {
+      peekBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        topPreviewOpen(p);
+      });
+    }
+    c.appendChild(row);
+  });
+  if (typeof topPreviewMaybeRefresh === 'function') topPreviewMaybeRefresh(projects);
+}
+
+function renderOverviewConsole() {
+  renderOverviewKpi();
+  renderOverviewAlerts();
+  renderOverviewFlow();
+}
+
+function loadOverviewDashboard() {
+  Object.assign(overviewState, {
+    stats: null,
+    periods: null,
+    forecast: null,
+    plan: null,
+    usage: null,
+    projects: [],
+  });
+  renderOverviewShell();
+  renderOverviewConsole();
+  void loadStats();
+  void loadPeriods();
+  void loadForecast();
+  void loadOverviewPlanUsage();
+  void loadTopProjects();
+}
+
+async function loadOverviewPlanUsage() {
+  try {
+    const resp = await safeFetch('/api/codex/plan/usage');
+    overviewState.plan = resp;
+    renderOverviewConsole();
+  } catch (e) {
+    reportError('loadOverviewPlanUsage', e);
+  }
+}
+
 //
 // Loaded as a regular script after app.js. All functions become window.*
 // globals. Depends on app.js globals: state, safeFetch, reportError,
@@ -16,9 +449,11 @@ async function loadStats() {
   try {
     const d = await safeFetch('/api/codex/stats');
     state.stats = d;
+    overviewState.stats = d;
     renderStats(d);
     loadCodexUsageSummary();
     markUpdated('stats');
+    renderOverviewConsole();
     reportSuccess('loadStats');
   } catch (e) { reportError('loadStats', e); }
 }
@@ -40,26 +475,10 @@ function renderStats(data) {
   set('hdrTotal', `전체: ${fmt$(a.cost_usd)}`);
 }
 
-function ensureCodexUsagePanel() {
-  const view = document.getElementById('view-overview');
-  if (!view) return null;
-  let panel = document.getElementById('codexUsagePanel');
-  if (panel) return panel;
-  panel = document.createElement('div');
-  panel.id = 'codexUsagePanel';
-  panel.className = 'bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in mt-3';
-  panel.innerHTML = `
-    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
-      <div class="text-xs font-bold text-white/40">CODEX 사용량</div>
-      <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
-    </div>`;
-  view.appendChild(panel);
-  return panel;
-}
-
 async function loadCodexUsageSummary() {
   try {
     const summary = await safeFetch('/api/usage/summary');
+    overviewState.usage = summary;
     const byRole = summary.by_role || {};
     const codexLine = `Codex ${fmtN(summary.sessions || 0)}세션 · ${fmtN(summary.messages || 0)}메시지`;
     set('statAllMessages', `${fmtN((state.stats?.all_time?.messages) || 0)} 메시지 · ${codexLine}`);
@@ -68,38 +487,7 @@ async function loadCodexUsageSummary() {
     if (dayDetail) {
       dayDetail.title = `user ${fmtN(byRole.user || 0)} · assistant ${fmtN(byRole.assistant || 0)} · tool ${fmtN(byRole.tool || 0)} · agent ${fmtN(byRole.agent || 0)}`;
     }
-    const panel = ensureCodexUsagePanel();
-    if (panel) {
-      panel.firstElementChild.innerHTML = `
-        <div class="text-xs font-bold text-white/40">CODEX 사용량</div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-          <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-3">
-            <div class="text-[10px] uppercase tracking-widest text-white/35">세션</div>
-            <div class="mt-2 text-xl font-bold text-white/85 tabular-nums">${fmtN(summary.sessions || 0)}</div>
-            <div class="text-[10px] text-white/35 mt-1">${fmtN(summary.messages || 0)} messages</div>
-          </div>
-          <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-3">
-            <div class="text-[10px] uppercase tracking-widest text-white/35">역할 분포</div>
-            <div class="mt-2 text-[11px] text-white/60 leading-relaxed">user ${fmtN(byRole.user || 0)} · assistant ${fmtN(byRole.assistant || 0)} · tool ${fmtN(byRole.tool || 0)} · agent ${fmtN(byRole.agent || 0)}</div>
-          </div>
-          <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-3">
-            <div class="text-[10px] uppercase tracking-widest text-white/35">최근 활동</div>
-            <div class="mt-2 text-[11px] text-white/60">${esc(summary.latest_activity_at || '—')}</div>
-          </div>
-        </div>
-        <div class="mt-3 grid gap-2">
-          ${(summary.top_sessions || []).slice(0, 4).map((row) => `
-            <div class="rounded-xl border border-white/[0.05] bg-black/20 px-3 py-2 flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <div class="text-[11px] font-semibold text-white/75 truncate">${esc(row.session_title || row.session_id)}</div>
-                <div class="text-[10px] text-white/35 mt-1">${esc(row.project_name || '—')} · ${fmtN(row.message_count || 0)} messages</div>
-              </div>
-              <button class="shrink-0 px-3 py-1 rounded-full bg-purple-500/15 text-purple-200 border border-purple-500/25 text-[10px] font-bold"
-                      data-action="openSessionReplay" data-arg0="${esc(row.session_id)}" data-arg1="${esc(row.session_title || row.session_id)}">Replay</button>
-            </div>
-          `).join('')}
-        </div>`;
-    }
+    renderOverviewConsole();
   } catch (e) {
     reportError('loadCodexUsageSummary', e);
   }
@@ -109,9 +497,11 @@ async function loadCodexUsageSummary() {
 async function loadPeriods() {
   try {
     const d = await safeFetch('/api/codex/usage/periods');
+    overviewState.periods = d;
     renderPeriod('Day', d.day);
     renderPeriod('Week', d.week);
     renderPeriod('Month', d.month);
+    renderOverviewConsole();
   } catch (e) { reportError('loadPeriods', e); }
 }
 function renderPeriod(key, p) {
@@ -136,6 +526,7 @@ function renderPeriod(key, p) {
 async function loadForecast() {
   try {
     const d = await safeFetch('/api/codex/forecast?days=14');
+    overviewState.forecast = d;
     // IMPORTANT: use the global set() from app.js (which also removes the
     // .skeleton class on write). A local setEl helper that only touches
     // textContent leaves the shimmer animation running OVER the real text —
@@ -183,6 +574,7 @@ async function loadForecast() {
       d.daily_budget_burnout_seconds, d.daily_limit, d.daily_used);
     setBurnout('forecastBurnoutWeekly', '주간',
       d.weekly_budget_burnout_seconds, d.weekly_limit, d.weekly_used);
+    renderOverviewConsole();
   } catch (e) {
     reportError('loadForecast', e);
   }
@@ -230,71 +622,10 @@ async function loadTopProjects() {
   try {
     const data = await safeFetch('/api/codex/projects/top?limit=5&with_last_message=true');
     const projects = data.projects || [];
+    overviewState.projects = projects;
     const c = document.getElementById('topProjectsList');
-    if (!projects.length) {
-      c.innerHTML = '<div class="text-center text-white/10 text-xs py-8">데이터 없음</div>';
-      return;
-    }
-    const mx = Math.max(...projects.map(p => p.total_cost || 0), 1);
-    const cols = ['#34d399', '#60a5fa', '#fbbf24', '#22d3ee', '#a78bfa', '#fb7185', '#34d399', '#60a5fa', '#fbbf24', '#22d3ee'];
-    c.textContent = '';
-    projects.forEach((p, i) => {
-      const pct = ((p.total_cost || 0) / mx * 100).toFixed(1);
-      const rc = i < 3 ? ['text-amber-400', 'text-white/40', 'text-orange-400'][i] : 'text-white/15';
-      const lm = p.last_message;
-      const cleaned = lm ? (lm.summary_line || lm.preview || '') : '';
-      const previewLine = cleaned
-        ? `<div class="text-[11px] text-white/35 mt-2 leading-relaxed whitespace-normal" style="display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden" title="${esc(lm.preview || '')}"><iconify-icon icon="solar:chat-round-line-linear" width="10" class="inline text-white/25 mr-0.5 align-[-1px]"></iconify-icon>${esc(cleaned)}</div>`
-        : '';
-      const liveBadge = p.is_active
-        ? `<span class="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300/90 ring-1 ring-emerald-500/40 text-[9px] font-bold uppercase tracking-wider align-middle" title="최근 30분 이내 활동"><span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>LIVE</span>`
-        : '';
-      // Status badge — shown to the LEFT of the project name. Different
-      // styles for different states: idle (amber), active tool (cyan),
-      // active subagent (blue).
-      const idleKey = (p.project_name || '') + '|' + (p.project_path || '');
-      const idleEntry = (state.idleProjects && state.idleProjects[idleKey]) || null;
-      let idleBadge = '';
-      if (idleEntry) {
-        const STATUS_BADGE = {
-          'end_turn':        { label: '입력 대기',       icon: 'solar:hourglass-line-linear',    bg: 'bg-amber-500/15', text: 'text-amber-300/95', ring: 'ring-amber-500/40',   pulse: true  },
-          'tool_use':        { label: '권한 승인 대기',  icon: 'solar:shield-check-linear',      bg: 'bg-amber-500/15', text: 'text-amber-300/95', ring: 'ring-amber-500/40',   pulse: true  },
-          'active_subagent': { label: '에이전트 작업 중', icon: 'solar:cpu-bolt-linear',          bg: 'bg-blue-500/15',  text: 'text-blue-300/90',  ring: 'ring-blue-500/40',    pulse: true  },
-          'active_tool':     { label: '도구 실행 중',    icon: 'solar:settings-minimalistic-linear', bg: 'bg-cyan-500/15',  text: 'text-cyan-300/90',  ring: 'ring-cyan-500/30',    pulse: false },
-        };
-        const cfg = STATUS_BADGE[idleEntry.reason] || STATUS_BADGE['end_turn'];
-        const title = esc(idleEntry.preview || cfg.label);
-        idleBadge = `<span class="mr-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full ${cfg.bg} ${cfg.text} ring-1 ${cfg.ring} text-[9px] font-bold uppercase tracking-wider align-middle${cfg.pulse ? ' animate-pulse' : ''}" title="${title}"><iconify-icon icon="${cfg.icon}" width="10" class="inline"></iconify-icon>${cfg.label}</span>`;
-      }
-      const row = document.createElement('div');
-      row.className = 'grid grid-cols-[28px_1fr_auto_auto_auto] items-start gap-2 py-4 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-2 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
-      row.title = '클릭하여 프로젝트 상세 보기';
-      row.setAttribute('tabindex', '0');
-      row.setAttribute('role', 'button');
-      row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
-      // NOTE: innerHTML here is safe — all dynamic values pass through esc() or
-// are numeric (pct, i, cols[i], fmt$, fmtTok). No raw user input.
-row.innerHTML = `<span class="text-sm font-extrabold text-center pt-0.5 ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-sm font-semibold text-white/60 truncate">${idleBadge}${esc(p.project_name||'—')}${liveBadge}</div><div class="h-1.5 bg-white/5 rounded-full mt-2 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div>${previewLine}</div><button data-peek-btn type="button" title="마지막 대화 미리보기" aria-label="마지막 대화 미리보기" class="flex items-center gap-1 self-start mt-0.5 px-2 py-1 rounded-full bg-accent/10 hover:bg-accent/25 text-accent/80 hover:text-accent ring-1 ring-accent/30 hover:ring-accent/60 text-[10px] font-bold spring"><iconify-icon icon="solar:eye-linear" width="13" style="pointer-events:none"></iconify-icon><span style="pointer-events:none">미리보기</span></button><span class="text-sm font-bold text-amber-400/70 whitespace-nowrap pt-0.5">${fmt$(p.total_cost)}</span><span class="text-[11px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5">${fmtTok(p.total_tokens||0)}</span>`;
-      row.dataset.projectName = p.project_name || '';
-      row.dataset.projectPath = p.project_path || '';
-      // 행 본체: 기존 프로젝트 상세 모달로 드릴
-      row.addEventListener('click', (ev) => {
-        if (ev.target.closest('[data-peek-btn]')) return;  // peek 버튼은 패스
-        showProjectDetail(p.project_name, p.project_path);
-      });
-      // 눈 아이콘 버튼: 우측 drawer 슬라이드 in
-      const peekBtn = row.querySelector('[data-peek-btn]');
-      if (peekBtn) {
-        peekBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          topPreviewOpen(p);
-        });
-      }
-      c.appendChild(row);
-    });
-    // Real-time refresh: if the preview panel is currently showing one of
-    // these projects, rebuild it with the fresh last_message.
-    if (typeof topPreviewMaybeRefresh === 'function') topPreviewMaybeRefresh(projects);
+    renderTopProjects(projects);
+    renderOverviewConsole();
   } catch (e) { reportError('loadTopProjects', e); }
 }
 

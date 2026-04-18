@@ -104,7 +104,7 @@ def e2e_client(tmp_path, monkeypatch):
 # break the UI silently; this test catches that.
 REQUIRED_IDS = [
     # Shell groups
-    'overviewHeroGrid', 'overviewAlertGrid', 'overviewFlowGrid', 'overviewEntryGrid',
+    'overviewKpiGrid', 'overviewAlertGrid', 'overviewFlowGrid', 'overviewEntryGrid',
     # Explore search surface
     'global-search-input', 'search-results-panel', 'search-context-panel',
     # Overview hero (Hero cards)
@@ -262,6 +262,24 @@ def test_overview_is_default_shell_view(e2e_client):
     assert 'hidden' in explore_view.group(1).split()
     assert 'hidden' in analysis_view.group(1).split()
     assert 'hidden' in admin_view.group(1).split()
+    assert 'id="overviewKpiGrid"' in html
+    assert 'id="overviewAlertGrid"' in html
+    assert 'id="overviewFlowGrid"' in html
+    assert 'id="overviewEntryGrid"' in html
+
+
+def test_overview_shell_contains_ops_console_regions(e2e_client):
+    html = e2e_client.get('/').text
+
+    region_pairs = [
+        ('overviewKpiGrid', 'overviewKpiTitle'),
+        ('overviewAlertGrid', 'overviewAlertTitle'),
+        ('overviewFlowGrid', 'overviewFlowTitle'),
+        ('overviewEntryGrid', 'overviewEntryTitle'),
+    ]
+    for region_id, title_id in region_pairs:
+        assert f'id="{region_id}"' in html
+        assert f'aria-labelledby="{title_id}"' in html
 
 
 def test_grouped_navigation_routing_is_backed_by_app_js():
