@@ -2791,40 +2791,19 @@ def api_project_delete(
     Use ``?path=`` to target a specific project_path when two projects share
     a final-segment name (C2 fix).
     """
-    where, _where_join, params = _project_where(project_name, path)
     if not confirm:
-        with read_db() as db:
-            row = db.execute(f'''
-                SELECT COUNT(*) AS sessions,
-                       COALESCE(SUM(message_count),0) AS messages,
-                       COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost
-                FROM sessions WHERE {where}
-            ''', params).fetchone()
-        if row and row['sessions'] > 0:
-            return {'preview': True, 'project_name': project_name, 'path': path,
-                    'sessions': row['sessions'], 'messages': row['messages'],
-                    'cost': row['cost']}
         payload = _codex_project_delete_preview(project_name, path)
-        if payload is not None:
-            return payload
-        return {'preview': True, 'project_name': project_name, 'path': path,
-                'sessions': 0, 'messages': 0, 'cost': 0.0}
-    with write_db() as db:
-        sids = [r['id'] for r in db.execute(
-            f'SELECT id FROM sessions WHERE {where}', params).fetchall()]
-        msg_del = sess_del = 0
-        if sids:
-            ph = ','.join(['?'] * len(sids))
-            msg_del = db.execute(
-                f'DELETE FROM messages WHERE session_id IN ({ph})', sids).rowcount
-            sess_del = db.execute(
-                f'DELETE FROM sessions WHERE id IN ({ph})', sids).rowcount
-    if sess_del == 0 and msg_del == 0:
-        codex_deleted = _codex_project_delete(project_name, path)
-        sess_del = codex_deleted['deleted_sessions']
-        msg_del = codex_deleted['deleted_messages']
-    elif sess_del > 0 or msg_del > 0:
-        close_thread_connections()
+        return payload or {
+            'preview': True,
+            'project_name': project_name,
+            'path': path,
+            'sessions': 0,
+            'messages': 0,
+            'cost': 0.0,
+        }
+    codex_deleted = _codex_project_delete(project_name, path)
+    sess_del = codex_deleted['deleted_sessions']
+    msg_del = codex_deleted['deleted_messages']
     logger.info("Deleted project '%s' (path=%s): %d sessions, %d messages",
                 project_name, path, sess_del, msg_del)
     return {'deleted_sessions': sess_del, 'deleted_messages': msg_del}
@@ -2833,65 +2812,10 @@ def api_project_delete(
 @app.get("/api/projects/{project_name}/stats")
 def api_project_stats(project_name: str, path: Optional[str] = Query(None)):
     """Detailed stats for a single project (use ?path= to disambiguate)."""
-    where, where_join, params = _project_where(project_name, path)
-    with read_db() as db:
-        summary = db.execute(f'''
-            SELECT COUNT(*) AS sessions,
-                   COALESCE(SUM(message_count),0) AS messages,
-                   COALESCE(SUM(user_message_count),0) AS user_messages,
-                   COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost,
-                   COALESCE(SUM(total_input_tokens),0) AS input_tokens,
-                   COALESCE(SUM(total_output_tokens),0) AS output_tokens,
-                   COALESCE(SUM(total_cache_read_tokens),0) AS cache_read_tokens,
-                   MIN(created_at) AS first_active,
-                   MAX(updated_at) AS last_active,
-                   MIN(project_path) AS canonical_path
-            FROM sessions WHERE {where}
-        ''', params).fetchone()
-        if not summary or summary['sessions'] == 0:
-            payload = _codex_project_stats_payload(project_name, path)
-            if payload is None:
-                return JSONResponse({'error': 'Not found'}, status_code=404)
-            return payload
-        # Models breakdown — aggregate from MESSAGES (C1 fix)
-        models = db.execute(f'''
-            SELECT m.model,
-                   COUNT(DISTINCT m.session_id) AS cnt,
-                   SUM(m.cost_micro)*1.0/1000000 AS cost
-            FROM messages m
-            JOIN sessions s ON m.session_id = s.id
-            WHERE {where_join}
-              AND m.role = 'assistant'
-              AND m.model IS NOT NULL AND m.model != ''
-            GROUP BY m.model ORDER BY cost DESC
-        ''', params).fetchall()
-        daily = db.execute(f'''
-            SELECT strftime('%Y-%m-%d', m.timestamp, ?) AS date,
-                   SUM(m.cost_micro)*1.0/1000000 AS cost,
-                   COUNT(*) AS messages
-            FROM messages m
-            JOIN sessions s ON m.session_id = s.id
-            WHERE {where_join}
-              AND m.role = 'assistant'
-            GROUP BY date ORDER BY date DESC LIMIT 30
-        ''', [f'+{_tz_offset(db)} hours', *params]).fetchall()
-        sessions = db.execute(f'''
-            SELECT id, model, created_at, updated_at,
-                   cost_micro*1.0/1000000 AS cost_usd,
-                   message_count, user_message_count,
-                   total_input_tokens, total_output_tokens,
-                   total_cache_read_tokens, pinned, is_subagent, version,
-                   tags
-            FROM sessions
-            WHERE {where}
-            ORDER BY updated_at DESC
-        ''', params).fetchall()
-    return {
-        'summary': dict(summary),
-        'models': [dict(m) for m in models],
-        'daily': [dict(d) for d in daily],
-        'sessions': [dict(s) for s in sessions],
-    }
+    payload = _codex_project_stats_payload(project_name, path)
+    if payload is None:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return payload
 
 
 # ─── Subagents ────────────────────────────────────────────────────────────
@@ -2917,26 +2841,7 @@ _DURATION_SQL = (
 @app.get("/api/sessions/{session_id}/subagents")
 def api_session_subagents(session_id: str):
     """List subagents spawned by a given parent session."""
-    with read_db() as db:
-        rows = db.execute(f'''
-            SELECT id, agent_type, agent_description, model,
-                   created_at, updated_at,
-                   cost_micro*1.0/1000000 AS cost_usd,
-                   message_count,
-                   total_input_tokens, total_output_tokens, total_cache_read_tokens,
-                   {_DURATION_SQL} AS duration_seconds,
-                   final_stop_reason, parent_tool_use_id, task_prompt
-            FROM sessions
-            WHERE parent_session_id = ? AND is_subagent = 1
-            ORDER BY cost_micro DESC, updated_at DESC
-        ''', (session_id,)).fetchall()
-    if not rows:
-        return _codex_session_subagents_payload(session_id)
-    return {
-        'parent_session_id': session_id,
-        'subagents': [dict(r) for r in rows],
-        'total': len(rows),
-    }
+    return _codex_session_subagents_payload(session_id)
 
 
 @app.get("/api/subagents")
@@ -2950,138 +2855,22 @@ def api_subagents_list(
     per_page: int = Query(50, ge=1, le=500),
 ):
     """Flat listing of every subagent session."""
-    sort_col = _SUBAGENTS_SORT_MAP.get(sort, 'cost_micro')
-    order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
-    conds: list[str] = ['is_subagent = 1']
-    params: list = []
-    if agent_type:
-        conds.append('agent_type = ?')
-        params.append(agent_type)
-    if parent:
-        conds.append('parent_session_id = ?')
-        params.append(parent)
-    if search:
-        conds.append("(agent_description LIKE ? ESCAPE '\\' OR agent_type LIKE ? ESCAPE '\\')")
-        s = f"%{_esc_like(search)}%"
-        params.extend([s, s])
-    where = ' AND '.join(conds)
-    with read_db() as db:
-        total = db.execute(
-            f"SELECT COUNT(*) FROM sessions WHERE {where}", params
-        ).fetchone()[0]
-        offset = (page - 1) * per_page
-        rows = db.execute(f'''
-            SELECT id, parent_session_id, agent_type, agent_description, model,
-                   created_at, updated_at,
-                   cost_micro*1.0/1000000 AS cost_usd,
-                   message_count,
-                   total_input_tokens, total_output_tokens, total_cache_read_tokens,
-                   project_name, project_path,
-                   {_DURATION_SQL} AS duration_seconds,
-                   final_stop_reason, parent_tool_use_id, task_prompt
-            FROM sessions
-            WHERE {where}
-            ORDER BY {sort_col} {order_sql}
-            LIMIT ? OFFSET ?
-        ''', [*params, per_page, offset]).fetchall()
-    if total == 0:
-        return _codex_subagents_list_payload(
-            agent_type=agent_type,
-            parent=parent,
-            search=search,
-            sort=sort,
-            order=order,
-            page=page,
-            per_page=per_page,
-        )
-    return {
-        'subagents': [dict(r) for r in rows],
-        'total': total, 'page': page, 'per_page': per_page,
-        'pages': max(1, -(-total // per_page)),
-        'sort': sort, 'order': order_sql.lower(),
-    }
+    return _codex_subagents_list_payload(
+        agent_type=agent_type,
+        parent=parent,
+        search=search,
+        sort=sort,
+        order=order,
+        page=page,
+        per_page=per_page,
+    )
 
 
 @app.get("/api/subagents/stats")
 def api_subagents_stats():
     """Aggregate metrics over all subagents: count / cost / tokens / duration
     by agentType + top lists + longest-running samples."""
-    with read_db() as db:
-        by_type = db.execute(f'''
-            SELECT COALESCE(NULLIF(agent_type, ''), '(unknown)') AS agent_type,
-                   COUNT(*) AS count,
-                   SUM(cost_micro)*1.0/1000000 AS cost,
-                   SUM(total_input_tokens + total_output_tokens) AS tokens,
-                   SUM(message_count) AS messages,
-                   AVG(cost_micro)*1.0/1000000 AS avg_cost,
-                   AVG({_DURATION_SQL}) AS avg_duration_seconds,
-                   MAX({_DURATION_SQL}) AS max_duration_seconds
-            FROM sessions WHERE is_subagent = 1
-            GROUP BY agent_type
-            ORDER BY cost DESC
-        ''').fetchall()
-        totals = db.execute('''
-            SELECT COUNT(*) AS count,
-                   SUM(cost_micro)*1.0/1000000 AS cost,
-                   SUM(total_input_tokens + total_output_tokens) AS tokens,
-                   SUM(message_count) AS messages
-            FROM sessions WHERE is_subagent = 1
-        ''').fetchone()
-        top = db.execute(f'''
-            SELECT id, agent_type, agent_description,
-                   cost_micro*1.0/1000000 AS cost_usd,
-                   message_count, parent_session_id,
-                   {_DURATION_SQL} AS duration_seconds
-            FROM sessions WHERE is_subagent = 1
-            ORDER BY cost_micro DESC LIMIT 10
-        ''').fetchall()
-        longest = db.execute(f'''
-            SELECT id, agent_type, agent_description,
-                   cost_micro*1.0/1000000 AS cost_usd,
-                   message_count, parent_session_id,
-                   {_DURATION_SQL} AS duration_seconds
-            FROM sessions WHERE is_subagent = 1
-              AND created_at != '' AND updated_at != ''
-            ORDER BY duration_seconds DESC LIMIT 10
-        ''').fetchall()
-        parents_with_most_subs = db.execute('''
-            SELECT parent_session_id,
-                   COUNT(*) AS sub_count,
-                   SUM(cost_micro)*1.0/1000000 AS total_cost,
-                   (SELECT project_name FROM sessions WHERE id = s.parent_session_id) AS project
-            FROM sessions s
-            WHERE is_subagent = 1 AND parent_session_id IS NOT NULL
-            GROUP BY parent_session_id
-            ORDER BY sub_count DESC LIMIT 10
-        ''').fetchall()
-        by_stop_reason = db.execute('''
-            SELECT COALESCE(NULLIF(final_stop_reason, ''), '(missing)') AS stop_reason,
-                   COUNT(*) AS count,
-                   SUM(cost_micro)*1.0/1000000 AS cost
-            FROM sessions WHERE is_subagent = 1
-            GROUP BY stop_reason ORDER BY count DESC
-        ''').fetchall()
-        # agent_type × stop_reason success matrix
-        by_type_and_stop_reason = db.execute('''
-            SELECT COALESCE(NULLIF(agent_type, ''), '(unknown)') AS agent_type,
-                   COALESCE(NULLIF(final_stop_reason, ''), '(missing)') AS stop_reason,
-                   COUNT(*) AS count,
-                   SUM(cost_micro)*1.0/1000000 AS cost
-            FROM sessions WHERE is_subagent = 1
-            GROUP BY agent_type, stop_reason
-            ORDER BY agent_type, count DESC
-        ''').fetchall()
-    if not totals or totals['count'] == 0:
-        return _codex_subagents_stats_payload()
-    return {
-        'totals': dict(totals) if totals else {},
-        'by_type': [dict(r) for r in by_type],
-        'top_by_cost': [dict(r) for r in top],
-        'top_by_duration': [dict(r) for r in longest],
-        'parents_with_most_subs': [dict(r) for r in parents_with_most_subs],
-        'by_stop_reason': [dict(r) for r in by_stop_reason],
-        'by_type_and_stop_reason': [dict(r) for r in by_type_and_stop_reason],
-    }
+    return _codex_subagents_stats_payload()
 
 
 @app.get("/api/sessions/{session_id}/chain")
@@ -3101,44 +2890,7 @@ def api_subagents_heatmap():
         'cells':       { 'Explore|proj-a': {count, cost}, ... },
       }
     """
-    with read_db() as db:
-        rows = db.execute('''
-            SELECT COALESCE(NULLIF(agent_type, ''), '(unknown)') AS agent_type,
-                   COALESCE(NULLIF(project_name, ''), '(unknown)') AS project_name,
-                   COUNT(*) AS count,
-                   SUM(cost_micro)*1.0/1000000 AS cost,
-                   SUM(total_input_tokens + total_output_tokens) AS tokens
-            FROM sessions
-            WHERE is_subagent = 1
-            GROUP BY agent_type, project_name
-            ORDER BY cost DESC
-        ''').fetchall()
-    if not rows:
-        return _codex_subagents_heatmap_payload()
-    projects: list[str] = []
-    seen_p: set[str] = set()
-    types: list[str] = []
-    seen_t: set[str] = set()
-    cells: dict[str, dict] = {}
-    for r in rows:
-        p = r['project_name']
-        t = r['agent_type']
-        if p not in seen_p:
-            seen_p.add(p)
-            projects.append(p)
-        if t not in seen_t:
-            seen_t.add(t)
-            types.append(t)
-        cells[f'{t}|{p}'] = {
-            'count': r['count'],
-            'cost': r['cost'],
-            'tokens': r['tokens'],
-        }
-    return {
-        'projects': projects,
-        'agent_types': types,
-        'cells': cells,
-    }
+    return _codex_subagents_heatmap_payload()
 
 
 @app.get("/api/projects/{project_name}/messages")
@@ -3151,33 +2903,7 @@ def api_project_messages(
 ):
     """Messages across all sessions in a project (chronological by default)."""
     order_sql = 'DESC' if str(order).lower() == 'desc' else 'ASC'
-    _where, where_join, params = _project_where(project_name, path)
-    with read_db() as db:
-        total = db.execute(f'''
-            SELECT COUNT(*) FROM messages m
-            JOIN sessions s ON m.session_id = s.id
-            WHERE {where_join} AND m.is_sidechain = 0
-        ''', params).fetchone()[0]
-        rows = db.execute(f'''
-            SELECT m.id, m.message_uuid, m.session_id, m.role,
-                   m.content_preview, m.content,
-                   m.input_tokens, m.output_tokens,
-                   m.cache_creation_tokens, m.cache_read_tokens,
-                   m.cost_micro*1.0/1000000 AS cost_usd,
-                   m.model, m.timestamp, m.git_branch
-            FROM messages m
-            JOIN sessions s ON m.session_id = s.id
-            WHERE {where_join} AND m.is_sidechain = 0
-            ORDER BY m.timestamp {order_sql}, m.id {order_sql}
-            LIMIT ? OFFSET ?
-        ''', [*params, limit, offset]).fetchall()
-    if total == 0:
-        return _codex_project_messages_payload(project_name, path, limit, offset, order_sql)
-    return {
-        'messages': [dict(r) for r in rows],
-        'total': total, 'limit': limit, 'offset': offset,
-        'order': order_sql.lower(),
-    }
+    return _codex_project_messages_payload(project_name, path, limit, offset, order_sql)
 
 
 # ─── Export ───────────────────────────────────────────────────────────────────

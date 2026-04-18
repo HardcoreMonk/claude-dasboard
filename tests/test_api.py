@@ -837,30 +837,30 @@ def test_sessions_prefer_codex_rows_when_both_sources_exist(api_client):
 # ─── Subagent endpoints ─────────────────────────────────────────────────
 
 def test_session_subagents_endpoint(api_client):
-    r = api_client.get('/api/sessions/parent-A/subagents')
+    r = api_client.get('/api/sessions/codex-s1/subagents')
     assert r.status_code == 200
     body = r.json()
-    assert body['total'] == 2
+    assert body['total'] == 1
     types = {s['agent_type'] for s in body['subagents']}
-    assert types == {'Explore', 'Plan'}
+    assert types == {'planner'}
 
 
 def test_subagents_list_filter_by_type(api_client):
-    r = api_client.get('/api/subagents?agent_type=Explore')
+    r = api_client.get('/api/subagents?agent_type=planner')
     assert r.status_code == 200
     subs = r.json()['subagents']
     assert len(subs) == 1
-    assert subs[0]['id'] == 'agent-1a'
+    assert subs[0]['id'] == 'agent-run-4'
 
 
 def test_subagents_stats(api_client):
     r = api_client.get('/api/subagents/stats')
     assert r.status_code == 200
     body = r.json()
-    assert body['totals']['count'] == 2
+    assert body['totals']['count'] == 1
     type_names = {row['agent_type'] for row in body['by_type']}
-    assert type_names == {'Explore', 'Plan'}
-    assert len(body['top_by_cost']) == 2
+    assert type_names == {'planner'}
+    assert len(body['top_by_cost']) == 1
 
 
 def test_session_subagents_endpoint_falls_back_to_codex_agent_runs(api_client):
@@ -984,11 +984,11 @@ def test_sessions_search_prefers_codex_results_when_both_sources_exist(api_clien
 
 
 def test_project_stats_by_path(api_client):
-    r = api_client.get('/api/projects/demo/stats?path=/tmp/demo')
+    r = api_client.get('/api/projects/codex-demo/stats?path=/tmp/codex-demo')
     assert r.status_code == 200
     summary = r.json()['summary']
-    # parent + 2 subagents = 3
-    assert summary['sessions'] == 3
+    assert summary['sessions'] == 2
+    assert summary['messages'] == 5
 
 
 def test_project_stats_unknown_path_404(api_client):
@@ -1573,26 +1573,18 @@ def test_subagents_heatmap_structure(api_client):
     assert 'projects' in body
     assert 'agent_types' in body
     assert 'cells' in body
-    assert 'demo' in body['projects']
+    assert 'codex-demo' in body['projects']
     types = set(body['agent_types'])
-    assert 'Explore' in types
-    assert 'Plan' in types
-    explore_demo = body['cells'].get('Explore|demo')
-    assert explore_demo is not None
-    assert explore_demo['count'] == 1
+    assert 'planner' in types
+    planner_demo = body['cells'].get('planner|codex-demo')
+    assert planner_demo is not None
+    assert planner_demo['count'] == 1
 
 
 def test_subagent_messages_bypasses_sidechain_filter(api_client, tmp_path):
-    """A subagent's own /messages endpoint must return its records even
-    though they are flagged ``is_sidechain=1`` in the DB."""
-    import sqlite3
-    conn = sqlite3.connect(str(tmp_path / 'api.db'))
-    conn.execute("UPDATE messages SET is_sidechain=1 WHERE session_id='agent-1a'")
-    conn.commit()
-    conn.close()
+    """Agent runs are no longer addressable as standalone sessions."""
     r = api_client.get('/api/sessions/agent-1a/messages')
-    assert r.status_code == 200
-    assert r.json()['total'] >= 1
+    assert r.status_code == 404
 
 
 # ─── G1/G2/G3 — stop_reason + parent_tool_use_id ───────────────────────
@@ -1611,45 +1603,28 @@ def test_v7_columns_present(api_client, tmp_path):
 
 
 def test_subagent_endpoint_exposes_stop_reason_and_parent_tool_use(api_client, tmp_path):
-    """/api/sessions/{sid}/subagents must surface the v7 fields."""
-    import sqlite3
-    conn = sqlite3.connect(str(tmp_path / 'api.db'))
-    conn.execute('''UPDATE sessions SET
-        final_stop_reason='end_turn',
-        parent_tool_use_id='toolu_fake123',
-        task_prompt='Do the thing.'
-        WHERE id='agent-1a'
-    ''')
-    conn.commit()
-    conn.close()
-    r = api_client.get('/api/sessions/parent-A/subagents')
+    """/api/sessions/{sid}/subagents must surface Codex agent-run fields."""
+    r = api_client.get('/api/sessions/codex-s1/subagents')
     assert r.status_code == 200
-    explore = next(s for s in r.json()['subagents'] if s['id'] == 'agent-1a')
-    assert explore['final_stop_reason'] == 'end_turn'
-    assert explore['parent_tool_use_id'] == 'toolu_fake123'
-    assert explore['task_prompt'] == 'Do the thing.'
+    explore = next(s for s in r.json()['subagents'] if s['id'] == 'agent-run-4')
+    assert explore['final_stop_reason'] == 'completed'
+    assert explore['parent_tool_use_id'] == ''
+    assert explore['task_prompt'] == ''
 
 
 def test_subagents_stats_by_stop_reason(api_client, tmp_path):
     """/api/subagents/stats must return a by_stop_reason breakdown."""
-    import sqlite3
-    conn = sqlite3.connect(str(tmp_path / 'api.db'))
-    conn.execute("UPDATE sessions SET final_stop_reason='end_turn' WHERE id='agent-1a'")
-    conn.execute("UPDATE sessions SET final_stop_reason='max_tokens' WHERE id='agent-1b'")
-    conn.commit()
-    conn.close()
     r = api_client.get('/api/subagents/stats')
     assert r.status_code == 200
     body = r.json()
     assert 'by_stop_reason' in body
     reasons = {row['stop_reason'] for row in body['by_stop_reason']}
-    assert 'end_turn' in reasons
-    assert 'max_tokens' in reasons
+    assert 'completed' in reasons
 
 
 def test_messages_endpoint_returns_stop_reason(api_client):
     """Individual messages must expose the stop_reason column."""
-    r = api_client.get('/api/sessions/parent-A/messages')
+    r = api_client.get('/api/sessions/codex-s1/messages')
     assert r.status_code == 200
     msgs = r.json()['messages']
     assert msgs
@@ -1701,12 +1676,6 @@ def test_sessions_user_message_count_exposed(api_client):
 
 def test_subagents_stats_success_matrix(api_client, tmp_path):
     """by_type_and_stop_reason must be a list of {agent_type, stop_reason, count, cost}."""
-    import sqlite3
-    conn = sqlite3.connect(str(tmp_path / 'api.db'))
-    conn.execute("UPDATE sessions SET final_stop_reason='end_turn' WHERE id='agent-1a'")
-    conn.execute("UPDATE sessions SET final_stop_reason='tool_use' WHERE id='agent-1b'")
-    conn.commit()
-    conn.close()
     r = api_client.get('/api/subagents/stats')
     assert r.status_code == 200
     matrix = r.json().get('by_type_and_stop_reason', [])
@@ -1719,8 +1688,7 @@ def test_subagents_stats_success_matrix(api_client, tmp_path):
         assert 'cost' in row
     # Specific cells exist
     pairs = {(r['agent_type'], r['stop_reason']) for r in matrix}
-    assert ('Explore', 'end_turn') in pairs
-    assert ('Plan', 'tool_use') in pairs
+    assert ('planner', 'completed') in pairs
 
 
 def test_sessions_exposes_cache_creation_separately(api_client):
