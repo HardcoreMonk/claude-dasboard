@@ -216,6 +216,11 @@ def test_explore_keeps_global_command_palette_and_legacy_subviews(e2e_client):
         re.S,
     )
     assert re.search(
+        r'function\s+showExploreSubview\(subView\s*=\s*[\'"]search[\'"]\)\s*\{.*?history\.replaceState\(null,\s*[\'"]\s*[\'"],\s*`\#\/explore\/\$\{next\}`\);.*?\}',
+        all_js,
+        re.S,
+    )
+    assert re.search(
         r'if\s*\(view\s*===\s*[\'"]explore[\'"]\)\s*state\.activeSubview\s*=\s*[\'"]search[\'"];',
         all_js,
     )
