@@ -206,7 +206,12 @@ def test_explore_keeps_global_command_palette_and_legacy_subviews(e2e_client):
     assert 'id="view-conversations"' in html
 
     assert re.search(
-        r'function\s+loadExploreDashboard\(\)\s*\{\s*activateExploreSubview\(state\.activeSubview\s*\|\|\s*[\'"]search[\'"]\);\s*renderSearchView\(\);\s*\}',
+        r'function\s+loadExploreDashboard\(\)\s*\{\s*renderExploreShell\(state\.activeSubview\s*\|\|\s*[\'"]search[\'"]\);\s*\}',
+        all_js,
+        re.S,
+    )
+    assert re.search(
+        r'function\s+renderExploreShell\(subView\s*=\s*[\'"]search[\'"]\)\s*\{.*?activateExploreSubview\(next\);.*?(?:renderSearchView\(\);|loadSessions\(\);|loadConvList\(\);).*?\}',
         all_js,
         re.S,
     )

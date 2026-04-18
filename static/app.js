@@ -221,7 +221,7 @@ function updateExploreSubviewTabs(view) {
     const active = btn.dataset.exploreSubview === view;
     btn.classList.toggle('is-active', active);
     btn.setAttribute('aria-selected', active ? 'true' : 'false');
-    btn.tabIndex = active ? 0 : -1;
+    btn.tabIndex = 0;
   });
   const summary = document.getElementById('exploreTabSummary');
   if (!summary) return;
