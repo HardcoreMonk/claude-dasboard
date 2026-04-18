@@ -3,147 +3,267 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Login — Claude Dashboard</title>
+<title>로그인 · Claude Dashboard</title>
+<meta name="description" content="Claude Dashboard 로그인 — 토큰 사용량 실시간 추적">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://code.iconify.design" crossorigin>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js" defer></script>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{color-scheme:dark}
   body{
-    font-family:'Pretendard Variable',system-ui,sans-serif;
+    font-family:'Pretendard Variable','Instrument Serif',system-ui,sans-serif;
+    font-feature-settings:'ss01','tnum';
     background:#0a0a0a;
     color:#fff;
-    min-height:100vh;
-    display:flex;
-    align-items:center;
-    justify-content:center;
+    min-height:100dvh;  /* was 100vh — breaks on iOS Safari */
+    display:flex;align-items:center;justify-content:center;
+    word-break:keep-all;
+    overflow:hidden;
+    position:relative;
+  }
+
+  /* Ambient orbs — subtle depth, tinted to brand */
+  .orb{position:fixed;border-radius:50%;filter:blur(100px);pointer-events:none;z-index:0}
+  .orb-a{width:520px;height:520px;background:rgba(52,211,153,.08);top:-15%;left:55%}
+  .orb-b{width:380px;height:380px;background:rgba(96,165,250,.04);bottom:-10%;left:-5%}
+  @keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,-15px)}}
+  .orb-a{animation:drift 22s ease-in-out infinite}
+  .orb-b{animation:drift 28s ease-in-out infinite reverse}
+
+  /* Noise texture — organic feel, never a flat digital surface */
+  .noise{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.025;
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+  .stage{
+    position:relative;z-index:10;
+    width:420px;max-width:92vw;
+    padding:3px;border-radius:24px;
+    background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.09);
+    box-shadow:
+      0 24px 60px rgba(0,0,0,.5),
+      0 8px 20px rgba(52,211,153,.05);  /* accent-tinted, not pure black */
   }
   .card{
-    width:380px;
-    max-width:90vw;
-    background:rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.07);
-    border-radius:20px;
-    padding:40px 32px;
-    box-shadow:0 20px 60px rgba(0,0,0,.5);
+    border-radius:22px;
+    background:rgba(255,255,255,.02);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+    padding:44px 36px 36px;
     backdrop-filter:blur(20px);
   }
-  .logo{
-    width:48px;height:48px;
-    margin:0 auto 20px;
-    border-radius:14px;
-    background:linear-gradient(135deg,#34d399 0%,#065f46 100%);
-    display:flex;align-items:center;justify-content:center;
-    font-size:22px;font-weight:800;color:#fff;
-    box-shadow:0 4px 16px rgba(52,211,153,.25);
+
+  /* Eyebrow — editorial top label */
+  .eyebrow{
+    display:flex;align-items:center;gap:8px;
+    font-size:10px;font-weight:600;letter-spacing:.25em;text-transform:uppercase;
+    color:rgba(255,255,255,.4);margin-bottom:24px;
   }
+  .eyebrow-line{flex:1;height:1px;background:rgba(255,255,255,.1)}
+
+  .logo-row{display:flex;align-items:center;gap:12px;margin-bottom:32px}
+  .logo{
+    width:44px;height:44px;border-radius:12px;flex-shrink:0;
+    background:linear-gradient(135deg,#34d399 0%,#10b981 60%,#065f46 100%);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 4px 12px rgba(52,211,153,.2);
+  }
+  .logo iconify-icon{color:#052e16;font-size:22px}
+
+  /* Editorial headline — Instrument Serif italic for "로그인", bold Pretendard for "합니다" */
   h1{
-    text-align:center;
-    font-size:18px;
-    font-weight:700;
-    color:rgba(255,255,255,.85);
-    margin-bottom:4px;
+    font-family:'Instrument Serif','Pretendard Variable',serif;
+    font-style:italic;font-weight:400;
+    font-size:40px;line-height:1;letter-spacing:-.02em;
+    color:rgba(255,255,255,.95);
+    text-wrap:balance;
+    margin-bottom:10px;
+  }
+  h1 .brand{
+    font-family:'Pretendard Variable',sans-serif;
+    font-style:normal;font-weight:800;letter-spacing:-.04em;
+    color:#34d399;
   }
   .subtitle{
-    text-align:center;
-    font-size:12px;
-    color:rgba(255,255,255,.3);
-    margin-bottom:28px;
+    font-size:13px;color:rgba(255,255,255,.5);
+    line-height:1.6;margin-bottom:36px;
+    max-width:34ch;
   }
+
   label{
-    display:block;
-    font-size:10px;
-    font-weight:700;
-    text-transform:uppercase;
-    letter-spacing:.08em;
-    color:rgba(255,255,255,.35);
-    margin-bottom:6px;
+    display:block;font-size:10px;font-weight:700;
+    text-transform:uppercase;letter-spacing:.2em;
+    color:rgba(255,255,255,.4);margin-bottom:8px;
+  }
+  .field{position:relative}
+  .field iconify-icon{
+    position:absolute;left:14px;top:50%;transform:translateY(-50%);
+    color:rgba(255,255,255,.3);font-size:16px;pointer-events:none;
+    transition:color .2s;
   }
   input[type="password"]{
-    width:100%;
-    padding:12px 16px;
+    width:100%;padding:13px 16px 13px 40px;
     border-radius:12px;
     border:1px solid rgba(255,255,255,.08);
-    background:rgba(255,255,255,.04);
-    color:#fff;
-    font-size:14px;
-    outline:none;
-    transition:border-color .2s,box-shadow .2s;
+    background:rgba(255,255,255,.03);
+    color:#fff;font-size:14px;outline:none;
+    font-family:'Pretendard Variable',ui-monospace,monospace;
+    letter-spacing:.08em;
+    transition:border-color .3s cubic-bezier(.16,1,.3,1),
+               box-shadow .3s cubic-bezier(.16,1,.3,1),
+               background .3s;
+  }
+  input[type="password"]::placeholder{
+    color:rgba(255,255,255,.2);letter-spacing:normal;
   }
   input[type="password"]:focus{
     border-color:rgba(52,211,153,.5);
-    box-shadow:0 0 0 3px rgba(52,211,153,.1);
+    background:rgba(255,255,255,.05);
+    box-shadow:0 0 0 4px rgba(52,211,153,.08);
   }
-  input[type="password"]::placeholder{color:rgba(255,255,255,.15)}
+  .field:focus-within iconify-icon{color:rgba(52,211,153,.85)}
+
   .btn{
-    width:100%;
-    padding:12px;
-    margin-top:20px;
-    border:none;
-    border-radius:12px;
-    background:#34d399;
-    color:#064e3b;
-    font-size:14px;
-    font-weight:700;
-    cursor:pointer;
-    transition:transform .15s cubic-bezier(.16,1,.3,1),opacity .15s;
+    width:100%;padding:13px 20px;margin-top:22px;
+    border:none;border-radius:12px;
+    background:#34d399;color:#052e16;
+    font-family:inherit;font-size:14px;font-weight:700;
+    letter-spacing:-.01em;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    box-shadow:0 6px 20px rgba(52,211,153,.15),inset 0 1px 0 rgba(255,255,255,.3);
+    transition:transform .3s cubic-bezier(.16,1,.3,1),
+               box-shadow .3s cubic-bezier(.16,1,.3,1),
+               background .2s;
   }
-  .btn:hover{transform:scale(1.01)}
-  .btn:active{transform:scale(.98)}
-  .btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  .btn:hover{
+    transform:translateY(-1px);
+    background:#6ee7b7;
+    box-shadow:0 10px 28px rgba(52,211,153,.3),inset 0 1px 0 rgba(255,255,255,.4);
+  }
+  .btn:active{transform:translateY(0) scale(.985)}
+  .btn:disabled{opacity:.5;cursor:not-allowed;transform:none;background:#34d399;box-shadow:0 6px 20px rgba(52,211,153,.15)}
+
+  .btn-kicker{
+    font-size:10px;opacity:.6;font-weight:500;
+    padding:2px 6px;border-radius:4px;background:rgba(5,46,22,.3);
+    margin-left:auto;font-family:ui-monospace,monospace;letter-spacing:.05em;
+  }
+
   .error{
-    margin-top:14px;
-    padding:10px 14px;
+    margin-top:16px;padding:11px 14px;
     border-radius:10px;
-    background:rgba(239,68,68,.1);
+    background:rgba(239,68,68,.08);
     border:1px solid rgba(239,68,68,.25);
     color:#fca5a5;
-    font-size:12px;
-    text-align:center;
-    display:none;
+    font-size:12px;text-align:center;
+    display:none;gap:6px;align-items:center;justify-content:center;
   }
-  .error.show{display:block;animation:shake .4s ease-in-out}
+  .error.show{display:flex;animation:shake .4s ease-in-out}
   @keyframes shake{
     0%,100%{transform:translateX(0)}
     20%,60%{transform:translateX(-6px)}
     40%,80%{transform:translateX(6px)}
   }
+
   .footer{
-    text-align:center;
-    margin-top:24px;
-    font-size:10px;
-    color:rgba(255,255,255,.15);
+    margin-top:32px;padding-top:24px;
+    border-top:1px solid rgba(255,255,255,.05);
+    display:flex;align-items:center;justify-content:space-between;
+    font-size:10px;color:rgba(255,255,255,.3);
+    letter-spacing:.03em;
+  }
+  .footer a{
+    color:rgba(52,211,153,.8);text-decoration:none;
+    display:inline-flex;align-items:center;gap:4px;
+    transition:color .2s,transform .2s;
+  }
+  .footer a:hover{color:#6ee7b7;transform:translateX(2px)}
+
+  /* Staggered entry — elements fade up in sequence */
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  .reveal{animation:fadeUp .7s cubic-bezier(.16,1,.3,1) both}
+  .reveal-1{animation-delay:.05s}
+  .reveal-2{animation-delay:.15s}
+  .reveal-3{animation-delay:.25s}
+  .reveal-4{animation-delay:.35s}
+
+  @media (prefers-reduced-motion: reduce){
+    .reveal,.orb{animation:none}
+    .reveal{opacity:1;transform:none}
+  }
+
+  @media (max-width: 480px){
+    .card{padding:32px 24px 28px}
+    h1{font-size:32px}
   }
 </style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo">C</div>
-    <h1>Claude Dashboard</h1>
-    <div class="subtitle">Sign in to continue</div>
-    <form id="loginForm" autocomplete="on">
-      <label for="pw">Password</label>
-      <input type="password" id="pw" name="password" placeholder="Enter password" autofocus required>
-      <button type="submit" class="btn" id="submitBtn">Sign in</button>
-    </form>
-    <div class="error" id="errorMsg"></div>
-    <div class="footer">
-      Claude Usage Dashboard
-      <div style="margin-top:10px;">
-        <a href="/landing/" style="color:rgba(52,211,153,.7);text-decoration:none;font-size:11px;letter-spacing:.05em;">
-          공개 소개 페이지 &rarr;
+  <div class="orb orb-a" aria-hidden="true"></div>
+  <div class="orb orb-b" aria-hidden="true"></div>
+  <div class="noise" aria-hidden="true"></div>
+
+  <main class="stage reveal">
+    <div class="card">
+      <div class="eyebrow reveal reveal-1">
+        <span class="eyebrow-line"></span>
+        <span>claude-dashboard</span>
+        <span class="eyebrow-line"></span>
+      </div>
+
+      <div class="logo-row reveal reveal-2">
+        <div class="logo" aria-hidden="true">
+          <iconify-icon icon="solar:graph-new-up-bold"></iconify-icon>
+        </div>
+        <div>
+          <h1>로그인<span class="brand">.</span></h1>
+        </div>
+      </div>
+      <p class="subtitle reveal reveal-2">계속하려면 대시보드 비밀번호를 입력하세요.</p>
+
+      <form id="loginForm" autocomplete="on" class="reveal reveal-3">
+        <label for="pw">비밀번호</label>
+        <div class="field">
+          <iconify-icon icon="solar:lock-keyhole-minimalistic-linear"></iconify-icon>
+          <input type="password" id="pw" name="password" placeholder="비밀번호 입력" autofocus required
+                 aria-label="대시보드 비밀번호">
+        </div>
+        <button type="submit" class="btn" id="submitBtn">
+          <iconify-icon icon="solar:arrow-right-linear" width="16"></iconify-icon>
+          <span>들어가기</span>
+          <span class="btn-kicker">Enter</span>
+        </button>
+      </form>
+
+      <div class="error" id="errorMsg" role="alert">
+        <iconify-icon icon="solar:danger-triangle-linear" width="14"></iconify-icon>
+        <span id="errorMsgText"></span>
+      </div>
+
+      <div class="footer reveal reveal-4">
+        <span>MIT · Self-hosted</span>
+        <a href="/landing/">
+          공개 소개 페이지
+          <iconify-icon icon="solar:arrow-right-linear" width="10"></iconify-icon>
         </a>
       </div>
     </div>
-  </div>
+  </main>
+
 <script>
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const pw = document.getElementById('pw').value;
   const btn = document.getElementById('submitBtn');
   const err = document.getElementById('errorMsg');
+  const errText = document.getElementById('errorMsgText');
   err.classList.remove('show');
   btn.disabled = true;
-  btn.textContent = 'Signing in\u2026';
+  btn.querySelector('span').textContent = '로그인 중\u2026';
   try {
     const resp = await fetch('/api/auth/login', {
       method: 'POST',
@@ -155,15 +275,15 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       window.location.href = '/app';
       return;
     }
-    err.textContent = data.error || 'Invalid password';
+    errText.textContent = data.error || '비밀번호가 올바르지 않습니다';
     err.classList.add('show');
     document.getElementById('pw').select();
   } catch (ex) {
-    err.textContent = 'Network error';
+    errText.textContent = '네트워크 오류 — 잠시 후 다시 시도하세요';
     err.classList.add('show');
   }
   btn.disabled = false;
-  btn.textContent = 'Sign in';
+  btn.querySelector('span').textContent = '들어가기';
 });
 // If already authenticated, redirect to dashboard
 fetch('/api/auth/me').then(r => r.json()).then(d => {

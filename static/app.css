@@ -21,6 +21,19 @@ body:not(.theme-light) .text-white\/25  { color: rgba(255,255,255,.45); }
 body:not(.theme-light) .text-white\/30  { color: rgba(255,255,255,.45); }
 body:not(.theme-light) .text-white\/35  { color: rgba(255,255,255,.48); }
 
+/* ── Typography polish ── */
+/* Prevent widow/orphan words in headings — only browsers that support it. */
+.text-balance { text-wrap: balance; }
+.text-pretty  { text-wrap: pretty; }
+
+/* Tabular numbers for tables and metric cards (not just in body selector,
+   but as a composable utility). Matches Supanova data-first aesthetic. */
+.tnum { font-variant-numeric: tabular-nums; letter-spacing:-.01em; }
+
+/* Tinted shadow utility — shadows that carry background hue instead of
+   generic rgba(0,0,0). Emerald tint for accent cards. */
+.shadow-accent-tint { box-shadow: 0 12px 28px rgba(52,211,153,.08), 0 2px 6px rgba(0,0,0,.25); }
+
 /* ── Animations ── */
 @keyframes fadeInUp {
   from { opacity:0; transform:translateY(1.5rem); filter:blur(3px); }
