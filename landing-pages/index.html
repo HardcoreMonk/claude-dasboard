@@ -98,14 +98,13 @@
 </nav>
 
 <!-- ─── TOP BANNER ─── -->
-<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-36 md:pt-40 pb-10 md:pb-14">
+<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-36 md:pt-40 pb-24 md:pb-32">
   <div class="reveal inline-flex items-center gap-2 px-3 py-1 rounded-full border border-accent/30 bg-accent/5 text-accent text-[10px] uppercase tracking-[0.25em] font-semibold mb-6">
     <iconify-icon icon="solar:palette-bold" width="12"></iconify-icon>
     Landing Page — Combined
   </div>
-  <h1 class="reveal reveal-1 font-display font-extrabold text-5xl md:text-6xl lg:text-[86px] tracking-[-0.04em] leading-[1.02]">
-    세 가지 서사,<br>
-    <span class="text-accent">하나의 대시보드.</span>
+  <h1 class="reveal reveal-1 font-display font-extrabold text-4xl md:text-6xl lg:text-[80px] tracking-[-0.04em] leading-[1.05]">
+    세 가지 서사, <span class="text-accent">하나의 대시보드.</span>
   </h1>
   <p class="reveal reveal-2 text-white/50 text-base md:text-lg max-w-2xl mt-7 leading-relaxed">
     같은 제품(claude-dashboard)을 세 가지 톤으로 풀어낸 시안을 하나로 합친 통합 랜딩페이지.
@@ -114,7 +113,7 @@
 </section>
 
 <!-- ─── HERO ─── -->
-<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-4 md:pt-8 pb-20 md:pb-28">
+<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-8 md:pt-12 pb-24 md:pb-32">
   <div class="grid lg:grid-cols-12 gap-10 items-center">
     <!-- Left: editorial statement (A-style) -->
     <div class="lg:col-span-6">
@@ -366,14 +365,14 @@
 
 <!-- ─── 02 TEAM (C architecture) ─── -->
 <section id="team" class="max-w-7xl mx-auto px-6 lg:px-12 py-28 md:py-40">
-  <div class="mb-16 md:mb-20 max-w-3xl ir">
+  <div class="mb-16 md:mb-20 ir">
     <div class="text-[11px] uppercase tracking-[0.25em] text-accent font-semibold mb-5">02 — At team scale</div>
-    <h2 class="font-display text-4xl md:text-5xl lg:text-6xl font-bold tracking-[-0.03em] leading-[1.05] mb-5">
-      수집 에이전트 하나가<br><span class="text-white/30">전부입니다.</span>
+    <h2 class="font-display text-3xl md:text-4xl lg:text-5xl font-bold tracking-[-0.03em] leading-[1.1] mb-5">
+      수집 에이전트 하나가 <span class="text-white/30">전부입니다.</span>
     </h2>
-    <p class="text-white/55 text-base md:text-lg leading-[1.7] max-w-[58ch]">
-      팀원 각자의 기기에 Python 3.9+만 있으면 됩니다. <code class="font-mono text-accent/80 text-sm">collector.py</code> 가
-      <code class="font-mono text-accent/80 text-sm">~/.claude/projects/</code> 의 JSONL을 읽어 INGEST_KEY로 서명한 뒤 대시보드로 POST.
+    <p class="text-white/55 text-base md:text-lg leading-[1.8] max-w-none">
+      팀원 각자의 기기에 Python 3.9+만 있으면 됩니다.<br>
+      <code class="font-mono text-accent/80 text-sm">collector.py</code> 가 <code class="font-mono text-accent/80 text-sm">~/.claude/projects/</code> 의 JSONL을 읽어 INGEST_KEY로 서명한 뒤 대시보드로 POST.<br>
       네트워크는 outbound HTTPS만 있으면 됩니다.
     </p>
   </div>
@@ -569,8 +568,10 @@
     <h2 class="font-display font-extrabold text-5xl md:text-7xl lg:text-8xl tracking-[-0.04em] leading-[0.95] mb-10">
       한 번 돌리면<br><span class="text-accent">전부 알게 된다.</span>
     </h2>
-    <p class="text-white/50 text-base md:text-lg max-w-2xl mx-auto mb-12 leading-relaxed">
-      설치에 5분. 이후 모든 Claude Code 세션은 자동 추적됩니다. 팀에 배포하는 데는 10분이면 충분합니다.
+    <p class="text-white/50 text-base md:text-lg mx-auto mb-12 leading-[1.8]">
+      설치에 5분.<br>
+      이후 모든 Claude Code 세션은 자동 추적됩니다.<br>
+      팀에 배포하는 데는 10분이면 충분합니다.
     </p>
     <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
       <a href="https://github.com/HardcoreMonk/claude-dasboard" class="inline-flex items-center gap-2 px-8 py-4 bg-accent text-ink font-bold text-[15px] rounded-full hover:scale-[1.02] active:scale-[0.98] transition-transform">
