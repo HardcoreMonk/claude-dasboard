@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Codex Dashboard</title>
 <meta name="description" content="Codex CLI 세션 검색과 복기를 위한 웹 대시보드">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&display=swap">
 
 <!-- Tailwind CSS (built from app.css via build.js) -->
 <link rel="stylesheet" href="/static/tailwind.v79.css">
@@ -21,6 +24,11 @@
 </head>
 
 <body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
+<div class="app-atmosphere" aria-hidden="true">
+  <div class="app-atmosphere-orb app-atmosphere-orb--mint"></div>
+  <div class="app-atmosphere-orb app-atmosphere-orb--cyan"></div>
+  <div class="app-atmosphere-grid"></div>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════
      FLOATING GLASS NAVIGATION
@@ -63,14 +71,6 @@
 <!-- Toast tray (U2) -->
 <div id="toastTray" aria-live="polite" aria-atomic="true"></div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════
-     HEADER BAR (subtle, below nav)
-     ═══════════════════════════════════════════════════════════════════════ -->
-<div class="fixed top-14 right-4 z-30 flex items-center gap-3 text-[10px] text-white/25 font-medium">
-  <span id="hdrToday"></span>
-  <span id="hdrTotal"></span>
-</div>
-
 <!-- Persistent connection-error banner (WS down > 15s) -->
 <div id="connBanner" role="alert" aria-live="assertive"
      class="hidden fixed top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full
@@ -85,7 +85,36 @@
 <!-- ═══════════════════════════════════════════════════════════════════════
      MAIN CONTENT
      ═══════════════════════════════════════════════════════════════════════ -->
-<main class="pt-20 pb-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+<main class="dashboard-main pt-20 pb-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+  <section class="dashboard-topbar anim-in" aria-label="대시보드 상태">
+    <div class="dashboard-topbar-copy">
+      <p class="dashboard-topbar-kicker">Codex dashboard</p>
+      <h1 class="dashboard-topbar-title">운영 상태와 탐색 흐름을 빠르게 읽는 화면입니다.</h1>
+      <p class="dashboard-topbar-description">상단은 오늘 상태와 누적 규모만 보여주고, 아래에서 바로 세션 운영 데이터로 내려갑니다.</p>
+      <div class="dashboard-topbar-signals" aria-label="주요 포인트">
+        <span class="dashboard-signal-pill">
+          <span class="dashboard-signal-dot"></span>
+          Live ingest
+        </span>
+        <span class="dashboard-signal-pill">Search-first flow</span>
+        <span class="dashboard-signal-pill">Session summaries</span>
+      </div>
+    </div>
+    <div class="dashboard-topbar-status">
+      <div class="dashboard-status-card">
+        <span class="dashboard-status-label">오늘</span>
+        <strong id="hdrToday" class="dashboard-status-value">오늘: —</strong>
+      </div>
+      <div class="dashboard-status-card">
+        <span class="dashboard-status-label">누적</span>
+        <strong id="hdrTotal" class="dashboard-status-value">전체: —</strong>
+      </div>
+      <div class="dashboard-status-card dashboard-status-card--build" aria-label="제품 정보">
+        <span class="dashboard-status-label">Surface</span>
+        <strong class="dashboard-status-value">Codex ops</strong>
+      </div>
+    </div>
+  </section>
 
 <!-- ─── EXPLORE ─── -->
 <section class="view hidden" id="view-explore" data-view="explore">

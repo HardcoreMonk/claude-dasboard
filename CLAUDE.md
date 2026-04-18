@@ -22,7 +22,7 @@
 | `static/sessions.js` | 세션 목록, 필터, 벌크, 노드 필터 |
 | `static/timeline.js` | Gantt, 히트맵, 시간별 분석, 트렌드 |
 | `static/charts.js` | Chart.js 6개 차트 + 테마 |
-| `static/overview.js` | 히어로 카드, TOP 5, 예측 |
+| `static/overview.js` | overview 콘솔, KPI 요약, TOP 5, 예측 |
 | `static/app.css` | 스타일 + 라이트모드 (WCAG AA 4.5:1) |
 | `tests/` | pytest 회귀/계약/통합 테스트 |
 

@@ -1582,7 +1582,7 @@ function renderConvSortBar(){
     const s=sortState.conversations;
     const active=s.key===k;
     const arr=active?(s.order==='asc'?' ↑':' ↓'):'';
-    return `<button onclick="toggleSort('conversations','${k}')" class="px-2 py-0.5 rounded-full border spring text-[9px] font-bold ${active?'bg-accent/15 text-accent border-accent/30':'text-white/40 border-white/[0.06] hover:text-white/70'}">${l}${arr}</button>`;
+    return `<button onclick="toggleSort('conversations','${k}')" class="px-2.5 py-1 rounded-full border spring text-[10px] font-bold ${active?'bg-accent/15 text-accent border-accent/30':'text-white/55 border-white/[0.08] hover:text-white/80'}">${l}${arr}</button>`;
   }).join('');
 }
 function switchConvSource(src) {
@@ -1594,7 +1594,7 @@ function switchConvSource(src) {
   const hdr = document.getElementById('convViewerHeader');
   hdr.textContent = '';
   const hint = document.createElement('div');
-  hint.className = 'text-xs text-white/20 text-center py-8';
+  hint.className = 'text-sm text-white/45 text-center py-8';
   hint.textContent = '← 대화를 선택하세요';
   hdr.appendChild(hint);
   document.getElementById('convMessages').textContent = '';
@@ -1629,7 +1629,7 @@ async function loadConvList(){
           <div class="text-xs font-bold text-white/80 truncate">${esc(s.project_name||'—')}</div>
           ${s.pinned?'<span class="text-accent text-[11px] flex-shrink-0">★</span>':''}
         </div>
-        <div class="text-[10px] text-white/40 mt-1 flex items-center gap-2 tabular-nums">
+        <div class="text-[11px] text-white/55 mt-1 flex items-center gap-2 tabular-nums">
           <span>${fmtTok((s.total_input_tokens||0)+(s.total_output_tokens||0))}</span>
           <span class="text-amber-400/70">${fmt$(s.total_cost_usd)}</span>
           <span>${relTime(s.updated_at)}</span>
@@ -2226,15 +2226,15 @@ function renderMarkdown(raw) {
 
 function renderBlock(block){if(!block||typeof block!=='object')return esc(String(block||''));const t=block.type||'';
   if(t==='text')return `<div>${renderMarkdown(block.text||'')}</div>`;
-  if(t==='thinking'){const th=block.thinking||'';if(!th)return `<div class="text-[10px] text-white/15 italic">[Extended Thinking]</div>`;const id='th-'+Math.random().toString(36).slice(2);return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[10px] font-semibold text-cyan-400/40 flex items-center gap-1.5" onclick="toggleTool('${id}')"><span class="arr">▶</span> Extended Thinking</div><div class="tool-body p-3 text-[10px] text-white/25 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(th)}</div></div>`;}
+  if(t==='thinking'){const th=block.thinking||'';if(!th)return `<div class="text-[10px] text-white/30 italic">[Extended Thinking]</div>`;const id='th-'+Math.random().toString(36).slice(2);return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[11px] font-semibold text-cyan-400/65 flex items-center gap-1.5" onclick="toggleTool('${id}')"><span class="arr">▶</span> Extended Thinking</div><div class="tool-body p-3 text-[11px] text-white/55 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(th)}</div></div>`;}
   if(t==='tool_use'){
     const name = block.name || '';
     if (name === 'Agent' || name === 'Task') return renderSubagentCard(block);
     const id='tu-'+Math.random().toString(36).slice(2);
-    return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[10px] font-semibold text-purple-400/50 flex items-center gap-1.5" onclick="toggleTool('${id}')"><span class="arr">▶</span> ${esc(name||'tool')}</div><div class="tool-body p-3 text-[10px] text-white/25 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(JSON.stringify(block.input||{},null,2))}</div></div>`;
+    return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[11px] font-semibold text-purple-400/65 flex items-center gap-1.5" onclick="toggleTool('${id}')"><span class="arr">▶</span> ${esc(name||'tool')}</div><div class="tool-body p-3 text-[11px] text-white/55 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(JSON.stringify(block.input||{},null,2))}</div></div>`;
   }
-  if(t==='tool_result'){const id='tr-'+Math.random().toString(36).slice(2);let rc='';if(Array.isArray(block.content))rc=block.content.map(c=>c.text||'').join('\n');else rc=String(block.content||'');return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[10px] font-semibold text-emerald-400/50 flex items-center gap-1.5" onclick="toggleTool('${id}')"><span class="arr">▶</span> Tool Result</div><div class="tool-body p-3 text-[10px] text-white/25 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(rc.slice(0,5000))}</div></div>`;}
-  return `<div class="text-[10px] text-white/10">[${esc(t)}]</div>`;
+  if(t==='tool_result'){const id='tr-'+Math.random().toString(36).slice(2);let rc='';if(Array.isArray(block.content))rc=block.content.map(c=>c.text||'').join('\n');else rc=String(block.content||'');return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[11px] font-semibold text-emerald-400/65 flex items-center gap-1.5" onclick="toggleTool('${id}')"><span class="arr">▶</span> Tool Result</div><div class="tool-body p-3 text-[11px] text-white/55 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(rc.slice(0,5000))}</div></div>`;}
+  return `<div class="text-[10px] text-white/20">[${esc(t)}]</div>`;
 }
 
 async function openSubagentFromDescription(description) {

@@ -202,7 +202,7 @@ login.html          독립 로그인 페이지
   ├─ app.js         코어: state, bus, accessors, WS, routing, utils, h(), 4단계 상태 감지
   ├─ charts.js      Chart.js 6개 차트 (usage, models, dailyCost, cache, stopReason, modelCache)
   ├─ sessions.js    세션 목록, 필터, 프리셋, 벌크 작업, 페이지네이션
-  ├─ overview.js    히어로 카드, 기간별 비용, TOP 5, 예측, 미리보기 drawer
+  ├─ overview.js    overview 콘솔, KPI 요약, 기간별 비용, TOP 5, 예측, 미리보기 drawer
   ├─ plan.js        플랜 사용량, 설정 모달
   ├─ subagents.js   7개 섹션 시각화 (유형별·종료사유·히트맵·매트릭스)
   ├─ timeline.js    Gantt 차트, 히트맵(드릴다운), 효율분석, 일간리포트(시간별 아코디언), 스택드 바 차트, 트렌드비교

@@ -98,6 +98,33 @@ def test_normalize_codex_record_supports_rollout_session_meta_shape():
     assert normalized.payload['parent_thread_id'] == '019d9615-2d01-7fd1-a41f-5e0d5db53eaa'
 
 
+def test_normalize_codex_record_handles_string_subagent_source_shape():
+    raw = {
+        'type': 'session_meta',
+        'payload': {
+            'id': '019d9faa-73fc-7bb0-befd-b5a6b49b562e',
+            'timestamp': '2026-04-18T08:17:21.421Z',
+            'cwd': '/home/user/projects/codex-dashboard',
+            'originator': 'codex_exec',
+            'source': {
+                'subagent': 'review',
+            },
+        },
+        '_source_path': str(FIXTURES / 'rollout.jsonl'),
+        '_line_number': 0,
+    }
+
+    normalized = cp.normalize_codex_record(raw)
+
+    assert normalized.event_type == 'agent'
+    assert normalized.session_id == '019d9faa-73fc-7bb0-befd-b5a6b49b562e'
+    assert normalized.project_path == '/home/user/projects/codex-dashboard'
+    assert normalized.project_name == 'codex-dashboard'
+    assert normalized.payload['agent_name'] == ''
+    assert normalized.payload['status'] == 'started'
+    assert normalized.payload['parent_thread_id'] == ''
+
+
 def test_normalize_codex_record_supports_rollout_function_call_shape():
     raw = {
         'type': 'response_item',

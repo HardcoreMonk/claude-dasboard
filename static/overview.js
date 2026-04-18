@@ -148,11 +148,8 @@ function overviewToneClass(tone) {
 function overviewStatRows() {
   const stats = overviewState.stats || {};
   const today = stats.today || {};
-  const all = stats.all_time || {};
-  const periods = overviewState.periods || {};
   const forecast = overviewState.forecast || {};
   const plan = overviewState.plan || {};
-  const usage = overviewState.usage || {};
   const daily = plan.daily || {};
   const weekly = plan.weekly || {};
   const rows = [
@@ -160,27 +157,20 @@ function overviewStatRows() {
     { label: '일일 예산', value: overviewPlanPct(daily), detail: `${fmt$(daily.used_cost || 0)} / ${fmt$(daily.limit_cost || 0)} · 남은 ${overviewDurationLabel(daily.remaining_seconds)}` },
     { label: '주간 예산', value: overviewPlanPct(weekly), detail: `${fmt$(weekly.used_cost || 0)} / ${fmt$(weekly.limit_cost || 0)} · 재설정 ${overviewResetLabel(weekly.reset_at)}` },
     { label: '월말 예측', value: fmt$(forecast.projected_eom_cost), detail: `14일 평균 ${fmt$(forecast.avg_cost_per_day || 0)} · ${forecast.days_left_in_month || 0}일 남음` },
-    { label: '전체 비용', value: fmt$(all.cost_usd), detail: `${fmtN(all.total_sessions || 0)}세션 · ${fmtN(all.messages || 0)}메시지` },
-    { label: '캐시 효율', value: `${((all.input_tokens || 0) + (all.cache_read_tokens || 0)) > 0 ? (((all.cache_read_tokens || 0) / ((all.input_tokens || 0) + (all.cache_read_tokens || 0))) * 100).toFixed(1) : '0.0'}%`, detail: `${fmtTok(all.cache_read_tokens || 0)} 읽기 · ${fmtTok(all.cache_creation_tokens || 0)} 생성` },
   ];
-  if (usage.sessions != null) {
-    rows.push({ label: '사용량', value: `${fmtN(usage.sessions || 0)}세션`, detail: `${fmtN(usage.messages || 0)}메시지 · ${overviewRelativeTime(usage.latest_activity_at)}` });
-  } else if (periods.day) {
-    rows.push({ label: '오늘 요약', value: fmt$(periods.day.cost), detail: `${fmtN(periods.day.messages || 0)}메시지 · 캐시 ${fmtTok(periods.day.cache_read_tokens || 0)}` });
-  }
-  return rows.slice(0, 6);
+  return rows;
 }
 
 function renderOverviewAxisGrid() {
-  const rows = overviewStatRows().slice(0, 3);
+  const rows = overviewStatRows().slice(0, 2);
   const usage = overviewState.usage || {};
   const topSession = (usage.top_sessions || [])[0];
   overviewSetHtml('overviewAxisBody', `
-    <div class="grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
-      <div class="rounded-[28px] border border-white/[0.07] bg-white/[0.03] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-        <div class="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Portal axis</div>
-        <div class="mt-2 text-xl font-extrabold tracking-tight text-white/92">Ops, productivity, reporting를 같은 축에 놓습니다.</div>
-        <p class="mt-2 text-[13px] leading-6 text-white/56">기존 KPI, alert, flow, top-projects 데이터를 유지한 채 배치를 다시 잡았습니다. 상단 그룹 네비게이션과 이 영역의 빠른 동작 버튼으로 같은 데이터 위를 오가게 합니다.</p>
+    <div class="grid gap-3 lg:grid-cols-[1.35fr_.65fr]">
+      <div class="rounded-[24px] border border-white/[0.07] bg-white/[0.03] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <div class="text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">Portal axis</div>
+        <div class="mt-2 text-[1.05rem] font-extrabold tracking-tight text-white/92">운영 수치와 탐색 진입점을 같은 화면에서 바로 읽습니다.</div>
+        <p class="mt-2 text-[12px] leading-6 text-white/56">상단은 상태 요약, 아래는 액션과 최근 흐름으로 나눠서 같은 데이터 위를 이동하게 정리했습니다.</p>
         <div class="mt-4 flex flex-wrap gap-2">
           <button data-action="showView" data-arg="overview" class="overview-flow-path__pill overview-flow-path__pill--active">overview</button>
           <button data-action="showView" data-arg="explore" class="overview-flow-path__pill">explore</button>
@@ -188,20 +178,20 @@ function renderOverviewAxisGrid() {
           <button data-action="showView" data-arg="admin" class="overview-flow-path__pill">admin</button>
         </div>
       </div>
-      <div class="grid gap-3 sm:grid-cols-3">
+      <div class="grid gap-3 sm:grid-cols-2">
         ${rows.map((row) => `
-          <article class="rounded-[24px] border border-white/[0.06] bg-white/[0.025] p-4">
-            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">${esc(row.label)}</div>
-            <div class="mt-2 text-2xl font-extrabold tracking-tight text-white/92">${row.value}</div>
+          <article class="rounded-[20px] border border-white/[0.06] bg-white/[0.025] p-4">
+            <div class="text-[10px] font-bold uppercase tracking-[0.12em] text-white/34">${esc(row.label)}</div>
+            <div class="mt-2 text-[1.4rem] font-extrabold tracking-tight text-white/92">${row.value}</div>
             <div class="mt-1 text-[11px] leading-5 text-white/45">${esc(row.detail)}</div>
           </article>
         `).join('')}
       </div>
-      <div class="rounded-[24px] border border-white/[0.06] bg-white/[0.025] p-4 lg:col-span-2">
+      <div class="rounded-[20px] border border-white/[0.06] bg-white/[0.025] p-4 lg:col-span-2">
         <div class="flex items-center justify-between gap-3">
           <div>
             <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Latest active</div>
-            <div class="mt-1 text-sm font-bold text-white/90">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
+            <div class="mt-1 text-[13px] font-bold text-white/90">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
           </div>
           <span class="overview-region-chip overview-region-chip--cyan">live</span>
         </div>
@@ -277,9 +267,19 @@ function renderOverviewOpsSummary() {
           <div class="overview-stat-chip__detail">${esc(row.detail)}</div>
         </div>
       `).join('')}
-      <div class="overview-stat-chip overview-stat-chip--wide">
+      <div class="overview-stat-chip">
+        <div class="overview-stat-chip__label">전체 규모</div>
+        <div class="overview-stat-chip__value">${fmtN(all.total_sessions || 0)}세션</div>
+        <div class="overview-stat-chip__detail">${fmt$(all.cost_usd || 0)} · ${fmtN(all.messages || 0)}메시지</div>
+      </div>
+      <div class="overview-stat-chip">
+        <div class="overview-stat-chip__label">캐시 효율</div>
+        <div class="overview-stat-chip__value">${((all.input_tokens || 0) + (all.cache_read_tokens || 0)) > 0 ? (((all.cache_read_tokens || 0) / ((all.input_tokens || 0) + (all.cache_read_tokens || 0))) * 100).toFixed(1) : '0.0'}%</div>
+        <div class="overview-stat-chip__detail">${fmtTok(all.cache_read_tokens || 0)} 읽기 · ${fmtTok(all.cache_creation_tokens || 0)} 생성</div>
+      </div>
+      <div class="overview-stat-chip overview-stat-chip--session">
         <div class="overview-stat-chip__label">Top session</div>
-        <div class="overview-stat-chip__value">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
+        <div class="overview-stat-chip__value overview-stat-chip__value--compact">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
         <div class="overview-stat-chip__detail">${esc(topSession ? `${topSession.project_name || '—'} · ${fmtN(topSession.message_count || 0)} messages` : 'usage summary unavailable')}</div>
       </div>
     </div>`);

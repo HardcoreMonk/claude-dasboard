@@ -613,6 +613,11 @@ def _payload_dict(raw: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _dict_value(raw: dict[str, Any], key: str) -> dict[str, Any]:
+    value = raw.get(key)
+    return value if isinstance(value, dict) else {}
+
+
 def _rollout_session_id_from_path(path: Path | None) -> str:
     if path is None:
         return ''
@@ -691,11 +696,9 @@ def normalize_codex_record(raw: dict[str, Any]) -> NormalizedCodexRecord:
     timestamp = _timestamp(raw)
 
     if event_type == 'session_meta':
-        spawn = (
-            payload_dict.get('source', {}).get('subagent', {}).get('thread_spawn', {})
-            if isinstance(payload_dict.get('source'), dict)
-            else {}
-        )
+        source = _dict_value(payload_dict, 'source')
+        subagent = _dict_value(source, 'subagent')
+        spawn = _dict_value(subagent, 'thread_spawn')
         session_id = _first_str(payload_dict, 'id') or session_id or _rollout_session_id_from_path(source_path)
         project_path = _first_str(payload_dict, 'cwd', 'project_path', 'projectPath')
         project_name = PureWindowsPath(project_path).name if project_path else ''
