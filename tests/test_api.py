@@ -937,12 +937,12 @@ def test_subagents_heatmap_falls_back_to_codex_agent_runs(api_client):
 # ─── Search + project disambiguation ────────────────────────────────────
 
 def test_search_fts_finds_keyword(api_client):
-    r = api_client.get('/api/sessions/search?q=haystack')
+    r = api_client.get('/api/sessions/search?q=search')
     assert r.status_code == 200
     body = r.json()
-    # 2 parent-A messages contain 'haystack'
-    assert len(body['results']) == 2
-    assert all('haystack' in (row['content_preview'] or '') for row in body['results'])
+    assert body['fts'] is True
+    assert len(body['results']) == 4
+    assert all('search' in (row['content_preview'] or '').lower() for row in body['results'])
 
 
 def test_sessions_search_is_backed_by_codex_search_index(api_client):

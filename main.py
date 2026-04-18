@@ -625,92 +625,49 @@ def api_stats():
 def _get_stats() -> dict:
     with read_db() as db:
         today_utc = _today_start_utc(db)
-        codex_total_sessions = int(
-            db.execute('SELECT COUNT(*) FROM codex_sessions').fetchone()[0] or 0
-        )
-        if codex_total_sessions > 0:
-            row = db.execute('''
-                SELECT COUNT(*) AS total_sessions,
-                       0 AS input_tokens,
-                       0 AS output_tokens,
-                       0 AS cache_creation_tokens,
-                       0 AS cache_read_tokens,
-                       0.0 AS cost_usd,
-                       COALESCE((SELECT COUNT(*) FROM codex_messages), 0) AS messages
-                FROM codex_sessions
-            ''').fetchone()
-            today = db.execute('''
-                SELECT 0 AS input_tokens,
-                       0 AS output_tokens,
-                       0 AS cache_creation_tokens,
-                       0 AS cache_read_tokens,
-                       0.0 AS cost_usd,
-                       COALESCE((
-                           SELECT COUNT(*)
-                           FROM codex_messages m
-                           JOIN codex_sessions s ON s.id = m.session_id
-                           WHERE s.updated_at >= ?
-                       ), 0) AS messages,
-                       COUNT(*) AS sessions
-                FROM codex_sessions
-                WHERE updated_at >= ?
-            ''', (today_utc, today_utc)).fetchone()
-            model_rows = db.execute('''
-                SELECT model,
-                       COUNT(DISTINCT session_id) AS cnt,
-                       0.0 AS cost,
-                       0 AS input_tokens,
-                       0 AS cache_read_tokens,
-                       0 AS cache_creation_tokens
-                FROM codex_messages
-                WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
-                GROUP BY model ORDER BY cnt DESC, model ASC
-            ''').fetchall()
-            stop_reasons = db.execute('''
-                SELECT '(unknown)' AS stop_reason,
-                       COUNT(*) AS count,
-                       0.0 AS cost
-                FROM codex_sessions
-            ''').fetchall()
-        else:
-            row = db.execute('''
-                SELECT COUNT(*) AS total_sessions,
-                       COALESCE(SUM(total_input_tokens), 0) AS input_tokens,
-                       COALESCE(SUM(total_output_tokens), 0) AS output_tokens,
-                       COALESCE(SUM(total_cache_creation_tokens), 0) AS cache_creation_tokens,
-                       COALESCE(SUM(total_cache_read_tokens), 0) AS cache_read_tokens,
-                       COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost_usd,
-                       COALESCE(SUM(message_count), 0) AS messages
-                FROM sessions
-            ''').fetchone()
-            today = db.execute('''
-                SELECT COALESCE(SUM(total_input_tokens), 0) AS input_tokens,
-                       COALESCE(SUM(total_output_tokens), 0) AS output_tokens,
-                       COALESCE(SUM(total_cache_creation_tokens), 0) AS cache_creation_tokens,
-                       COALESCE(SUM(total_cache_read_tokens), 0) AS cache_read_tokens,
-                       COALESCE(SUM(cost_micro),0)*1.0/1000000 AS cost_usd,
-                       COALESCE(SUM(message_count), 0) AS messages,
-                       COUNT(*) AS sessions
-                FROM sessions WHERE updated_at >= ?
-            ''', (today_utc,)).fetchone()
-            model_rows = db.execute('''
-                SELECT model,
-                       COUNT(DISTINCT session_id) AS cnt,
-                       SUM(cost_micro)*1.0/1000000 AS cost,
-                       SUM(input_tokens) AS input_tokens,
-                       SUM(cache_read_tokens) AS cache_read_tokens,
-                       SUM(cache_creation_tokens) AS cache_creation_tokens
-                FROM messages
-                WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
-                GROUP BY model ORDER BY cost DESC
-            ''').fetchall()
-            stop_reasons = db.execute('''
-                SELECT COALESCE(NULLIF(final_stop_reason, ''), '(unknown)') AS stop_reason,
-                       COUNT(*) AS count,
-                       SUM(cost_micro)*1.0/1000000 AS cost
-                FROM sessions
-                GROUP BY stop_reason ORDER BY count DESC
-            ''').fetchall()
+        row = db.execute('''
+            SELECT COUNT(*) AS total_sessions,
+                   0 AS input_tokens,
+                   0 AS output_tokens,
+                   0 AS cache_creation_tokens,
+                   0 AS cache_read_tokens,
+                   0.0 AS cost_usd,
+                   COALESCE((SELECT COUNT(*) FROM codex_messages), 0) AS messages
+            FROM codex_sessions
+        ''').fetchone()
+        today = db.execute('''
+            SELECT 0 AS input_tokens,
+                   0 AS output_tokens,
+                   0 AS cache_creation_tokens,
+                   0 AS cache_read_tokens,
+                   0.0 AS cost_usd,
+                   COALESCE((
+                       SELECT COUNT(*)
+                       FROM codex_messages m
+                       JOIN codex_sessions s ON s.id = m.session_id
+                       WHERE s.updated_at >= ?
+                   ), 0) AS messages,
+                   COUNT(*) AS sessions
+            FROM codex_sessions
+            WHERE updated_at >= ?
+        ''', (today_utc, today_utc)).fetchone()
+        model_rows = db.execute('''
+            SELECT model,
+                   COUNT(DISTINCT session_id) AS cnt,
+                   0.0 AS cost,
+                   0 AS input_tokens,
+                   0 AS cache_read_tokens,
+                   0 AS cache_creation_tokens
+            FROM codex_messages
+            WHERE role = 'assistant' AND model IS NOT NULL AND model != ''
+            GROUP BY model ORDER BY cnt DESC, model ASC
+        ''').fetchall()
+        stop_reasons = db.execute('''
+            SELECT '(unknown)' AS stop_reason,
+                   COUNT(*) AS count,
+                   0.0 AS cost
+            FROM codex_sessions
+        ''').fetchall()
 
         models = [{'model': m['model'], 'cnt': m['cnt'], 'cost': m['cost']}
                   for m in model_rows]
@@ -776,169 +733,84 @@ def api_sessions(
     sort_col = _SESSIONS_SORT_MAP.get(sort, 'updated_at')
     order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
     with read_db() as db:
-        codex_total = int(db.execute('SELECT COUNT(*) FROM codex_sessions').fetchone()[0] or 0)
-        if codex_total > 0:
-            codex_conds: list[str] = []
-            codex_params: list = []
-            codex_sort_map = {
-                'updated_at': 's.updated_at',
-                'created_at': 's.created_at',
-                'cost_micro': 'total_cost_usd',
-                'message_count': 's.message_count',
-                'project_name': 'p.project_name',
-                'model': 's.model',
-                'total_input_tokens': 'total_input_tokens',
-                'total_output_tokens': 'total_output_tokens',
-                'total_cache_read_tokens': 'total_cache_read_tokens',
-            }
-            codex_order = codex_sort_map.get(sort_col, 's.updated_at')
-            if node:
-                codex_conds.append("COALESCE(NULLIF(s.source_node, ''), 'local') = ?")
-                codex_params.append(node)
-            if pinned_only:
-                codex_conds.append("s.pinned = 1")
-            if project:
-                codex_conds.append("p.project_name = ?")
-                codex_params.append(project)
-            if model:
-                codex_conds.append("s.model LIKE ? ESCAPE '\\'")
-                codex_params.append(f"%{_esc_like(model)}%")
-            if search:
-                s = f"%{_esc_like(search)}%"
-                codex_conds.append("(p.project_name LIKE ? ESCAPE '\\' OR COALESCE(s.cwd, '') LIKE ? ESCAPE '\\')")
-                codex_params.extend([s, s])
-            if date_from:
-                if not re.match(r'^\d{4}-\d{2}-\d{2}', date_from):
-                    return JSONResponse({'error': 'invalid date format', 'field': 'date_from'}, status_code=400)
-                codex_conds.append("s.updated_at >= ?")
-                codex_params.append(date_from)
-            if date_to:
-                if not re.match(r'^\d{4}-\d{2}-\d{2}', date_to):
-                    return JSONResponse({'error': 'invalid date format', 'field': 'date_to'}, status_code=400)
-                codex_conds.append("s.updated_at <= ?")
-                codex_params.append(date_to + "T23:59:59Z" if len(date_to) == 10 else date_to)
-            if cost_min is not None:
-                codex_conds.append("0 >= ?")
-                codex_params.append(cost_min)
-            if cost_max is not None:
-                codex_conds.append("0 <= ?")
-                codex_params.append(cost_max)
-            if tag:
-                codex_conds.append(
-                    "(',' || COALESCE(s.tags, '') || ',') LIKE ? ESCAPE '\\'"
-                )
-                codex_params.append(f"%,{_esc_like(tag)},%")
-            codex_where = "WHERE " + " AND ".join(codex_conds) if codex_conds else ""
-            total = db.execute(f'''
-                SELECT COUNT(*)
-                FROM codex_sessions s
-                JOIN codex_projects p ON p.project_path = s.project_path
-                {codex_where}
-            ''', codex_params).fetchone()[0]
-            offset = (page - 1) * per_page
-            rows = db.execute(f'''
-                SELECT s.id,
-                       p.project_name,
-                       s.project_path,
-                       s.cwd,
-                       s.model,
-                       s.created_at,
-                       s.updated_at,
-                       0 AS total_input_tokens,
-                       0 AS total_output_tokens,
-                       0 AS total_cache_creation_tokens,
-                       0 AS total_cache_read_tokens,
-                       0.0 AS total_cost_usd,
-                       s.message_count,
-                       s.user_message_count,
-                       s.pinned,
-                       0 AS is_subagent,
-                       NULL AS parent_session_id,
-                       '' AS agent_type,
-                       '' AS agent_description,
-                       '' AS version,
-                       COALESCE(NULLIF(s.final_stop_reason, ''), '') AS final_stop_reason,
-                       COALESCE(NULLIF(s.tags, ''), '') AS tags,
-                       0 AS turn_duration_ms,
-                       COALESCE(NULLIF(s.source_node, ''), 'local') AS source_node,
-                       (julianday(COALESCE(NULLIF(s.updated_at,''), s.created_at)) - julianday(s.created_at)) * 86400.0 AS duration_seconds,
-                       0 AS subagent_count,
-                       0.0 AS subagent_cost
-                FROM codex_sessions s
-                JOIN codex_projects p ON p.project_path = s.project_path
-                {codex_where}
-                ORDER BY s.pinned DESC, {codex_order} {order_sql}
-                LIMIT ? OFFSET ?
-            ''', codex_params + [per_page, offset]).fetchall()
-            return {
-                'sessions': [dict(r) for r in rows],
-                'total': total, 'page': page, 'per_page': per_page,
-                'pages': max(1, -(-total // per_page)),
-                'sort': sort, 'order': order_sql.lower(),
-            }
-
         conds: list[str] = []
         params: list = []
+        codex_sort_map = {
+            'updated_at': 's.updated_at',
+            'created_at': 's.created_at',
+            'cost_micro': 'total_cost_usd',
+            'message_count': 's.message_count',
+            'project_name': 'p.project_name',
+            'model': 's.model',
+            'total_input_tokens': 'total_input_tokens',
+            'total_output_tokens': 'total_output_tokens',
+            'total_cache_read_tokens': 'total_cache_read_tokens',
+        }
+        codex_order = codex_sort_map.get(sort_col, 's.updated_at')
         if node:
-            conds.append("source_node = ?")
+            conds.append("COALESCE(NULLIF(s.source_node, ''), 'local') = ?")
             params.append(node)
-        if not include_subagents:
-            conds.append("is_subagent = 0")
         if pinned_only:
-            conds.append("pinned = 1")
+            conds.append("s.pinned = 1")
         if project:
-            conds.append("project_name = ?")
+            conds.append("p.project_name = ?")
             params.append(project)
         if model:
-            conds.append("model LIKE ? ESCAPE '\\'")
+            conds.append("s.model LIKE ? ESCAPE '\\'")
             params.append(f"%{_esc_like(model)}%")
         if search:
-            conds.append("(project_name LIKE ? ESCAPE '\\' OR cwd LIKE ? ESCAPE '\\')")
             s = f"%{_esc_like(search)}%"
+            conds.append("(p.project_name LIKE ? ESCAPE '\\' OR COALESCE(s.cwd, '') LIKE ? ESCAPE '\\')")
             params.extend([s, s])
         if date_from:
             if not re.match(r'^\d{4}-\d{2}-\d{2}', date_from):
                 return JSONResponse({'error': 'invalid date format', 'field': 'date_from'}, status_code=400)
-            conds.append("updated_at >= ?")
+            conds.append("s.updated_at >= ?")
             params.append(date_from)
         if date_to:
             if not re.match(r'^\d{4}-\d{2}-\d{2}', date_to):
                 return JSONResponse({'error': 'invalid date format', 'field': 'date_to'}, status_code=400)
-            # end-of-day: append "T23:59:59Z" so the full day is included
-            conds.append("updated_at <= ?")
+            conds.append("s.updated_at <= ?")
             params.append(date_to + "T23:59:59Z" if len(date_to) == 10 else date_to)
         if cost_min is not None:
-            conds.append("cost_micro >= ?")
-            params.append(int(cost_min * 1_000_000))
+            conds.append("0 >= ?")
+            params.append(cost_min)
         if cost_max is not None:
-            conds.append("cost_micro <= ?")
-            params.append(int(cost_max * 1_000_000))
+            conds.append("0 <= ?")
+            params.append(cost_max)
         if tag:
             conds.append(
-                "(',' || COALESCE(tags, '') || ',') LIKE ? ESCAPE '\\'"
+                "(',' || COALESCE(s.tags, '') || ',') LIKE ? ESCAPE '\\'"
             )
             params.append(f"%,{_esc_like(tag)},%")
         where = "WHERE " + " AND ".join(conds) if conds else ""
-        total = db.execute(f"SELECT COUNT(*) FROM sessions {where}", params).fetchone()[0]
+        total = db.execute(f'''
+            SELECT COUNT(*)
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            {where}
+        ''', params).fetchone()[0]
         offset = (page - 1) * per_page
         rows = db.execute(f'''
-            SELECT s.id, s.project_name, s.project_path, s.cwd, s.model,
+            SELECT s.id, p.project_name, s.project_path, s.cwd, s.model,
                    s.created_at, s.updated_at,
-                   s.total_input_tokens, s.total_output_tokens,
-                   s.total_cache_creation_tokens, s.total_cache_read_tokens,
-                   s.cost_micro*1.0/1000000 AS total_cost_usd,
+                   0 AS total_input_tokens, 0 AS total_output_tokens,
+                   0 AS total_cache_creation_tokens, 0 AS total_cache_read_tokens,
+                   0.0 AS total_cost_usd,
                    s.message_count, s.user_message_count, s.pinned,
-                   s.is_subagent, s.parent_session_id,
-                   s.agent_type, s.agent_description, s.version,
-                   s.final_stop_reason, s.tags,
-                   s.turn_duration_ms, s.source_node,
-                   {_DURATION_SQL} AS duration_seconds,
-                   (SELECT COUNT(*) FROM sessions c
-                    WHERE c.parent_session_id = s.id AND c.is_subagent = 1) AS subagent_count,
-                   (SELECT COALESCE(SUM(cost_micro),0)*1.0/1000000 FROM sessions c
-                    WHERE c.parent_session_id = s.id AND c.is_subagent = 1) AS subagent_cost
-            FROM sessions s {where}
-            ORDER BY s.pinned DESC, s.{sort_col} {order_sql}
+                   0 AS is_subagent, NULL AS parent_session_id,
+                   '' AS agent_type, '' AS agent_description, '' AS version,
+                   COALESCE(NULLIF(s.final_stop_reason, ''), '') AS final_stop_reason,
+                   COALESCE(NULLIF(s.tags, ''), '') AS tags,
+                   0 AS turn_duration_ms,
+                   COALESCE(NULLIF(s.source_node, ''), 'local') AS source_node,
+                   (julianday(COALESCE(NULLIF(s.updated_at,''), s.created_at)) - julianday(s.created_at)) * 86400.0 AS duration_seconds,
+                   0 AS subagent_count,
+                   0.0 AS subagent_cost
+            FROM codex_sessions s
+            JOIN codex_projects p ON p.project_path = s.project_path
+            {where}
+            ORDER BY s.pinned DESC, {codex_order} {order_sql}
             LIMIT ? OFFSET ?
         ''', params + [per_page, offset]).fetchall()
     return {
@@ -968,69 +840,20 @@ def api_session_search_messages(
 ):
     """Full-text search across message previews using SQLite FTS5."""
     fts_query = _build_fts_query(q)
-    with read_db() as db:
-        codex_total = int(db.execute('SELECT COUNT(*) FROM codex_messages').fetchone()[0] or 0)
-        if codex_total > 0:
-            rows = [
-                {
-                    'id': row['message_id'],
-                    'session_id': row['session_id'],
-                    'role': row['role'],
-                    'content_preview': row['content_preview'],
-                    'timestamp': row['created_at'],
-                    'cost_usd': 0.0,
-                    'project_name': row['project_name'],
-                    'project_path': row['project_path'],
-                }
-                for row in search_codex_messages(q, limit=limit)
-            ]
-            return {'results': rows, 'query': q, 'fts': bool(fts_query)}
-        if fts_query:
-            try:
-                rows = db.execute('''
-                    SELECT m.id, m.session_id, m.role, m.content_preview,
-                           m.timestamp, m.cost_micro*1.0/1000000 AS cost_usd,
-                           s.project_name, s.project_path
-                    FROM messages_fts fts
-                    JOIN messages m ON m.id = fts.rowid
-                    JOIN sessions s ON m.session_id = s.id
-                    WHERE messages_fts MATCH ?
-                    ORDER BY m.timestamp DESC
-                    LIMIT ?
-                ''', (fts_query, limit)).fetchall()
-                if rows:
-                    return {'results': [dict(r) for r in rows], 'query': q, 'fts': True}
-            except sqlite3.OperationalError as e:
-                logger.warning("FTS query failed (%s) — falling back to LIKE", e)
-        # Fallback: LIKE scan (used when FTS5 unavailable or empty token set)
-        rows = db.execute('''
-            SELECT m.id, m.session_id, m.role, m.content_preview,
-                   m.timestamp, m.cost_micro*1.0/1000000 AS cost_usd,
-                   s.project_name, s.project_path
-            FROM messages m
-            JOIN sessions s ON m.session_id = s.id
-            WHERE m.content_preview LIKE ? ESCAPE '\\'
-            ORDER BY m.timestamp DESC
-            LIMIT ?
-        ''', (f'%{_esc_like(q)}%', limit)).fetchall()
-        if not rows:
-            rows = db.execute('''
-                SELECT m.id,
-                       m.session_id,
-                       m.role,
-                       m.content_preview,
-                       m.timestamp,
-                       0.0 AS cost_usd,
-                       p.project_name,
-                       p.project_path
-                FROM codex_messages m
-                JOIN codex_sessions s ON s.id = m.session_id
-                JOIN codex_projects p ON p.project_path = s.project_path
-                WHERE m.content_preview LIKE ? ESCAPE '\\'
-                ORDER BY m.timestamp DESC
-                LIMIT ?
-            ''', (f'%{_esc_like(q)}%', limit)).fetchall()
-    return {'results': [dict(r) for r in rows], 'query': q, 'fts': False}
+    rows = [
+        {
+            'id': row['message_id'],
+            'session_id': row['session_id'],
+            'role': row['role'],
+            'content_preview': row['content_preview'],
+            'timestamp': row['created_at'],
+            'cost_usd': 0.0,
+            'project_name': row['project_name'],
+            'project_path': row['project_path'],
+        }
+        for row in search_codex_messages(q, limit=limit)
+    ]
+    return {'results': [dict(r) for r in rows], 'query': q, 'fts': bool(fts_query)}
 
 
 @app.get("/api/search/messages")
@@ -1062,40 +885,18 @@ def api_message_position(session_id: str, message_id: int = Query(...)):
     Used by the frontend to load the right page of messages when jumping
     from a search result to a specific message.
     """
-    with read_db() as db:
-        row = db.execute(
-            'SELECT is_subagent FROM sessions WHERE id = ?', (session_id,)
-        ).fetchone()
-        is_sub = bool(row and row['is_subagent'])
-        side_filter = '' if is_sub else 'AND is_sidechain = 0'
-        pos = db.execute(f'''
-            SELECT COUNT(*) FROM messages
-            WHERE session_id = ? {side_filter}
-              AND (timestamp, id) < (
-                SELECT timestamp, id FROM messages WHERE id = ?
-              )
-        ''', (session_id, message_id)).fetchone()[0]
-        total = db.execute(
-            f'SELECT COUNT(*) FROM messages WHERE session_id = ? {side_filter}',
-            (session_id,),
-        ).fetchone()[0]
-        if total == 0:
-            payload = get_codex_message_position(session_id, message_id)
-            if payload is not None:
-                return payload
-    return {'position': pos, 'total': total, 'message_id': message_id}
+    payload = get_codex_message_position(session_id, message_id)
+    if payload is None:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return payload
 
 
 @app.get("/api/sessions/{session_id}")
 def api_session_detail(session_id: str):
-    with read_db() as db:
-        row = db.execute('SELECT * FROM sessions WHERE id = ?', (session_id,)).fetchone()
-    if not row:
-        codex_row = get_codex_session_detail_row(session_id)
-        if codex_row is None:
-            return JSONResponse({'error': 'Not found'}, status_code=404)
-        return codex_row
-    return dict(row)
+    codex_row = get_codex_session_detail_row(session_id)
+    if codex_row is None:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return codex_row
 
 
 @app.get("/api/sessions/{session_id}/messages")
@@ -1104,36 +905,10 @@ def api_session_messages(
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
 ):
-    """Return messages for a session.
-
-    Parent sessions filter ``is_sidechain=0`` (subagent-owned records have
-    already been moved out by the v5 migration, so the filter is a belt-and-
-    braces guard). Subagent sessions skip the filter entirely because their
-    records were authored as sidechain records in the original parent JSONL.
-    """
-    with read_db() as db:
-        row = db.execute(
-            'SELECT is_subagent FROM sessions WHERE id = ?', (session_id,)
-        ).fetchone()
-        is_sub = bool(row and row['is_subagent'])
-        side_filter = '' if is_sub else 'AND is_sidechain = 0'
-        rows = db.execute(f'''
-            SELECT id, message_uuid, parent_uuid, role, content_preview, content,
-                   input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-                   cost_micro*1.0/1000000 AS cost_usd, model, timestamp, git_branch,
-                   is_sidechain, stop_reason
-            FROM messages
-            WHERE session_id = ? {side_filter}
-            ORDER BY timestamp ASC, id ASC
-            LIMIT ? OFFSET ?
-        ''', (session_id, limit, offset)).fetchall()
-        total = db.execute(
-            f'SELECT COUNT(*) FROM messages WHERE session_id = ? {side_filter}',
-            (session_id,),
-        ).fetchone()[0]
-        if total == 0:
-            return get_codex_session_messages_page(session_id, limit=limit, offset=offset)
-    return {'messages': [dict(r) for r in rows], 'total': total, 'limit': limit, 'offset': offset}
+    payload = get_codex_session_messages_page(session_id, limit=limit, offset=offset)
+    if payload['total'] == 0 and get_codex_session_detail_row(session_id) is None:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
+    return payload
 
 
 @app.get("/api/sessions/{session_id}/replay")
@@ -2961,25 +2736,16 @@ def api_session_set_tags(session_id: str, body: SessionTagsBody):
     and normalises, the backend just stores the string."""
     tags = body.tags.strip()
     codex_row = get_codex_session_detail_row(session_id)
-    if codex_row is not None:
-        with write_db() as db:
-            codex_cur = db.execute(
-                'UPDATE codex_sessions SET tags = ? WHERE id = ?',
-                (tags, session_id),
-            )
-        return {
-            'ok': True,
-            'updated': codex_cur.rowcount > 0,
-            'tags': tags,
-        }
+    if codex_row is None:
+        return JSONResponse({'error': 'Not found'}, status_code=404)
     with write_db() as db:
-        legacy_cur = db.execute(
-            'UPDATE sessions SET tags = ? WHERE id = ?',
+        codex_cur = db.execute(
+            'UPDATE codex_sessions SET tags = ? WHERE id = ?',
             (tags, session_id),
         )
     return {
         'ok': True,
-        'updated': legacy_cur.rowcount > 0,
+        'updated': codex_cur.rowcount > 0,
         'tags': tags,
     }
 
@@ -2992,15 +2758,9 @@ def api_tags_list(
     """Return every distinct tag across all sessions with its session count."""
     counts: dict[str, int] = {}
     with read_db() as db:
-        codex_total = int(db.execute('SELECT COUNT(*) FROM codex_sessions').fetchone()[0] or 0)
-        if codex_total > 0:
-            rows = db.execute(
-                "SELECT tags FROM codex_sessions WHERE tags IS NOT NULL AND tags != ''"
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT tags FROM sessions WHERE tags IS NOT NULL AND tags != ''"
-            ).fetchall()
+        rows = db.execute(
+            "SELECT tags FROM codex_sessions WHERE tags IS NOT NULL AND tags != ''"
+        ).fetchall()
     for r in rows:
         for t in (r['tags'] or '').split(','):
             t = t.strip()
