@@ -10,18 +10,10 @@ import pytest
 
 @pytest.fixture()
 def temp_db(tmp_path, monkeypatch):
-    """Each test gets a fresh DB file and a fresh database module state.
-
-    We also point CLAUDE_PROJECTS at an empty temp dir so the v5 subagent
-    walk doesn't accidentally scan the developer's real ``~/.claude/projects``
-    (slow + test pollution).
-    """
+    """Each test gets a fresh DB file and a fresh database module state."""
     db_file = tmp_path / 'test.db'
-    fake_claude_projects = tmp_path / 'claude-projects'
-    fake_claude_projects.mkdir()
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
-    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_claude_projects)
     if hasattr(database._read_local, 'conn'):
         try:
             database._read_local.conn.close()
@@ -66,99 +58,6 @@ def test_init_db_is_idempotent(temp_db):
 
     assert v1 == v2 == database.SCHEMA_VERSION
     assert tables1 == tables2
-
-
-def test_migration_heal_project_identity(temp_db):
-    """v4 should rewrite project_path/project_name from cwd on legacy rows."""
-    import database
-    conn = sqlite3.connect(str(temp_db))
-    # Simulate a pre-v4 DB: v3 schema with a bad row
-    conn.executescript(database._SCHEMA_V1)
-    conn.execute(f"PRAGMA user_version = 3")
-    # Insert a legacy session whose project_path was dash-decoded wrongly
-    conn.execute('''INSERT INTO sessions (id, project_path, project_name, cwd)
-                    VALUES (?, ?, ?, ?)''',
-                 ('s-old', '/home/u/p/claude/dashboard',   # WRONG (dash split)
-                  'dashboard',                              # WRONG (last seg)
-                  '/home/u/p/claude-dashboard'))            # correct cwd
-    conn.commit()
-    conn.close()
-
-    database.init_db()   # should run v4 healing
-
-    conn = sqlite3.connect(str(temp_db))
-    row = conn.execute('SELECT project_path, project_name FROM sessions WHERE id=?',
-                       ('s-old',)).fetchone()
-    assert row == ('/home/u/p/claude-dashboard', 'claude-dashboard')
-
-
-def test_migration_heal_session_models(temp_db):
-    """v4 should pick a real model for sessions tagged synthetic."""
-    import database
-    conn = sqlite3.connect(str(temp_db))
-    conn.executescript(database._SCHEMA_V1)
-    conn.execute("PRAGMA user_version = 3")
-    # Session with model='<synthetic>' but mixed message history
-    conn.execute("INSERT INTO sessions (id, model) VALUES ('s-mix', '<synthetic>')")
-    conn.execute("INSERT INTO messages (session_id, message_uuid, role, model, cost_micro) "
-                 "VALUES ('s-mix', 'u1', 'assistant', 'claude-opus-4-6', 50000)")
-    conn.execute("INSERT INTO messages (session_id, message_uuid, role, model, cost_micro) "
-                 "VALUES ('s-mix', 'u2', 'assistant', '<synthetic>', 0)")
-    conn.commit()
-    conn.close()
-
-    database.init_db()
-
-    conn = sqlite3.connect(str(temp_db))
-    model = conn.execute("SELECT model FROM sessions WHERE id='s-mix'").fetchone()[0]
-    assert model == 'claude-opus-4-6'
-
-
-# ─── FTS5 ───────────────────────────────────────────────────────────────
-
-def test_fts_triggers_sync_on_insert_and_delete(temp_db):
-    """Inserting/deleting a message must propagate to messages_fts."""
-    import database
-    database.init_db()
-
-    conn = sqlite3.connect(str(temp_db))
-    conn.execute('''INSERT INTO messages
-        (session_id, message_uuid, role, content_preview, timestamp)
-        VALUES ('sid', 'uuid-1', 'user', 'quantum widget haystack', '2026-01-01')''')
-    conn.commit()
-
-    matches = conn.execute(
-        "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'haystack'"
-    ).fetchone()[0]
-    assert matches == 1, 'INSERT trigger should populate FTS'
-
-    conn.execute("DELETE FROM messages WHERE message_uuid='uuid-1'")
-    conn.commit()
-    matches_after = conn.execute(
-        "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'haystack'"
-    ).fetchone()[0]
-    assert matches_after == 0, 'DELETE trigger should purge from FTS'
-
-
-def test_fts_trigger_on_update(temp_db):
-    """Updating content_preview should replace the FTS row."""
-    import database
-    database.init_db()
-    conn = sqlite3.connect(str(temp_db))
-    conn.execute('''INSERT INTO messages
-        (session_id, message_uuid, role, content_preview, timestamp)
-        VALUES ('sid', 'uuid-2', 'user', 'original text', '2026-01-01')''')
-    conn.commit()
-
-    conn.execute("UPDATE messages SET content_preview='updated sentinel' WHERE message_uuid='uuid-2'")
-    conn.commit()
-    assert conn.execute(
-        "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'original'"
-    ).fetchone()[0] == 0
-    assert conn.execute(
-        "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'sentinel'"
-    ).fetchone()[0] == 1
-
 
 # ─── Codex schema / search ──────────────────────────────────────────────
 

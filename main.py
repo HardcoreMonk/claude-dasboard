@@ -61,7 +61,6 @@ from database import (
     list_codex_sessions,
     list_codex_sessions_table,
     delete_codex_session,
-    purge_legacy_dashboard_data,
     read_db,
     search_codex_messages,
     set_codex_session_pinned,
@@ -250,10 +249,6 @@ def _make_watcher_metrics() -> "WatcherMetrics":
 async def lifespan(app: FastAPI):
     global watcher, _sched_task
     init_db()
-    if 'PYTEST_CURRENT_TEST' not in os.environ:
-        purged = purge_legacy_dashboard_data()
-        if any(purged.values()):
-            logger.info("Purged legacy Claude dashboard data: %s", purged)
     if DB_PATH.exists() and not check_integrity():
         logger.error("DATABASE INTEGRITY CHECK FAILED — consider restoring from backup")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -2180,127 +2175,11 @@ def api_projects_top(
     projects. Set ``with_last_message=true`` to attach the most recent
     assistant message preview for the overview TOP 5 widget.
     """
-    # Fetch a wider candidate pool so we can re-rank in Python: enough that
-    # actives + top-by-cost never loses a legitimate entry.
-    candidate_limit = max(limit * 3, 30)
-    with read_db() as db:
-        rows = db.execute(f'''
-            SELECT project_name, project_path,
-                   SUM(CASE WHEN is_subagent=0 THEN 1 ELSE 0 END) AS session_count,
-                   SUM(CASE WHEN is_subagent=1 THEN 1 ELSE 0 END) AS subagent_count,
-                   SUM(cost_micro)*1.0/1000000 AS total_cost,
-                   SUM(total_input_tokens) AS input_tokens,
-                   SUM(total_output_tokens) AS output_tokens,
-                   SUM(total_cache_read_tokens) AS cache_read_tokens,
-                   SUM(total_input_tokens + total_output_tokens) AS total_tokens,
-                   MAX(updated_at) AS last_active
-            FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
-            ORDER BY total_cost DESC LIMIT ?
-        ''', (candidate_limit,)).fetchall()
-        if not rows:
-            rows = db.execute('''
-                SELECT p.project_name,
-                       p.project_path,
-                       COUNT(*) AS session_count,
-                       0 AS subagent_count,
-                       0.0 AS total_cost,
-                       0 AS input_tokens,
-                       0 AS output_tokens,
-                       0 AS cache_read_tokens,
-                       0 AS total_tokens,
-                       MAX(s.updated_at) AS last_active
-                FROM codex_sessions s
-                JOIN codex_projects p ON p.project_path = s.project_path
-                GROUP BY p.project_path, p.project_name
-                ORDER BY last_active DESC
-                LIMIT ?
-            ''', (candidate_limit,)).fetchall()
-
-        # Compute is_active against a fresh "now" timestamp and re-rank.
-        active_cutoff = (datetime.now(_tz.utc) - timedelta(minutes=active_window_minutes)).strftime(
-            '%Y-%m-%dT%H:%M:%SZ')
-        projects = []
-        for r in rows:
-            d = dict(r)
-            d['is_active'] = bool(d.get('last_active') and d['last_active'] >= active_cutoff)
-            projects.append(d)
-
-        # Two-tier sort:
-        #   (a) active first, most recent activity at the very top
-        #   (b) remaining slots: highest cost first
-        # Sorting an already cost-sorted list by (is_active DESC, last_active
-        # DESC) is stable, so inactive ordering by cost is preserved.
-        projects.sort(key=lambda p: (
-            0 if p['is_active'] else 1,       # active group first
-            -(_iso_to_epoch(p.get('last_active')) if p['is_active'] else 0),
-        ))
-        projects = projects[:limit]
-
-        if with_last_message and projects:
-            # Single query: fetch best preview per project using ROW_NUMBER.
-            paths = [p['project_path'] for p in projects]
-            ph = ','.join(['?'] * len(paths))
-            preview_rows = db.execute(f'''
-                WITH ranked AS (
-                    SELECT m.content_preview, m.timestamp, m.model, m.session_id,
-                           s.project_path,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY s.project_path
-                               ORDER BY
-                                   CASE WHEN m.content_preview NOT LIKE '[Tool:%%'
-                                        AND m.content_preview NOT LIKE '[Extended Thinking]%%'
-                                        AND m.content_preview NOT LIKE '[생각중:%%'
-                                        AND LENGTH(m.content_preview) >= 20
-                                   THEN 0 ELSE 1 END,
-                                   m.timestamp DESC, m.id DESC
-                           ) AS rn
-                    FROM messages m
-                    JOIN sessions s ON m.session_id = s.id
-                    WHERE s.project_path IN ({ph})
-                      AND m.role = 'assistant'
-                      AND m.content_preview IS NOT NULL
-                      AND m.content_preview != ''
-                )
-                SELECT * FROM ranked WHERE rn = 1
-            ''', paths).fetchall()
-            if not preview_rows:
-                preview_rows = db.execute(f'''
-                    WITH ranked AS (
-                        SELECT m.content_preview, m.timestamp, m.model, m.session_id,
-                               p.project_path,
-                               ROW_NUMBER() OVER (
-                                   PARTITION BY p.project_path
-                                   ORDER BY m.timestamp DESC, m.id DESC
-                               ) AS rn
-                        FROM codex_messages m
-                        JOIN codex_sessions s ON s.id = m.session_id
-                        JOIN codex_projects p ON p.project_path = s.project_path
-                        WHERE p.project_path IN ({ph})
-                          AND m.role = 'assistant'
-                          AND m.content_preview IS NOT NULL
-                          AND m.content_preview != ''
-                    )
-                    SELECT * FROM ranked WHERE rn = 1
-                ''', paths).fetchall()
-            preview_map = {r['project_path']: r for r in preview_rows}
-            for p in projects:
-                row = preview_map.get(p['project_path'])
-                if row:
-                    preview = row['content_preview'] or ''
-                    for prefix in ('[Extended Thinking]', '[생각중:'):
-                        if preview.startswith(prefix):
-                            preview = preview[len(prefix):].lstrip(' ]:')
-                    p['last_message'] = {
-                        'preview':      preview[:2000],
-                        'summary_line': summarize_preview(preview),
-                        'timestamp':    row['timestamp'],
-                        'model':        row['model'],
-                        'session_id':   row['session_id'],
-                    }
-                else:
-                    p['last_message'] = None
-
-    return {'projects': projects}
+    return get_codex_projects_top(
+        limit=limit,
+        with_last_message=with_last_message,
+        active_window_minutes=active_window_minutes,
+    )
 
 
 def _project_where(project_name: str, path: Optional[str]) -> tuple[str, str, list]:

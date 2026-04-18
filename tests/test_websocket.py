@@ -38,7 +38,6 @@ def noauth_client(tmp_path, monkeypatch):
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
-    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
     import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
 
@@ -76,7 +75,6 @@ def auth_client(tmp_path, monkeypatch):
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
-    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
     import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
 

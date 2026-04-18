@@ -20,12 +20,21 @@ def _clear_legacy_runtime_rows():
     import database
 
     with database.write_db() as db:
-        db.execute('DELETE FROM messages')
-        db.execute('DELETE FROM sessions')
-        try:
-            db.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-        except Exception:
-            pass
+        names = {
+            row['name']
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            ).fetchall()
+        }
+        if 'messages' in names:
+            db.execute('DELETE FROM messages')
+        if 'sessions' in names:
+            db.execute('DELETE FROM sessions')
+        if 'messages_fts' in names:
+            try:
+                db.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+            except Exception:
+                pass
 
 
 def _clear_codex_runtime_rows():
@@ -174,66 +183,21 @@ def _boot_api_client(tmp_path, monkeypatch, dashboard_password=None):
     except Exception:
         pass
 
-    # Drop any cached modules so the new DB_PATH / CLAUDE_PROJECTS stick
+    # Drop any cached modules so the new DB_PATH stick
     for name in list(sys.modules):
         if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
             sys.modules.pop(name, None)
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
-    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_claude_projects)
 
     import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_claude_projects)
-
-    import sqlite3
 
     import main  # noqa: F401 — imported for its side effect of app construction
 
     # Pre-seed some deterministic data so endpoints have something to return
     database.init_db()
-    conn = sqlite3.connect(str(db_file))
-    conn.execute('''INSERT INTO sessions
-        (id, project_name, project_path, cwd, model, created_at, updated_at,
-         total_input_tokens, total_output_tokens, cost_micro, message_count,
-         is_subagent, parent_session_id, agent_type, agent_description)
-        VALUES
-        ('parent-A', 'demo', '/tmp/demo', '/tmp/demo', 'claude-opus-4-6',
-         '2026-04-01T00:00:00Z', '2026-04-02T00:00:00Z',
-         1000, 500, 60000, 3, 0, NULL, '', ''),
-        ('agent-1a', 'demo', '/tmp/demo', '/tmp/demo', 'claude-haiku-4-5',
-         '2026-04-01T01:00:00Z', '2026-04-01T02:00:00Z',
-         100, 50, 4000, 2, 1, 'parent-A', 'Explore', 'Audit the repo'),
-        ('agent-1b', 'demo', '/tmp/demo', '/tmp/demo', 'claude-haiku-4-5',
-         '2026-04-01T03:00:00Z', '2026-04-01T04:00:00Z',
-         200, 80, 6000, 4, 1, 'parent-A', 'Plan', 'Design a migration'),
-        ('parent-B', 'other', '/tmp/other', '/tmp/other', 'claude-opus-4-6',
-         '2026-04-03T00:00:00Z', '2026-04-03T12:00:00Z',
-         500, 200, 30000, 1, 0, NULL, '', '')
-    ''')
-    conn.execute('''INSERT INTO messages
-        (session_id, message_uuid, role, content, content_preview,
-         input_tokens, output_tokens, cost_micro, model, timestamp)
-        VALUES
-        ('parent-A', 'm1', 'assistant', '{"type":"text","text":"hi"}',
-         'hi haystack one', 500, 200, 30000, 'claude-opus-4-6', '2026-04-01T00:00:01Z'),
-        ('parent-A', 'm2', 'assistant', '{"type":"text","text":"bye"}',
-         'bye haystack two', 500, 300, 30000, 'claude-opus-4-6', '2026-04-01T00:00:02Z'),
-        ('agent-1a', 'm3', 'assistant', '{"type":"text","text":"explore"}',
-         'subagent explore log', 100, 50, 4000, 'claude-haiku-4-5', '2026-04-01T01:00:01Z'),
-        ('agent-1b', 'm4', 'assistant', '{"type":"text","text":"plan"}',
-         'plan text payload', 200, 80, 6000, 'claude-haiku-4-5', '2026-04-01T03:00:01Z'),
-        ('parent-B', 'm5', 'assistant', '{"type":"text","text":"other"}',
-         'other project content', 500, 200, 30000, 'claude-opus-4-6', '2026-04-03T00:00:01Z')
-    ''')
-    conn.commit()
-    # FTS5 rebuild for search tests
-    try:
-        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
-    conn.close()
 
     database.store_codex_message(
         project_path='/tmp/codex-demo',
@@ -314,7 +278,6 @@ def test_codex_runtime_defaults_without_env_overrides(monkeypatch):
 
 def test_codex_only_init_db_skips_legacy_runtime_tables(tmp_path, monkeypatch):
     monkeypatch.setenv('DASHBOARD_DB_PATH', str(tmp_path / 'codex-only.db'))
-    monkeypatch.setenv('DASHBOARD_ENABLE_LEGACY_RUNTIME', '0')
     _reload_runtime_modules()
 
     import database
@@ -338,7 +301,6 @@ def test_codex_only_init_db_skips_legacy_runtime_tables(tmp_path, monkeypatch):
 
 def test_codex_only_api_boots_and_stats_without_legacy_runtime_tables(tmp_path, monkeypatch):
     monkeypatch.setenv('DASHBOARD_DB_PATH', str(tmp_path / 'codex-only-api.db'))
-    monkeypatch.setenv('DASHBOARD_ENABLE_LEGACY_RUNTIME', '0')
     _reload_runtime_modules()
 
     import database
@@ -1929,7 +1891,6 @@ def test_api_works_with_auth_cookie(tmp_path, monkeypatch):
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
-    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
     import codex_parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
     import main
