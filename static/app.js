@@ -1234,6 +1234,13 @@ async function loadConvList(){
         ${tagRow}`;
       div.onclick=()=>openConversation(s.id,s,div);b.appendChild(div);
     });
+    // Auto-select the first session if none is currently open. Prevents the
+    // awkward empty 70%-blank right panel when the conversations view loads.
+    if (!state.currentSession && d.sessions?.length) {
+      const first = d.sessions[0];
+      const firstEl = b.querySelector(`[data-id="${first.id}"]`);
+      if (firstEl) openConversation(first.id, first, firstEl);
+    }
   }catch(e){reportError('loadConvList',e);}
 }
 
@@ -2288,14 +2295,21 @@ async function loadModels(){
     renderModelsSortBar();
     const ss=sortState.models;
     const data=await safeFetch(`/api/models?sort=${ss.key}&order=${ss.order}`);
-    const rows=data.models||[];
-    const grid=document.getElementById('modelsGrid');grid.innerHTML='';
-    if(!rows.length){grid.innerHTML='<div class="col-span-full text-center text-white/25 text-xs py-16">데이터 없음</div>';return;}
+    // Filter out zero-usage models (e.g. <synthetic>) — they're noise.
+    const rows=(data.models||[]).filter(r => (r.cost_usd||0) > 0 || (r.input_tokens||0) > 0 || (r.output_tokens||0) > 0);
+    const grid=document.getElementById('modelsGrid');grid.textContent='';
+    if(!rows.length){const empty=document.createElement('div');empty.className='col-span-full text-center text-white/25 text-xs py-16';empty.textContent='데이터 없음';grid.appendChild(empty);return;}
     const mx=Math.max(...rows.map(r=>r.message_count||0),1);
+    // Bento: promote the dominant model (>= 50% usage) to 2x width.
+    const sortedByUsage=[...rows].sort((a,b)=>(b.message_count||0)-(a.message_count||0));
+    const topModelName=sortedByUsage[0]?.model;
     rows.forEach(r=>{
       const pct=Math.round((r.message_count||0)/mx*100);
+      const isTop = r.model === topModelName && pct >= 50;
       const card=document.createElement('div');
-      card.className='bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel';
+      card.className = isTop
+        ? 'bg-white/5 ring-1 ring-accent/30 p-1 rounded-bezel md:col-span-2'
+        : 'bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel';
       card.innerHTML=`
         <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
           <div class="text-sm font-bold text-white/85 mb-4">${esc(r.model||'—')}</div>
@@ -2311,6 +2325,17 @@ async function loadModels(){
             <div class="h-1 bg-white/5 rounded-full overflow-hidden"><div class="h-full rounded-full bg-accent" style="width:${pct}%"></div></div>
           </div>
         </div>`;
+      // Promote top card visually: prepend "PRIMARY" badge via DOM API.
+      if (isTop) {
+        const headRow = card.querySelector('.text-sm.font-bold');
+        if (headRow) {
+          headRow.classList.add('flex','items-center','justify-between','gap-3');
+          const badge = document.createElement('span');
+          badge.className = 'text-[9px] uppercase tracking-widest text-accent font-bold px-2 py-0.5 rounded-full bg-accent/10 ring-1 ring-accent/30 flex-shrink-0';
+          badge.textContent = 'Primary';
+          headRow.appendChild(badge);
+        }
+      }
       grid.appendChild(card);
     });
   }catch(e){reportError('loadModels',e);}
@@ -2339,7 +2364,7 @@ async function loadProjects(){
     if(!data.projects?.length){tb.innerHTML='<tr><td colspan="8" class="text-center py-12 text-white/25 text-xs">데이터 없음</td></tr>';return;}
     (data.projects||[]).forEach(p=>{
       const tr=document.createElement('tr');
-      tr.className='border-b border-white/[0.03] hover:bg-white/[0.05] cursor-pointer spring';
+      tr.className='group border-b border-white/[0.03] hover:bg-white/[0.05] cursor-pointer spring';
       tr.onclick=()=>showProjectDetail(p.project_name,p.project_path);
       const pTagList = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
       const pTagRow = pTagList.length
@@ -2356,9 +2381,10 @@ async function loadProjects(){
         <td class="px-3 py-3 text-right"><span class="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/85 font-bold tabular-nums">${fmt$(p.total_cost)}</span></td>
         <td class="px-3 py-3 text-right text-white/40">${relTime(p.last_active)}</td>
         <td class="px-3 py-3 text-center whitespace-nowrap"></td>`;
-      // Attach delete button via DOM API (safe against path/name HTML injection)
+      // Attach delete button via DOM API (safe against path/name HTML injection).
+      // Hidden until row hover — 관리 column should not add noise to every row.
       const delBtn = document.createElement('button');
-      delBtn.className = 'text-white/20 hover:text-red-400 spring text-sm';
+      delBtn.className = 'text-white/30 hover:text-red-400 spring text-sm opacity-0 group-hover:opacity-100 transition-opacity';
       delBtn.title = '삭제';
       delBtn.textContent = '✕';
       delBtn.addEventListener('click', (e) => {

@@ -7,7 +7,7 @@
 <meta name="description" content="Claude Code 토큰 사용량 실시간 추적 대시보드">
 
 <!-- Tailwind CSS (built from app.css via build.js) -->
-<link rel="stylesheet" href="/static/tailwind.v87.css">
+<link rel="stylesheet" href="/static/tailwind.v88.css">
 
 <!-- Pretendard (Korean) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
@@ -40,68 +40,76 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════
-     FLOATING GLASS NAVIGATION
+     FLOATING GLASS NAVIGATION — tabs only, utilities moved to top-right
      ═══════════════════════════════════════════════════════════════════════ -->
 <nav class="fixed top-3 left-1/2 -translate-x-1/2 z-40
             backdrop-blur-xl bg-white/[0.06] border border-white/[0.07]
             rounded-full px-1.5 py-1 flex items-center gap-0.5
             shadow-[0_8px_32px_rgba(0,0,0,.4)]">
-  <button class="nav-pill active spring px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-tight" data-view="overview">
+  <button class="nav-pill active spring px-3 py-1.5 rounded-full text-xs font-semibold tracking-tight whitespace-nowrap" data-view="overview" title="개요">
     <iconify-icon icon="solar:chart-square-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>개요
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="cost">
+  <button class="nav-pill spring px-3 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70 whitespace-nowrap" data-view="cost" title="비용">
     <iconify-icon icon="solar:graph-up-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>비용
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="sessions">
+  <button class="nav-pill spring px-3 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70 whitespace-nowrap" data-view="sessions" title="세션">
     <iconify-icon icon="solar:list-check-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>세션
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="conversations">
+  <button class="nav-pill spring px-3 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70 whitespace-nowrap" data-view="conversations" title="대화">
     <iconify-icon icon="solar:chat-round-line-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>대화
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="models">
+  <button class="nav-pill spring px-3 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70 whitespace-nowrap" data-view="models" title="모델">
     <iconify-icon icon="solar:cpu-bolt-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>모델
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="projects">
+  <button class="nav-pill spring px-3 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70 whitespace-nowrap" data-view="projects" title="프로젝트">
     <iconify-icon icon="solar:folder-open-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>프로젝트
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="subagents">
-    <iconify-icon icon="solar:widget-2-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>Subagent
+  <button class="nav-pill spring px-3 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70 whitespace-nowrap" data-view="subagents" title="하위 에이전트">
+    <iconify-icon icon="solar:widget-2-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>하위
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="search">
+  <button class="nav-pill spring px-3 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70 whitespace-nowrap" data-view="search" title="검색">
     <iconify-icon icon="solar:magnifer-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>검색
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="timeline">
-    <iconify-icon icon="solar:calendar-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>타임라인
+  <button class="nav-pill spring px-3 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70 whitespace-nowrap" data-view="timeline" title="타임라인">
+    <iconify-icon icon="solar:calendar-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>시간
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="export">
+  <button class="nav-pill spring px-3 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70 whitespace-nowrap" data-view="export" title="관리">
     <iconify-icon icon="solar:database-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>관리
   </button>
+</nav>
 
-  <!-- WS badge -->
-  <div class="ml-2 mr-1 flex items-center gap-1.5 text-[10px] text-white/30" role="status" aria-live="polite">
+<!-- Utility cluster: separate from main nav to prevent overcrowding -->
+<div class="fixed top-3 right-4 z-40 flex items-center gap-1
+            backdrop-blur-xl bg-white/[0.06] border border-white/[0.07]
+            rounded-full px-1.5 py-1 shadow-[0_8px_32px_rgba(0,0,0,.4)]">
+  <!-- WS status -->
+  <div class="flex items-center gap-1.5 px-2 py-1 text-[10px] text-white/30" role="status" aria-live="polite">
     <span class="w-1.5 h-1.5 rounded-full bg-white/20 spring" id="wsDot"
           role="img" aria-label="WebSocket 연결 상태"></span>
     <span id="wsLabel" class="hidden sm:inline">연결 중</span>
   </div>
-  <!-- Theme toggle (U4) -->
+  <div class="w-px h-4 bg-white/10"></div>
+  <!-- Theme toggle -->
   <button id="themeToggle" data-action="toggleTheme" title="테마 전환" aria-label="테마 전환"
-          class="ml-1 w-7 h-7 rounded-full text-white/60 hover:text-white hover:bg-white/10 spring text-sm leading-none">☀</button>
+          class="w-7 h-7 rounded-full text-white/60 hover:text-white hover:bg-white/10 spring text-sm leading-none flex items-center justify-center">☀</button>
+  <!-- Command palette -->
+  <button data-action="openCommandPalette" title="명령 팔레트 (⌘K)" aria-label="명령 팔레트"
+          class="w-7 h-7 rounded-full text-white/60 hover:text-white hover:bg-white/10 spring text-[11px] leading-none font-bold flex items-center justify-center">⌘K</button>
+  <!-- Logout -->
   <button id="logoutBtn" data-action="logoutDashboard" title="로그아웃" aria-label="로그아웃"
-          class="hidden ml-1 w-7 h-7 rounded-full text-white/40 hover:text-red-400 hover:bg-white/10 spring text-sm leading-none">
+          class="hidden w-7 h-7 rounded-full text-white/40 hover:text-red-400 hover:bg-white/10 spring text-sm leading-none items-center justify-center">
     <iconify-icon icon="solar:logout-2-linear" width="14"></iconify-icon>
   </button>
-  <!-- Command palette trigger (U7) -->
-  <button data-action="openCommandPalette" title="명령 팔레트 (Cmd+K)" aria-label="명령 팔레트"
-          class="w-7 h-7 rounded-full text-white/60 hover:text-white hover:bg-white/10 spring text-xs leading-none font-bold">⌘K</button>
-</nav>
+</div>
 
-<!-- Toast tray (U2) -->
-<div id="toastTray" aria-live="polite" aria-atomic="true"></div>
+<!-- Toast tray — top-right, stacked below utility cluster. -->
+<div id="toastTray" aria-live="polite" aria-atomic="true"
+     class="fixed top-16 right-4 z-50 flex flex-col items-end gap-2 pointer-events-none"></div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════
-     HEADER BAR (subtle, below nav)
+     HEADER BAR (today/total cost, subtle, left side to avoid utility cluster)
      ═══════════════════════════════════════════════════════════════════════ -->
-<div class="fixed top-14 right-4 z-30 flex items-center gap-3 text-[10px] text-white/25 font-medium">
+<div class="fixed top-5 left-4 z-30 flex items-center gap-3 text-[10px] text-white/35 font-medium">
   <span id="hdrToday"></span>
   <span id="hdrTotal"></span>
 </div>
@@ -1276,6 +1284,6 @@
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/bundle.v87.js" defer></script>
+<script src="/static/bundle.v88.js" defer></script>
 </body>
 </html>

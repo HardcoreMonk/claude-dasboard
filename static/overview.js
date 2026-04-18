@@ -266,9 +266,9 @@ function _buildProjectRow(p, idx, mxCost, opts) {
   const cleaned = lm ? (lm.summary_line || lm.preview || '') : '';
   if (cleaned) {
     const prev = document.createElement('div');
-    prev.className = 'text-[11px] text-white/35 mt-2 leading-relaxed whitespace-normal';
+    prev.className = 'text-[11px] text-white/45 mt-2 leading-relaxed whitespace-normal';
     prev.style.display = '-webkit-box';
-    prev.style.webkitLineClamp = '4';
+    prev.style.webkitLineClamp = '2';  // was 4 — row heights were jumping too much
     prev.style.webkitBoxOrient = 'vertical';
     prev.style.overflow = 'hidden';
     prev.title = (lm && lm.preview) || '';

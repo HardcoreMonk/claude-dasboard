@@ -359,7 +359,7 @@ function renderSessions(data){
   data.sessions.forEach(s=>{
     const tr=document.createElement('tr');
     const _isRemoteNode = s.source_node && s.source_node !== 'local';
-    tr.className='cursor-pointer border-b border-white/[0.03] hover:bg-white/[0.04] spring';
+    tr.className='group cursor-pointer border-b border-white/[0.03] hover:bg-white/[0.04] spring';
     if (_isRemoteNode) tr.style.background = 'rgba(34,211,238,.04)';
     tr.setAttribute('tabindex', '0');
     tr.setAttribute('role', 'row');
@@ -450,8 +450,10 @@ function renderSessions(data){
       <td class="px-3 py-3 text-center whitespace-nowrap hide-sm"></td>`;
     // Action buttons via DOM API — safe against name/id injection
     const actionTd = tr.lastElementChild;
+    // Pinned sessions keep ★ always visible (state indicator). Others hide
+    // behind group-hover so the column doesn't add visual noise to unpinned rows.
     const pinBtn = document.createElement('button');
-    pinBtn.className = (s.pinned ? 'text-accent' : 'text-white/20') + ' hover:text-accent spring text-sm mr-1';
+    pinBtn.className = (s.pinned ? 'text-accent opacity-100' : 'text-white/30 opacity-0 group-hover:opacity-100') + ' hover:text-accent spring text-sm mr-1 transition-opacity';
     pinBtn.title = s.pinned ? '핀 해제' : '핀 고정';
     pinBtn.textContent = s.pinned ? '★' : '☆';
     pinBtn.addEventListener('click', (e) => {
@@ -459,7 +461,7 @@ function renderSessions(data){
       pinSession(s.id, s.pinned ? 0 : 1);
     });
     const tagBtn = document.createElement('button');
-    tagBtn.className = 'text-white/20 hover:text-cyan-300 spring text-sm mr-1';
+    tagBtn.className = 'text-white/30 hover:text-cyan-300 spring text-sm mr-1 opacity-0 group-hover:opacity-100 transition-opacity';
     tagBtn.title = '태그 편집';
     tagBtn.textContent = '🏷';
     tagBtn.addEventListener('click', (e) => {
@@ -467,7 +469,7 @@ function renderSessions(data){
       editSessionTags(s.id, s.tags || '');
     });
     const delBtn = document.createElement('button');
-    delBtn.className = 'text-white/20 hover:text-red-400 spring text-sm';
+    delBtn.className = 'text-white/30 hover:text-red-400 spring text-sm opacity-0 group-hover:opacity-100 transition-opacity';
     delBtn.title = '삭제';
     delBtn.textContent = '✕';
     delBtn.addEventListener('click', (e) => {

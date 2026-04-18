@@ -40,6 +40,28 @@ function tooltipOpts(extra={}){
   const c=themeColors();
   return{backgroundColor:c.tooltipBg,borderColor:c.tooltipBorder,borderWidth:1,titleColor:c.tooltipTitle,bodyColor:c.tooltipBody,...extra};
 }
+// Safe Chart.js renderer. The naive `setChart(name, new Chart(canvas, cfg))`
+// pattern evaluates `new Chart(...)` BEFORE setChart can destroy the previous
+// instance, so Chart.js throws "Canvas is already in use". This helper
+// destroys both the state-tracked instance AND any chart attached to the
+// canvas via Chart.getChart() before creating the new one.
+function renderChart(stateKey, canvasId, config) {
+  destroyChart(stateKey);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) throw new Error(`canvas #${canvasId} not found`);
+  // Safety: tear down any untracked Chart.js instance already bound here.
+  if (typeof Chart !== 'undefined' && Chart.getChart) {
+    const existing = Chart.getChart(canvas);
+    if (existing) { try { existing.destroy(); } catch {} }
+  }
+  const chart = new Chart(canvas, config);
+  setChart(stateKey, chart);
+  // Clear any prior error overlay now that the chart rendered successfully.
+  const wrap = canvas.parentElement;
+  if (wrap) wrap.querySelectorAll('.chart-err-overlay').forEach(n => n.remove());
+  return chart;
+}
+
 // Per-chart error overlay. Inject on top of the canvas wrapper so a
 // failing chart doesn't render as a silent blank canvas.
 function chartError(canvasId, err, retryFn) {
@@ -96,27 +118,27 @@ async function loadUsageChart(){
   const ep=h<=168?`/api/usage/hourly?hours=${h}`:`/api/usage/daily?days=30`;
   const data=await safeFetch(ep);const rows=data.data||[];
   const labels=rows.map(r=>r.hour||r.date||''),inp=rows.map(r=>r.input_tokens||0),out=rows.map(r=>r.output_tokens||0),cr=rows.map(r=>r.cache_read_tokens||0);
-  setChart('usage', new Chart(document.getElementById('chartUsage'),{type:'line',data:{labels,datasets:[
+  renderChart('usage', 'chartUsage', {type:'line',data:{labels,datasets:[
     {label:'입력',data:inp,borderColor:CC.blue,backgroundColor:'rgba(96,165,250,.08)',fill:true,tension:.3,pointRadius:2,pointStyle:'circle',borderWidth:1.5,borderDash:CB_DASHES[0]},
     {label:'출력',data:out,borderColor:CC.emerald,backgroundColor:'rgba(52,211,153,.06)',fill:true,tension:.3,pointRadius:2,pointStyle:'rect',borderWidth:1.5,borderDash:CB_DASHES[1]},
     {label:'캐시',data:cr,borderColor:CC.cyan,backgroundColor:'rgba(34,211,238,.04)',fill:true,tension:.3,pointRadius:2,pointStyle:'triangle',borderWidth:1,borderDash:CB_DASHES[2]},
-  ]},options:{...CHART_D,plugins:{legend:{display:true,position:'top',align:'end',labels:legendLabels()},tooltip:tooltipOpts({callbacks:{label:c=>`${c.dataset.label}: ${fmtTok(c.raw)}`}})},scales:{x:{grid:grd(),ticks:{...tck(),maxTicksLimit:8,maxRotation:0}},y:{grid:grd(),ticks:{...tck(),callback:v=>fmtTok(v)}}}}}));
+  ]},options:{...CHART_D,plugins:{legend:{display:true,position:'top',align:'end',labels:legendLabels()},tooltip:tooltipOpts({callbacks:{label:c=>`${c.dataset.label}: ${fmtTok(c.raw)}`}})},scales:{x:{grid:grd(),ticks:{...tck(),maxTicksLimit:8,maxRotation:0}},y:{grid:grd(),ticks:{...tck(),callback:v=>fmtTok(v)}}}}});
 }
 async function loadModelChart(){
   const data=await safeFetch('/api/models');const rows=data.models||[];
   const labels=rows.map(r=>shortModel(r.model)),vals=rows.map(r=>parseFloat((r.cost_usd||0).toFixed(4)));
   const pal=[CC.emerald,CC.blue,CC.amber,CC.rose,CC.cyan,CC.purple];
-  setChart('models', new Chart(document.getElementById('chartModels'),{type:'doughnut',data:{labels,datasets:[{data:vals,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'65%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:6})},tooltip:tooltipOpts({callbacks:{label:c=>` ${c.label}: $${c.raw.toFixed(2)}`}})}}}));
+  renderChart('models', 'chartModels', {type:'doughnut',data:{labels,datasets:[{data:vals,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'65%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:6})},tooltip:tooltipOpts({callbacks:{label:c=>` ${c.label}: $${c.raw.toFixed(2)}`}})}}});
 }
 async function loadDailyCostChart(){
   const data=await safeFetch('/api/usage/daily?days=30');const rows=data.data||[];
   const labels=rows.map(r=>r.date?r.date.slice(5):''),costs=rows.map(r=>parseFloat((r.cost_usd||0).toFixed(4)));
-  setChart('dailyCost', new Chart(document.getElementById('chartDailyCost'),{type:'bar',data:{labels,datasets:[{label:'비용',data:costs,backgroundColor:'rgba(52,211,153,.25)',borderColor:CC.emerald,borderWidth:1,borderRadius:3}]},options:{...CHART_D,plugins:{tooltip:tooltipOpts({callbacks:{label:c=>` $${c.raw.toFixed(4)}`}})},scales:{x:{grid:grd(),ticks:{...tck(),maxTicksLimit:10}},y:{grid:grd(),ticks:{...tck(),callback:v=>'$'+v}}}}}));
+  renderChart('dailyCost', 'chartDailyCost', {type:'bar',data:{labels,datasets:[{label:'비용',data:costs,backgroundColor:'rgba(52,211,153,.25)',borderColor:CC.emerald,borderWidth:1,borderRadius:3}]},options:{...CHART_D,plugins:{tooltip:tooltipOpts({callbacks:{label:c=>` $${c.raw.toFixed(4)}`}})},scales:{x:{grid:grd(),ticks:{...tck(),maxTicksLimit:10}},y:{grid:grd(),ticks:{...tck(),callback:v=>'$'+v}}}}});
 }
 async function loadCacheChart(){
   const data=await safeFetch('/api/stats');const a=data.all_time||{};
   const d=[a.input_tokens||0,a.cache_creation_tokens||0,a.cache_read_tokens||0,a.output_tokens||0];
-  setChart('cache', new Chart(document.getElementById('chartCache'),{type:'doughnut',data:{labels:['입력','캐시 생성','캐시 읽기','출력'],datasets:[{data:d,backgroundColor:[CC.blue+'66',CC.purple+'66',CC.cyan+'66',CC.emerald+'66'],borderColor:[CC.blue,CC.purple,CC.cyan,CC.emerald],borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'60%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:5})},tooltip:tooltipOpts({callbacks:{label:c=>` ${c.label}: ${fmtTok(c.raw)}`}})}}}));
+  renderChart('cache', 'chartCache', {type:'doughnut',data:{labels:['입력','캐시 생성','캐시 읽기','출력'],datasets:[{data:d,backgroundColor:[CC.blue+'66',CC.purple+'66',CC.cyan+'66',CC.emerald+'66'],borderColor:[CC.blue,CC.purple,CC.cyan,CC.emerald],borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'60%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:5})},tooltip:tooltipOpts({callbacks:{label:c=>` ${c.label}: ${fmtTok(c.raw)}`}})}}});
 }
 async function loadStopReasonChart(){
   const data=await safeFetch('/api/stats');const rows=data.stop_reasons||[];
@@ -125,14 +147,14 @@ async function loadStopReasonChart(){
   const labels=rows.map(r=>SR_LABELS[r.stop_reason]||r.stop_reason);
   const counts=rows.map(r=>r.count||0);
   const pal=[CC.emerald,CC.blue,CC.amber,CC.rose,CC.cyan,CC.purple];
-  setChart('stopReason', new Chart(document.getElementById('chartStopReason'),{type:'doughnut',data:{labels,datasets:[{data:counts,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'60%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:5})},tooltip:tooltipOpts({callbacks:{label:c=>{const total=c.dataset.data.reduce((a,b)=>a+b,0);const pct=total>0?(c.raw/total*100).toFixed(1):'0';return ` ${c.label}: ${fmtN(c.raw)} (${pct}%)`;}}})}}}));
+  renderChart('stopReason', 'chartStopReason', {type:'doughnut',data:{labels,datasets:[{data:counts,backgroundColor:pal.map(c=>c+'66'),borderColor:pal,borderWidth:1,hoverOffset:4}]},options:{...CHART_D,cutout:'60%',plugins:{legend:{display:true,position:'right',labels:legendLabels({boxWidth:8,padding:5})},tooltip:tooltipOpts({callbacks:{label:c=>{const total=c.dataset.data.reduce((a,b)=>a+b,0);const pct=total>0?(c.raw/total*100).toFixed(1):'0';return ` ${c.label}: ${fmtN(c.raw)} (${pct}%)`;}}})}}});
 }
 async function loadModelCacheChart(){
   const data=await safeFetch('/api/stats');const rows=data.model_cache||[];
   if(!rows.length)return;
   const labels=rows.map(r=>shortModel(r.model));
   const hitRates=rows.map(r=>{const total=(r.input_tokens||0)+(r.cache_read_tokens||0);return total>0?((r.cache_read_tokens||0)/total*100):0;});
-  setChart('modelCache', new Chart(document.getElementById('chartModelCache'),{type:'bar',data:{labels,datasets:[{label:'캐시 히트율 %',data:hitRates,backgroundColor:'rgba(34,211,238,.3)',borderColor:CC.cyan,borderWidth:1,borderRadius:3}]},options:{...CHART_D,indexAxis:'y',plugins:{tooltip:tooltipOpts({callbacks:{label:c=>` ${c.raw.toFixed(1)}%`}})},scales:{x:{grid:grd(),ticks:{...tck(),callback:v=>v+'%'},max:100},y:{grid:grd(),ticks:tck()}}}}));
+  renderChart('modelCache', 'chartModelCache', {type:'bar',data:{labels,datasets:[{label:'캐시 히트율 %',data:hitRates,backgroundColor:'rgba(34,211,238,.3)',borderColor:CC.cyan,borderWidth:1,borderRadius:3}]},options:{...CHART_D,indexAxis:'y',plugins:{tooltip:tooltipOpts({callbacks:{label:c=>` ${c.raw.toFixed(1)}%`}})},scales:{x:{grid:grd(),ticks:{...tck(),callback:v=>v+'%'},max:100},y:{grid:grd(),ticks:tck()}}}});
 }
 function setUsageRange(btn,range){
   document.querySelectorAll('.chart-range').forEach(b=>{b.classList.remove('active');b.classList.add('text-white/20');b.classList.remove('text-white/40');});
