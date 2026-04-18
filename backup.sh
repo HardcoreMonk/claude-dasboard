@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Manual backup of the dashboard database.
-# Also callable via:  curl -X POST http://localhost:8765/api/admin/backup
+# Also callable via:  curl -X POST http://localhost:8617/api/admin/backup
 set -e
 
-DB="$HOME/.claude/dashboard.db"
-DEST_DIR="$HOME/.claude/dashboard-backups"
+DB="$HOME/.codex/dashboard.db"
+DEST_DIR="$HOME/.codex/dashboard-backups"
 mkdir -p "$DEST_DIR"
 
 TS=$(date +%Y%m%d_%H%M%S)

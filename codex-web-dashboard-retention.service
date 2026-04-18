@@ -1,0 +1,25 @@
+[Unit]
+Description=Codex Web Dashboard — retention sweep (delete old sessions)
+After=codex-web-dashboard.service
+Requires=codex-web-dashboard.service
+
+[Service]
+Type=oneshot
+User=hardcoremonk
+Environment=RETENTION_DAYS=365
+Environment=DASHBOARD_URL=http://127.0.0.1:8617
+
+ExecStart=/bin/bash -c ' \
+  set -eu; \
+  echo "Retention sweep: deleting sessions older than $${RETENTION_DAYS}d"; \
+  curl -fsSL -X DELETE \
+    "$${DASHBOARD_URL}/api/admin/retention?older_than_days=$${RETENTION_DAYS}&confirm=true" \
+  || { echo "retention request failed"; exit 1; }; \
+  echo "Incremental vacuum reclaim …"; \
+  sqlite3 /home/hardcoremonk/.codex/dashboard.db "PRAGMA incremental_vacuum;" || true; \
+'
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/hardcoremonk/.codex

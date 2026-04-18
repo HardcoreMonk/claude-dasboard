@@ -5,7 +5,7 @@
 #   1. PRAGMA integrity check on the source backup before replacing
 #   2. Snapshot the current DB to dashboard-backups/pre-restore_<ts>.db
 #      so a mistaken restore can itself be undone
-#   3. Stop claude-dashboard.service before replacement so the watcher
+#   3. Stop codex-web-dashboard.service before replacement so the watcher
 #      doesn't half-write to the swapped-out file, restart afterwards
 #
 # Usage:
@@ -14,9 +14,9 @@
 #   ./restore.sh --latest                     # restore the most recent backup
 set -euo pipefail
 
-DB="$HOME/.claude/dashboard.db"
-DEST_DIR="$HOME/.claude/dashboard-backups"
-UNIT="claude-dashboard.service"
+DB="$HOME/.codex/dashboard.db"
+DEST_DIR="$HOME/.codex/dashboard-backups"
+UNIT="codex-web-dashboard.service"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 

@@ -12,9 +12,9 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
 ```
 ~/.codex/sessions/**/rollout-*.jsonl   (Codex 가 실시간 기록)
            |
-     [watchdog + 30s poll]      watcher.py
+     [watchdog + 30s poll]      codex_watcher.py
            |
-     [JSONL 파싱 + 비용 계산]    parser.py
+     [JSONL 파싱 + 비용 계산]    codex_parser.py
            |
      [SQLite WAL 쓰기]          database.py
            |
@@ -27,16 +27,16 @@ Codex JSONL/이벤트 적재           store_codex_message()
       [SPA 프론트엔드]           static/*.js
 ```
 
-단일 프로세스 (uvicorn) 가 파일 감시, DB 관리, Codex/Claude 인덱스 조회, API 서빙, WebSocket 브로드캐스트를 모두 처리한다.
+단일 프로세스 (uvicorn) 가 파일 감시, DB 관리, Codex 인덱스 조회, API 서빙, WebSocket 브로드캐스트를 모두 처리한다.
 외부 의존 서비스 없음 — SQLite 파일 하나로 완결된다.
 
-운영 배포는 논리적으로 둘로 나눈다. Claude와 Codex는 별도 systemd 서비스로 운영하며, 포트뿐 아니라 별도 DB 루트와 별도 백업 루트를 유지한다. 권장 매핑은 `codex-web-dashboard.service` → `~/.codex/dashboard.db`, `~/.codex/dashboard-backups`, `PORT=8617` 이고 `claude-dashboard.service` → `~/.claude/dashboard.db`, `~/.claude/dashboard-backups`, `PORT=8765` 이다.
+운영 배포는 `codex-web-dashboard.service` 단일 인스턴스를 기준으로 한다. 기본 경로는 `~/.codex/dashboard.db`, `~/.codex/dashboard-backups`, `PORT=8617` 이다.
 
-### 서비스 분리 원칙
+### 서비스 원칙
 
 - `codex-web-dashboard.service` 는 Codex Web Dashboard 식별자와 전용 포트 `8617` 을 사용한다.
-- `claude-dashboard.service` 는 Claude Usage Dashboard 식별자를 유지하고 Codex 식별자와 섞지 않는다.
-- 두 서비스는 동일 코드베이스를 실행할 수 있지만 운영 데이터는 합치지 않는다. 별도 DB 루트, 별도 백업 루트, 별도 systemd unit 을 유지해 장애 복구와 보존 정책을 분리한다.
+- 운영 데이터는 `~/.codex` 루트에만 쓴다.
+- 백업과 보존 정책도 Codex 단일 인스턴스 기준으로 관리한다.
 
 ### 접근 검증 체크포인트
 
@@ -77,7 +77,6 @@ HTTP routes + 1 WebSocket 을 호스팅.
 | Subagent | `/api/subagents`, `/stats`, `/heatmap` | subagent 분석 |
 | 예측 | `/api/forecast` | MTD 비용 예측, 예산 소진 시간 |
 | 플랜 | `/api/plan/detect`, `/plan/config`, `/plan/usage` | 요금제 감지, 예산 설정 |
-| claude.ai | `/api/claude-ai/conversations`, `/search`, `/stats` | claude.ai export 데이터 |
 | 원격 수집 | `/api/ingest`, `/api/nodes` | 다중 서버 JSONL 수집 (`codex_collector.py` → POST `/api/ingest`) |
 | 관리 | `/api/admin/backup`, `/retention`, `/retention/schedule`, `/db-size`, `/status`, `/audit` | 백업, 보존 + 자동 스케줄러, Codex ingest 상태를 포함한 대시보드 상태, 감사 로그 |
 | 내보내기 | `/api/export/csv` | 세션 CSV 다운로드 |
@@ -110,13 +109,8 @@ SCHEMA_VERSION = 15
 
 | 테이블 | 역할 |
 |---|---|
-| `sessions` | 세션 메타 (프로젝트, 모델, 비용, 태그, subagent 플래그) |
-| `messages` | 개별 메시지 (토큰, 비용, 역할, stop_reason) |
-| `messages_fts` | FTS5 전문 검색 (content_preview, 트리거 동기화) |
 | `file_watch_state` | 파일별 마지막 파싱 위치 (offset + mtime) |
 | `plan_config` | 요금제, 예산, 타임존 설정 |
-| `claude_ai_conversations` | claude.ai export 대화 (sessions 와 완전 격리) |
-| `claude_ai_messages` | claude.ai export 메시지 |
 | `codex_projects` | Codex 프로젝트 메타 |
 | `codex_sessions` | Codex 세션 메타 |
 | `codex_messages` | Codex 메시지 + 리플레이/검색 원본 |
@@ -136,15 +130,15 @@ SCHEMA_VERSION = 15
 | `indexed_sessions` | `codex_sessions` 기준 적재된 세션 수 |
 | `indexed_messages` | `codex_messages` 기준 적재된 메시지 수 |
 
-이 필드는 관리자 화면에서 "Codex 인덱스가 실제로 채워졌는지"를 즉시 확인하는 용도이며, 기존 `counts` 블록은 Claude Code/remote/admin 집계와의 하위 호환을 유지한다.
+이 필드는 관리자 화면에서 "Codex 인덱스가 실제로 채워졌는지"를 즉시 확인하는 용도다.
 
 ### Codex-first runtime 기본값
 
-대시보드는 이제 Codex-first runtime 을 기본 경로로 사용한다. 세션 상세, 메시지, 검색, 사용량, 메트릭, chain 은 모두 `codex_projects`, `codex_sessions`, `codex_messages` 기준으로 응답하도록 이동 중이며, Claude-era `sessions/messages` 테이블은 호환 계층으로만 남아 있다.
+대시보드는 이제 Codex-first runtime 을 기본 경로로 사용한다. 세션 상세, 메시지, 검색, 사용량, 메트릭, chain 은 모두 `codex_projects`, `codex_sessions`, `codex_messages` 기준으로 응답한다.
 
 startup 에서는 `DASHBOARD_ENABLE_LEGACY_RUNTIME=0` 으로 Codex 전용 bootstrap 이 가능하다. 이 모드에서는 primary UI/API 에 필요한 Codex 스키마와 보조 설정 테이블만 생성하고, legacy runtime table 생성은 생략한다.
 
-### parser.py — JSONL 파싱 엔진
+### codex_parser.py — JSONL 파싱 엔진
 
 ```
 JSONL 레코드 → type 분기 (user/assistant/system)
@@ -174,7 +168,7 @@ cost = input_tokens * rate.input
 
 6개 모델 가격표 (`MODEL_PRICING`) + family fallback (opus/sonnet/haiku substring 매칭).
 
-### watcher.py — 파일 감시
+### codex_watcher.py — 파일 감시
 
 **이중 감시 체계:**
 
@@ -185,7 +179,7 @@ cost = input_tokens * rate.input
 
 ```
 start_watching()
-  → 초기 전체 스캔 (CLAUDE_PROJECTS 하위 모든 JSONL)
+  → 초기 전체 스캔 (PROJECTS_ROOT 하위 모든 JSONL)
   → watchdog Observer 시작
   → safety poll 루프 (30s)
   → 변경 파일 → parse → DB 쓰기 → WS broadcast
@@ -389,11 +383,11 @@ lifespan 종료 → 태스크 cancel
 
 설정은 `PUT /api/admin/retention/schedule` 로 영속화. Docker/Fly/Railway 등 컨테이너 배포에서도 동일하게 동작. UI: Export/Admin 뷰.
 
-**B. systemd timer (레거시)**
+**B. systemd timer**
 
 ```
-claude-dashboard-retention.timer  → 일요일 03:30 (15분 랜덤)
-claude-dashboard-retention.service → 오래된 데이터 정리
+codex-web-dashboard-retention.timer  → 일요일 03:30 (15분 랜덤)
+codex-web-dashboard-retention.service → 오래된 데이터 정리
 ```
 
 ### 감사 로그 (v14~)
@@ -427,16 +421,6 @@ claude-dashboard-retention.service → 오래된 데이터 정리
 
 ## 외부 통합
 
-### claude.ai export
-
-```bash
-python import_claude_ai.py --zip ~/export.zip
-```
-
-- `conversations.json` 파싱 → `claude_ai_conversations` / `claude_ai_messages` 테이블
-- **격리:** 기존 `sessions`/`messages` 와 절대 JOIN/UNION 하지 않음 (비용 오염 방지)
-- 프론트: Codex 전용 대화 목록/상세
-
 ### 원격 노드 수집
 
 ```
@@ -454,7 +438,7 @@ codex_collector.py                POST /api/ingest
 
 ### 플랜 감지
 
-- `~/.claude/.credentials.json` 의 `rateLimitTier` 읽기 (로컬 전용, API 호출 없음)
+- `~/.codex/.credentials.json` 의 `rateLimitTier` 읽기 (로컬 전용, API 호출 없음)
 - 티어별 기본 한도 매핑 (Pro, Max 5x, Max 20x)
 - 예산 추적은 전적으로 로컬 JSONL 기반 추정
 

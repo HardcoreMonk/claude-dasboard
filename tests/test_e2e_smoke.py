@@ -19,7 +19,6 @@ Then replace this file with a Playwright sync_playwright() test that
 navigates to the page and interacts with the DOM.
 """
 import re
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -59,32 +58,6 @@ def e2e_client(tmp_path, monkeypatch):
     import main  # noqa: F401
 
     database.init_db()
-    conn = sqlite3.connect(str(db_file))
-    conn.executescript('''
-        INSERT INTO sessions
-          (id, project_name, project_path, cwd, model, created_at, updated_at,
-           total_input_tokens, total_output_tokens, cost_micro, message_count,
-           user_message_count, is_subagent, parent_session_id, agent_type,
-           agent_description, final_stop_reason, tags)
-        VALUES
-          ('p1', 'demo', '/tmp/demo', '/tmp/demo', 'claude-opus-4-6',
-           '2026-04-01T00:00:00Z', '2026-04-02T00:00:00Z',
-           1000, 500, 60000, 2, 1, 0, NULL, '', '', 'end_turn', '');
-        INSERT INTO messages
-          (session_id, message_uuid, role, content, content_preview,
-           input_tokens, output_tokens, cost_micro, model, timestamp, stop_reason)
-        VALUES
-          ('p1', 'm1', 'assistant', '{"type":"text","text":"hi"}', 'hi from demo',
-            500, 200, 30000, 'claude-opus-4-6', '2026-04-01T00:00:01Z', 'end_turn');
-    ''')
-    conn.commit()
-    try:
-        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
-    conn.close()
-
     database.store_codex_message(
         project_path='/tmp/codex-demo',
         project_name='codex-demo',

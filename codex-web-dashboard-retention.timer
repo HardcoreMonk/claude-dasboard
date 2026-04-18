@@ -1,0 +1,11 @@
+[Unit]
+Description=Codex Web Dashboard — weekly retention sweep timer
+
+[Timer]
+OnCalendar=Sun 03:30:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=codex-web-dashboard-retention.service
+
+[Install]
+WantedBy=timers.target

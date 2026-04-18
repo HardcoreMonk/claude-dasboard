@@ -13,7 +13,7 @@ Codex Dashboard 프로젝트의 최상위 기준 문서.
 - 기본 백업 경로: `~/.codex/dashboard-backups`
 - 기본 인증 방식: `DASHBOARD_PASSWORD` 기반 쿠키 세션
 
-새 문서와 운영 예시는 모두 Codex 기준으로 작성한다. Claude 관련 경로와 서비스는 호환 운영용 레거시로만 유지한다.
+새 문서와 운영 예시는 모두 Codex 기준으로 작성한다. Claude 관련 경로와 서비스는 문서와 운영 예시에서 제거한다.
 
 ## 문서 우선순위
 
@@ -42,9 +42,9 @@ Codex Dashboard 프로젝트의 최상위 기준 문서.
 
 ## 운영 원칙
 
-- 운영 기본값은 Codex 인스턴스다.
+- 운영 기본값은 Codex 단일 인스턴스다.
 - `codex-web-dashboard.service`를 우선 설명한다.
-- Codex와 Claude는 포트, DB, 백업 루트를 분리한다.
+- Codex는 `~/.codex`, `8617`, `codex-web-dashboard.service`를 기준으로 운영한다.
 - 운영 환경에서는 반드시 `DASHBOARD_PASSWORD`를 설정한다.
 - 기본 검증 절차는 `8617` 바인딩, `/api/auth/me`, `/api/stats` 확인으로 통일한다.
 

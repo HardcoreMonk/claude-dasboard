@@ -1,7 +1,6 @@
 # REST API
 
 62 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/codex-collector.py`, `/login`, `/features` 은 인증 우회.
-현재 대시보드는 Codex 세션 탐색 전용으로 동작한다. legacy Claude/claude.ai 라우트는 데이터 보존과 호환을 위해 남아 있지만, 기본 UI 는 사용하지 않는다.
 
 프로젝트 기준과 문서 우선순위는 `AGENTS.md`를 따른다. 이 문서는 인터페이스 계약과 호출 예시에 집중한다.
 
@@ -169,18 +168,6 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 | DELETE | `/api/nodes/{node_id}` | 노드 등록 해제 (수집된 데이터는 유지) |
 | POST | `/api/nodes/{node_id}/rotate-key` | ingest key 재발급 |
 
-## claude.ai export
-
-`import_claude_ai.py` 로 적재된 웹 대화 아카이브 전용 라우트다. 토큰/비용 없음 — content 검색 전용. 현재 Codex 대시보드 UI 는 이 경로를 사용하지 않는다.
-
-| 메서드 | 경로 | 설명 |
-|---|---|---|
-| GET | `/api/claude-ai/stats` | 전체 카운트 (conversations, messages, attachments, files, total_text_bytes, first/last timestamp) |
-| GET | `/api/claude-ai/conversations` | sort (`updated_at`/`created_at`/`message_count`/`name`/`text_bytes`), order, search, per_page, page |
-| GET | `/api/claude-ai/conversations/{uuid}` | 대화 메타 상세 (404 on unknown uuid) |
-| GET | `/api/claude-ai/conversations/{uuid}/messages` | 메시지 목록 (limit/offset, content_json 포함) |
-| GET | `/api/claude-ai/search?q=k` | FTS5 전문 검색 (LIKE fallback) |
-
 ## 관측성 메트릭
 
 `/metrics` 응답에 포함되는 주요 시리즈:
@@ -212,8 +199,4 @@ curl -s 'http://localhost:8617/api/sessions/<sid>/chain?depth=4' | jq .
 curl -o codex-usage.csv http://localhost:8617/api/export/csv
 curl -s http://localhost:8617/metrics | grep dashboard_
 
-# claude.ai export 엔드포인트
-curl -s http://localhost:8617/api/claude-ai/stats | jq .
-curl -s 'http://localhost:8617/api/claude-ai/conversations?sort=message_count&per_page=5' | jq '.conversations[]|{uuid,name,message_count}'
-curl -s --get --data-urlencode 'q=하이퍼바이저' --data 'limit=5' http://localhost:8617/api/claude-ai/search | jq '.results'
 ```

@@ -1,7 +1,6 @@
 # Codex Dashboard
 
 Codex CLI 세션을 수집·검색·복기하는 자체 호스팅 웹 대시보드.
-현재 UX와 기본 데이터 경로는 Codex 전용이며, legacy Claude/claude.ai 경로는 운영 호환용으로만 남아 있다.
 
 프로젝트 운영 기본값과 문서 우선순위는 `AGENTS.md`를 기준으로 한다.
 
@@ -51,7 +50,7 @@ PORT=8617                     # Codex 기본 포트
 
 ### systemd 서비스
 
-운영 기준은 Codex 인스턴스다. Claude와 Codex는 별도 systemd 서비스로 운영하며, 서로 다른 포트·별도 DB 루트·별도 백업 루트를 사용한다.
+운영 기준은 Codex 단일 인스턴스다.
 
 ```bash
 # Codex Web Dashboard
@@ -59,13 +58,9 @@ sudo cp codex-web-dashboard.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now codex-web-dashboard
 
-# Legacy Claude Dashboard
-sudo cp claude-dashboard.service /etc/systemd/system/
-sudo systemctl enable --now claude-dashboard
 ```
 
 - `codex-web-dashboard.service` → `PORT=8617`, `DASHBOARD_DB_PATH=~/.codex/dashboard.db`, `DASHBOARD_BACKUP_DIR=~/.codex/dashboard-backups`
-- `claude-dashboard.service` → `PORT=8765`, `DASHBOARD_DB_PATH=~/.claude/dashboard.db`, `DASHBOARD_BACKUP_DIR=~/.claude/dashboard-backups`
 
 ### 테스트 & 빌드
 
@@ -130,7 +125,6 @@ INGEST_KEY=<key> python3 codex_collector.py --url http://dashboard:8617 --node-i
 ### 그 외
 - **Subagent 분석**: 유형별/종료사유/비용TOP10/소요TOP10/히트맵/매트릭스 (7개 섹션)
 - **예산 관리**: 플랜 자동 감지, 일/주간 예산, 프로그레스 바, 카운트다운
-- **호환 API 유지**: legacy Claude/claude.ai 데이터는 별도 API 와 테이블로만 유지
 - **다크/라이트 테마**: WCAG AA 4.5:1, 반응형 (640/480/360px)
 - **커맨드 팔레트**: Cmd+K, 키보드 단축키 (g+o/b/s/c)
 
@@ -214,15 +208,13 @@ docs/
 
 **A. 내장 asyncio 스케줄러 (권장)** — Export/Admin UI에서 토글로 활성화. `interval_hours`와 `older_than_days`를 설정하면 백그라운드 루프가 주기 체크 후 자동 실행. 설정은 `app_config` 테이블에 영속화되어 재시작에도 유지. Docker/VPS 동일하게 동작.
 
-**B. systemd timer (레거시)** — 기존 설치 유지용.
+**B. systemd timer** — systemd 기반 운영 환경용.
 
 ```bash
-sudo cp claude-dashboard-retention.{service,timer} /etc/systemd/system/
-sudo systemctl enable --now claude-dashboard-retention.timer
+sudo cp codex-web-dashboard-retention.{service,timer} /etc/systemd/system/
+sudo systemctl enable --now codex-web-dashboard-retention.timer
 # 매주 일요일 03:30, 365일 이전 데이터 삭제
 ```
-
-서비스를 분리 운영할 때도 백업/보존 루트는 섞지 않는다. Claude와 Codex는 별도 systemd 서비스로 운영하고, 별도 DB 루트와 별도 백업 루트를 유지해야 복원 절차와 보존 정책을 독립적으로 관리할 수 있다.
 
 ## 문서
 

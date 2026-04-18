@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Disaster recovery: rebuild the dashboard DB from scratch by rescanning
-# every JSONL file under ~/.claude/projects/. Useful when:
+# every JSONL file under ~/.codex/projects/. Useful when:
 #   - the DB is corrupted and no clean backup exists
 #   - a migration bug left data in an inconsistent state
 #   - you want a clean v0→v11 re-migration run
@@ -10,9 +10,9 @@
 # by backup.sh's 10-file rotation (which matches `dashboard_*`).
 set -euo pipefail
 
-DB="$HOME/.claude/dashboard.db"
-DEST_DIR="$HOME/.claude/dashboard-backups"
-UNIT="claude-dashboard.service"
+DB="$HOME/.codex/dashboard.db"
+DEST_DIR="$HOME/.codex/dashboard-backups"
+UNIT="codex-web-dashboard.service"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
