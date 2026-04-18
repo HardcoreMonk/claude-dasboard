@@ -437,6 +437,30 @@ def test_session_chain_does_not_invent_unproven_recursive_children(api_client):
     assert body['nodes'][1]['parent_session_id'] == 'codex-s1'
 
 
+def test_codex_only_boot_keeps_chain_and_primary_session_routes_alive(api_client):
+    _clear_legacy_runtime_rows()
+
+    detail = api_client.get('/api/sessions/codex-s1')
+    assert detail.status_code == 200
+    assert detail.json()['id'] == 'codex-s1'
+
+    messages = api_client.get('/api/sessions/codex-s1/messages')
+    assert messages.status_code == 200
+    assert messages.json()['total'] == 4
+
+    chain = api_client.get('/api/sessions/codex-s1/chain')
+    assert chain.status_code == 200
+    assert chain.json()['root'] == 'codex-s1'
+
+    tags = api_client.get('/api/tags')
+    assert tags.status_code == 200
+    assert 'tags' in tags.json()
+
+    metrics = api_client.get('/metrics')
+    assert metrics.status_code == 200
+    assert 'dashboard_sessions_total' in metrics.text
+
+
 def test_admin_ingest_status_reports_codex_counters(api_client):
     r = api_client.get('/api/admin/status')
     assert r.status_code == 200
