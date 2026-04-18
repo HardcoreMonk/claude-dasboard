@@ -7,7 +7,7 @@
   <meta name="description" content="Claude Code 비용, 토큰, 세션을 로컬·팀 단위로 추적. JSONL 실시간 파싱, 174 테스트 통과, SQLite WAL. stdlib 수집 에이전트로 팀 확장 가능.">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
   <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
   <script>
     tailwind.config = {
@@ -16,6 +16,7 @@
           fontFamily: {
             sans: ['Pretendard', 'Geist', 'system-ui', 'sans-serif'],
             display: ['Geist', 'Pretendard', 'sans-serif'],
+            serif: ['"Instrument Serif"', 'Pretendard', 'Georgia', 'serif'],
             mono: ['Geist Mono', 'ui-monospace', 'monospace'],
           },
           colors: {
@@ -28,12 +29,18 @@
   </script>
   <style>
     body { word-break: keep-all; }
+    /* Subtle full-page grid pattern — replaces ambient orbs. Data-viz inspired,
+       not "generic AI ambient blur". Fixed so it doesn't scroll. */
+    .bg-grid { position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background-image:
+        linear-gradient(to right, rgba(255,255,255,0.018) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,0.018) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at center top, #000 30%, transparent 80%);
+      -webkit-mask-image: radial-gradient(ellipse at center top, #000 30%, transparent 80%);
+    }
     .grain { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .028;
       background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E"); }
-    .ambient { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
-    .orb { position: absolute; border-radius: 50%; filter: blur(120px); }
-    .orb-a { width: 560px; height: 560px; background: #34d399; top: -15%; left: 55%; opacity: .07; }
-    .orb-b { width: 420px; height: 420px; background: #60a5fa; top: 65%; left: -8%; opacity: .04; }
 
     @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
     .reveal { animation: fadeUp .8s cubic-bezier(.16,1,.3,1) both; }
@@ -58,10 +65,6 @@
     .float-b { animation: float 5s ease-in-out infinite .7s; }
     .float-c { animation: float 4.5s ease-in-out infinite 1.4s; }
 
-    @keyframes drift { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(24px, -18px); } }
-    .orb-a { animation: drift 20s ease-in-out infinite; }
-    .orb-b { animation: drift 26s ease-in-out infinite reverse; }
-
     .link-underline { position: relative; }
     .link-underline::after { content: ''; position: absolute; left: 0; bottom: -2px; width: 100%; height: 1px; background: currentColor; transform: scaleX(0); transform-origin: right; transition: transform .5s cubic-bezier(.16,1,.3,1); }
     .link-underline:hover::after { transform: scaleX(1); transform-origin: left; }
@@ -76,8 +79,8 @@
   </style>
 </head>
 <body class="bg-ink text-white/90 antialiased min-h-[100dvh] font-sans">
+<div class="bg-grid"></div>
 <div class="grain"></div>
-<div class="ambient"><div class="orb orb-a"></div><div class="orb orb-b"></div></div>
 
 <!-- ─── NAV ─── -->
 <nav class="fixed top-4 left-1/2 -translate-x-1/2 z-40 px-1.5 py-1.5 rounded-full
@@ -85,10 +88,11 @@
             shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
   <div class="flex items-center gap-1 text-[12px]">
     <a href="/login" class="flex items-center gap-1.5 px-3 py-1 rounded-full hover:bg-white/5 transition-colors group" title="대시보드 로그인으로 이동">
-      <div class="w-5 h-5 rounded-md bg-gradient-to-br from-accent to-accent/40 flex items-center justify-center">
+      <div class="w-5 h-5 rounded-md bg-gradient-to-br from-accent to-accent/40 flex items-center justify-center flex-shrink-0">
         <iconify-icon icon="solar:graph-new-up-bold" width="11" class="text-ink"></iconify-icon>
       </div>
-      <span class="font-display font-semibold tracking-tight group-hover:text-accent transition-colors">claude-dashboard</span>
+      <span class="font-display font-semibold tracking-tight group-hover:text-accent transition-colors hidden sm:inline whitespace-nowrap">claude-dashboard</span>
+      <span class="font-mono font-semibold tracking-tighter group-hover:text-accent transition-colors sm:hidden" aria-hidden="true">cd</span>
     </a>
     <a href="#local" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline">01</a>
     <a href="#team" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline">02</a>
@@ -97,39 +101,24 @@
   </div>
 </nav>
 
-<!-- ─── TOP BANNER ─── -->
-<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-36 md:pt-40 pb-24 md:pb-32">
-  <div class="reveal inline-flex items-center gap-2 px-3 py-1 rounded-full border border-accent/30 bg-accent/5 text-accent text-[10px] uppercase tracking-[0.25em] font-semibold mb-6">
-    <iconify-icon icon="solar:palette-bold" width="12"></iconify-icon>
-    Landing Page — Combined
-  </div>
-  <h1 class="reveal reveal-1 font-display font-extrabold text-4xl md:text-6xl lg:text-[80px] tracking-[-0.04em] leading-[1.05]">
-    세 가지 서사, <span class="text-accent">하나의 대시보드.</span>
-  </h1>
-  <p class="reveal reveal-2 text-white/50 text-base md:text-lg max-w-2xl mt-7 leading-relaxed">
-    같은 제품(claude-dashboard)을 세 가지 톤으로 풀어낸 시안을 하나로 합친 통합 랜딩페이지.
-    Local → Team → Proof 서사로 이어집니다.
-  </p>
-</section>
-
-<!-- ─── HERO ─── -->
-<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-8 md:pt-12 pb-24 md:pb-32">
-  <div class="grid lg:grid-cols-12 gap-10 items-center">
-    <!-- Left: editorial statement (A-style) -->
+<!-- ─── OPENING (merged banner + hero, single h1) ─── -->
+<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-36 md:pt-44 pb-24 md:pb-36">
+  <div class="grid lg:grid-cols-12 gap-10 md:gap-14 items-center">
+    <!-- Left: editorial statement (single h1) -->
     <div class="lg:col-span-6">
-      <div class="reveal flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-white/40 mb-7">
+      <div class="reveal flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] text-white/40 mb-8">
         <span class="w-6 h-px bg-white/20"></span>
-        <span>Usage Observability for Claude Code</span>
+        <span>Self-hosted · Open Source · 2026</span>
       </div>
-      <h1 class="reveal reveal-1 font-display font-extrabold text-[48px] md:text-[72px] lg:text-[88px] leading-[0.95] tracking-[-0.04em] mb-8">
-        사용량을<br>
-        <span class="text-white/30">숫자로</span> 본다.
+      <h1 class="reveal reveal-1 font-serif font-normal italic text-[54px] md:text-[84px] lg:text-[112px] leading-[0.95] tracking-[-0.02em] mb-8">
+        세 가지 서사,<br>
+        <span class="not-italic font-display font-extrabold text-accent tracking-[-0.04em]">하나의 대시보드.</span>
       </h1>
-      <p class="reveal reveal-2 text-white/60 text-base md:text-lg leading-[1.6] max-w-[48ch] mb-9">
+      <p class="reveal reveal-2 text-white/60 text-base md:text-lg leading-[1.65] max-w-[52ch] mb-10">
         Claude Code의 모든 세션, 토큰, 비용을 로컬 대시보드에서 추적합니다.
         <span class="text-white/85">혼자 쓰든 팀으로 쓰든</span>, stdlib 수집 에이전트 하나로 확장됩니다.
       </p>
-      <div class="reveal reveal-3 flex flex-wrap items-center gap-3 mb-8">
+      <div class="reveal reveal-3 flex flex-wrap items-center gap-3 mb-10">
         <a href="https://github.com/HardcoreMonk/claude-dasboard" class="inline-flex items-center gap-2 px-6 py-3.5 bg-accent text-ink font-bold text-[14px] rounded-full hover:scale-[1.02] active:scale-[0.98] transition-transform">
           <iconify-icon icon="solar:download-linear" width="16"></iconify-icon>
           5분 안에 설치
@@ -139,7 +128,7 @@
           <iconify-icon icon="solar:arrow-right-linear" width="14"></iconify-icon>
         </a>
       </div>
-      <div class="reveal reveal-4 flex items-center gap-5 text-[11px] text-white/40">
+      <div class="reveal reveal-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-white/40">
         <span class="flex items-center gap-1.5"><iconify-icon icon="solar:shield-check-linear" width="14" class="text-accent/70"></iconify-icon>Self-hosted</span>
         <span class="flex items-center gap-1.5"><iconify-icon icon="solar:database-linear" width="14" class="text-accent/70"></iconify-icon>SQLite WAL</span>
         <span class="flex items-center gap-1.5"><iconify-icon icon="solar:test-tube-linear" width="14" class="text-accent/70"></iconify-icon>174 tests</span>
@@ -199,7 +188,7 @@
             <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
               <div class="text-[9px] uppercase tracking-wider text-white/40 mb-2">활성 (30분)</div>
               <div class="flex items-center gap-2 text-[11px]">
-                <span class="w-1.5 h-1.5 rounded-full bg-accent pulse-dot"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-accent"></span>
                 <span class="font-medium">claude-dashboard</span>
                 <span class="text-accent font-mono ml-auto">$5,096</span>
               </div>
@@ -286,40 +275,64 @@
   <!-- Row 2: visual left / text right -->
   <div class="grid md:grid-cols-12 gap-10 md:gap-16 mb-28 md:mb-32 ir">
     <div class="md:col-span-7 order-2 md:order-1">
-      <div class="rounded-3xl border border-white/10 bg-white/[0.02] p-8 md:p-12">
-        <div class="font-mono text-[11px] text-white/40 mb-6">PLAN USAGE · DAILY BUDGET</div>
-        <div class="grid grid-cols-7 gap-1.5 mb-6">
-          <div class="h-20 rounded bg-accent/70"></div>
-          <div class="h-16 rounded bg-accent/50"></div>
-          <div class="h-24 rounded bg-accent/80"></div>
-          <div class="h-12 rounded bg-accent/40"></div>
-          <div class="h-28 rounded bg-accent"></div>
-          <div class="h-20 rounded bg-accent/60"></div>
-          <div class="h-8 rounded bg-accent/30"></div>
-        </div>
-        <div class="flex items-center justify-between text-[11px] text-white/40 font-mono">
-          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
-        </div>
-        <div class="mt-8 pt-6 border-t border-white/5 flex items-end justify-between">
+      <div class="rounded-3xl border border-white/10 bg-white/[0.02] p-6 md:p-8">
+        <div class="flex items-start justify-between mb-5">
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-white/40">예산 소진 예상</div>
-            <div class="font-display font-bold text-2xl tracking-tight text-accent">3일 18시간 후</div>
+            <div class="text-[10px] uppercase tracking-[0.25em] text-white/40 font-semibold mb-1">Weekly Heatmap · 요일 × 시간</div>
+            <div class="font-display font-bold text-lg md:text-xl">작업 패턴이 드러납니다.</div>
+          </div>
+          <iconify-icon icon="solar:calendar-minimalistic-linear" width="18" class="text-white/30"></iconify-icon>
+        </div>
+        <!-- 7 rows × 24 cols heatmap (Mon → Sun). Real shape from /api/timeline/heatmap. -->
+        <div class="grid gap-[3px]" style="grid-template-columns: 28px repeat(24, 1fr);">
+          <!-- Mon -->
+          <div class="text-[9px] text-white/30 font-mono flex items-center justify-end pr-1">Mon</div>
+          <div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/40"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent/90"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent/50"></div><div class="aspect-square rounded-sm bg-accent/40"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div>
+          <!-- Tue -->
+          <div class="text-[9px] text-white/30 font-mono flex items-center justify-end pr-1">Tue</div>
+          <div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/50"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent/90"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/40"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div>
+          <!-- Wed -->
+          <div class="text-[9px] text-white/30 font-mono flex items-center justify-end pr-1">Wed</div>
+          <div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/50"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent/90"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent/90"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent/50"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div>
+          <!-- Thu -->
+          <div class="text-[9px] text-white/30 font-mono flex items-center justify-end pr-1">Thu</div>
+          <div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent/90"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/40"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div>
+          <!-- Fri -->
+          <div class="text-[9px] text-white/30 font-mono flex items-center justify-end pr-1">Fri</div>
+          <div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/50"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent/80"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent/50"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div>
+          <!-- Sat -->
+          <div class="text-[9px] text-white/30 font-mono flex items-center justify-end pr-1">Sat</div>
+          <div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/40"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent/50"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/70"></div><div class="aspect-square rounded-sm bg-accent/60"></div><div class="aspect-square rounded-sm bg-accent/50"></div><div class="aspect-square rounded-sm bg-accent/40"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div>
+          <!-- Sun -->
+          <div class="text-[9px] text-white/30 font-mono flex items-center justify-end pr-1">Sun</div>
+          <div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/40"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/40"></div><div class="aspect-square rounded-sm bg-accent/50"></div><div class="aspect-square rounded-sm bg-accent/40"></div><div class="aspect-square rounded-sm bg-accent/30"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/20"></div><div class="aspect-square rounded-sm bg-accent/10"></div><div class="aspect-square rounded-sm bg-white/[0.05]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div><div class="aspect-square rounded-sm bg-white/[0.03]"></div>
+        </div>
+        <!-- x-axis labels -->
+        <div class="grid gap-[3px] mt-2 text-[9px] text-white/30 font-mono" style="grid-template-columns: 28px repeat(24, 1fr);">
+          <div></div>
+          <div class="col-start-2">00</div><div class="col-start-8">06</div><div class="col-start-14">12</div><div class="col-start-20">18</div><div class="col-end-[-1]">24</div>
+        </div>
+        <div class="mt-6 pt-5 border-t border-white/5 flex items-end justify-between">
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-white/40">피크 시간대</div>
+            <div class="font-display font-bold text-xl tracking-tight text-accent">화 · 오전 9-11시</div>
           </div>
           <div class="text-right">
-            <div class="text-[10px] uppercase tracking-wider text-white/40">일일 한도</div>
-            <div class="font-mono text-sm">$50.00</div>
+            <div class="text-[10px] uppercase tracking-wider text-white/40">샘플</div>
+            <div class="font-mono text-sm">지난 90일</div>
           </div>
         </div>
       </div>
     </div>
     <div class="md:col-span-5 md:pt-12 order-1 md:order-2">
-      <div class="font-mono text-[11px] text-accent mb-4">/api/forecast · /api/plan/usage</div>
+      <div class="font-mono text-[11px] text-accent mb-4">/api/timeline/heatmap · /api/forecast</div>
       <h3 class="font-display text-3xl md:text-4xl font-semibold tracking-tight leading-tight mb-5">
-        언제 예산이<br>바닥날지 안다.
+        언제 집중해서 쓰는지 한눈에.
       </h3>
       <p class="text-white/55 text-[15px] leading-[1.7] max-w-[44ch]">
-        일/주간 예산을 설정하면 현재 번율로 소진 시점을 예측합니다. EOM 투영, 평균 토큰/일,
-        캐시 효율까지 한 곳에. Chart.js 6개 차트와 시간별 히트맵이 기본 제공됩니다.
+        요일×시간 7×24 히트맵으로 팀의 작업 패턴이 드러납니다. 개인은 야근 시간,
+        팀은 배포 주기까지 — 한 번에 보이는 데이터. 예산은 현재 번율로 소진 시점을 예측,
+        일/주간 한도까지 기본 제공.
       </p>
     </div>
   </div>
@@ -480,7 +493,7 @@
 </section>
 
 <!-- ─── 03 PROOF (B comparison) ─── -->
-<section id="proof" class="max-w-7xl mx-auto px-6 lg:px-12 py-20 md:py-28">
+<section id="proof" class="max-w-7xl mx-auto px-6 lg:px-12 pt-16 md:pt-24 pb-10 md:pb-14">
   <div class="mb-12 ir">
     <div class="text-[11px] uppercase tracking-[0.25em] text-accent font-semibold mb-5">03 — Before vs after</div>
     <h2 class="font-display text-4xl md:text-5xl lg:text-6xl font-bold tracking-[-0.03em] leading-[1.05]">
@@ -526,7 +539,7 @@
 </section>
 
 <!-- ─── CTA ─── -->
-<section class="max-w-5xl mx-auto px-6 lg:px-12 py-28 md:py-40 text-center">
+<section class="max-w-5xl mx-auto px-6 lg:px-12 pt-24 md:pt-32 pb-32 md:pb-48 text-center">
   <div class="ir">
     <div class="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-white/40 mb-8">
       <span class="w-8 h-px bg-white/20"></span>
