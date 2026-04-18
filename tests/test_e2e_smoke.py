@@ -249,6 +249,17 @@ def test_public_landing_pages_are_exposed_without_auth(e2e_client, path, marker)
     assert '로컬에서 바로 실행' in r.text
 
 
+def test_ops_landing_positions_codex_as_operations_console(e2e_client):
+    html = e2e_client.get('/landing/ops').text
+
+    assert 'operations console' in html.lower()
+    assert '운영 콘솔' in html
+    assert '로컬에서 바로 실행' in html
+    assert 'warning' in html.lower() or '경고' in html
+    assert 'retention' in html.lower() or '보관' in html
+    assert 'db' in html.lower() or '데이터베이스' in html or 'SQLite' in html
+
+
 def test_overview_balanced_portal_regions_exist(e2e_client):
     html = e2e_client.get('/').text
     css = Path('static/app.css').read_text()
