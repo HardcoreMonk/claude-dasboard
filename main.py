@@ -83,7 +83,12 @@ BACKUP_DIR = Path(
         str(Path.home() / '.codex' / 'dashboard-backups'),
     )
 )
-CREDENTIALS_PATH = Path.home() / '.claude' / '.credentials.json'
+CREDENTIALS_PATH = Path(
+    os.environ.get(
+        'DASHBOARD_CREDENTIALS_PATH',
+        str(Path.home() / '.codex' / '.credentials.json'),
+    )
+)
 _AUTH_PW = os.environ.get('DASHBOARD_PASSWORD')
 _SESSION_SECRET = os.environ.get('DASHBOARD_SECRET', secrets.token_hex(32))
 if 'DASHBOARD_SECRET' not in os.environ:
@@ -116,20 +121,20 @@ def _verify_session(token: str) -> bool:
 # ─── Plan auto-detection ──────────────────────────────────────────────────────
 
 PLAN_PRESETS: dict[str, dict] = {
-    'default_claude_pro':      {'label': 'Pro',      'daily': 15,   'weekly': 80},
-    'default_claude_max_5x':   {'label': 'Max 5x',   'daily': 80,   'weekly': 400},
-    'default_claude_max_20x':  {'label': 'Max 20x',  'daily': 300,  'weekly': 1500},
+    'default_pro':      {'label': 'Pro',      'daily': 15,   'weekly': 80},
+    'default_max_5x':   {'label': 'Max 5x',   'daily': 80,   'weekly': 400},
+    'default_max_20x':  {'label': 'Max 20x',  'daily': 300,  'weekly': 1500},
 }
 
 
 def detect_plan() -> dict:
-    """Read plan tier from Claude Code credentials (local file, no API call)."""
+    """Read plan tier from local dashboard credentials (local file, no API call)."""
     try:
         with open(CREDENTIALS_PATH) as f:
             creds = json.load(f)
-        oauth = creds.get('claudeAiOauth', {})
-        tier = oauth.get('rateLimitTier', '')
-        sub_type = oauth.get('subscriptionType', '')
+        oauth = creds.get('oauth', {})
+        tier = creds.get('rateLimitTier', '') or oauth.get('rateLimitTier', '')
+        sub_type = creds.get('subscriptionType', '') or oauth.get('subscriptionType', '')
         preset = PLAN_PRESETS.get(tier, {})
         return {
             'tier': tier,

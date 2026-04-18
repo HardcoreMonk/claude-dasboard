@@ -49,7 +49,6 @@ body:not(.theme-light) .text-white\/35  { color: rgba(255,255,255,.48); }
 .conv-source-btn { background:rgba(255,255,255,.04); color:rgba(255,255,255,.5); border:1px solid rgba(255,255,255,.07); }
 .conv-source-btn:hover { color:rgba(255,255,255,.75); }
 .conv-source-btn.active { background:rgba(52,211,153,.15); color:#34d399; border-color:rgba(52,211,153,.3); }
-.cai-badge { background:rgba(147,51,234,.15); color:#d8b4fe; border:1px solid rgba(147,51,234,.3); padding:1px 6px; border-radius:9999px; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
 
 /* ── Session tag badge ── (shared by 세션/대화/프로젝트 뷰) */
 .tag-badge {
@@ -325,11 +324,6 @@ body.theme-light .conv-source-btn.active {
   background: rgba(16,185,129,.18);
   color: #047857;
   border-color: rgba(16,185,129,.45);
-}
-body.theme-light .cai-badge {
-  background: rgba(147,51,234,.18);
-  color: #6d28d9;
-  border-color: rgba(147,51,234,.5);
 }
 body.theme-light .tag-badge {
   background: rgba(6,182,212,.20);
