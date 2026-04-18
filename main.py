@@ -293,7 +293,8 @@ app.add_middleware(
 # metrics SECOND. At runtime the order is: metrics → auth → route.
 
 _AUTH_BYPASS = {'/api/health', '/metrics', '/api/ingest', '/api/codex-collector.py',
-                '/api/auth/login', '/api/auth/me', '/login', '/features'}
+                '/api/auth/login', '/api/auth/me', '/login', '/features',
+                '/landing/ops', '/landing/team', '/landing/executive'}
 _AUTH_BYPASS_PREFIX = ('/static/',)
 
 if _AUTH_PW:
@@ -460,6 +461,30 @@ async def login_page():
 async def features_page():
     return FileResponse(
         Path(__file__).parent / 'docs' / 'features.html',
+        headers={'Cache-Control': 'no-store'},
+    )
+
+
+@app.get("/landing/ops")
+async def landing_ops_page():
+    return FileResponse(
+        STATIC_DIR / 'landing-ops.html',
+        headers={'Cache-Control': 'no-store'},
+    )
+
+
+@app.get("/landing/team")
+async def landing_team_page():
+    return FileResponse(
+        STATIC_DIR / 'landing-team.html',
+        headers={'Cache-Control': 'no-store'},
+    )
+
+
+@app.get("/landing/executive")
+async def landing_executive_page():
+    return FileResponse(
+        STATIC_DIR / 'landing-executive.html',
         headers={'Cache-Control': 'no-store'},
     )
 
