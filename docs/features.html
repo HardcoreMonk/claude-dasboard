@@ -123,7 +123,7 @@ footer a{color:var(--accent);text-decoration:none}
     <li><a href="#timeline"><span class="num">07</span> Timeline (Gantt)</a></li>
     <li><a href="#budget"><span class="num">08</span> Budget Management</a></li>
     <li><a href="#multiserver"><span class="num">09</span> Multi-Server Collection</a></li>
-    <li><a href="#claudeai"><span class="num">10</span> claude.ai Archive</a></li>
+    <li><a href="#runtime"><span class="num">10</span> Codex Runtime Defaults</a></li>
     <li><a href="#auth"><span class="num">11</span> Authentication &amp; Security</a></li>
     <li><a href="#admin"><span class="num">12</span> Administration</a></li>
     <li><a href="#uiux"><span class="num">13</span> UI / UX</a></li>
@@ -268,7 +268,7 @@ footer a{color:var(--accent);text-decoration:none}
 <section id="budget">
   <h2><span class="badge">08</span> Budget Management</h2>
   <table>
-    <tr><td>Plan Auto-Detect</td><td>Reads rateLimitTier from ~/.claude/.credentials.json (local, no API)</td></tr>
+    <tr><td>Plan Auto-Detect</td><td>Reads rateLimitTier from ~/.codex/.credentials.json (local, no API)</td></tr>
     <tr><td>Daily/Weekly Budget</td><td>Custom limits + presets (Pro, Max 5x, Max 20x)</td></tr>
     <tr><td>Progress Bar</td><td>Usage % with color gradient (green → yellow → orange → red)</td></tr>
     <tr><td>Countdown Timer</td><td>Live seconds-until-reset countdown</td></tr>
@@ -298,14 +298,14 @@ codex_collector.py                      POST /api/ingest
 </section>
 
 <!-- ═══ 10 ═══ -->
-<section id="claudeai">
-  <h2><span class="badge">10</span> claude.ai Archive</h2>
+<section id="runtime">
+  <h2><span class="badge">10</span> Codex Runtime Defaults</h2>
   <table>
-    <tr><td>Import</td><td>import_claude_ai.py --zip CLI (conversations.json)</td></tr>
-    <tr><td>Conversation List</td><td>Sort, search, paginate</td></tr>
-    <tr><td>Viewer</td><td>text/thinking/tool_use/tool_result block rendering</td></tr>
-    <tr><td>Source Toggle</td><td>claude-code / claude-ai switch in conversation view</td></tr>
-    <tr><td>Isolation</td><td>Independent tables, never JOIN with sessions/messages</td></tr>
+    <tr><td>Credentials</td><td>Reads plan metadata from ~/.codex/.credentials.json</td></tr>
+    <tr><td>Session Roots</td><td>Scans ~/.codex/sessions and ~/.codex/projects</td></tr>
+    <tr><td>Storage</td><td>Uses ~/.codex/dashboard.db and ~/.codex/dashboard-backups</td></tr>
+    <tr><td>Collector</td><td>Downloads codex_collector.py from /api/codex-collector.py</td></tr>
+    <tr><td>Service</td><td>Runs as codex-web-dashboard.service on port 8617</td></tr>
   </table>
 </section>
 
