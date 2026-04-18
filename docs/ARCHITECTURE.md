@@ -68,7 +68,7 @@ HTTP routes + 1 WebSocket 을 호스팅.
 | 페이지 | `/features` | Feature Reference HTML 페이지 (인증 우회) |
 | 헬스 | `/api/health` | 서버 상태 + DB 메시지/세션 카운트 |
 | 메트릭 | `/metrics` | Prometheus text format (인증 우회) |
-| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | Codex 기본 세션 조회/관리 경로. legacy runtime table은 호환 계층으로만 유지 |
+| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | Codex 기본 세션 조회/관리 경로 |
 | Codex | `/api/search/messages`, `/api/search/messages/{message_id}/context`, `/api/sessions/{id}/replay`, `/api/codex/sessions`, `/api/codex/sessions/{id}/messages`, `/api/codex/projects/{name}/stats`, `/api/codex/projects/{name}/messages`, `/api/timeline/summary`, `/api/usage/summary`, `/api/agents/summary` | Codex 메시지 검색, 문맥 복기, 세션 리플레이, 프로젝트 상세, 타임라인/사용량/agent 요약 |
 | 프로젝트 | `/api/projects`, `/top`, `/{name}/stats`, `/{name}/messages` | 프로젝트 집계, TOP 5, 상세 |
 | 사용량 | `/api/usage/hourly`, `/daily`, `/periods` | 시계열 토큰/비용 집계 |
@@ -94,7 +94,7 @@ HTTP routes + 1 WebSocket 을 호스팅.
 ### database.py — SQLite 데이터 계층
 
 ```
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 18
 모드: WAL, busy_timeout=5000, auto_vacuum=INCREMENTAL
 ```
 
@@ -118,7 +118,7 @@ SCHEMA_VERSION = 15
 | `admin_audit` | 관리자 액션 감사 로그 (ts/action/actor_ip/status/detail) |
 | `app_config` | in-app 설정 키-값 스토어 (현재 `retention_schedule`) |
 
-**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v15). 각 단계는 idempotent.
+**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v18). 각 단계는 idempotent.
 
 ### Codex 수집 상태
 
@@ -132,11 +132,11 @@ SCHEMA_VERSION = 15
 
 이 필드는 관리자 화면에서 "Codex 인덱스가 실제로 채워졌는지"를 즉시 확인하는 용도다.
 
-### Codex-first runtime 기본값
+### Codex runtime 기본값
 
-대시보드는 이제 Codex-first runtime 을 기본 경로로 사용한다. 세션 상세, 메시지, 검색, 사용량, 메트릭, chain 은 모두 `codex_projects`, `codex_sessions`, `codex_messages` 기준으로 응답한다.
+대시보드는 Codex runtime 만을 기본 경로로 사용한다. 세션 상세, 메시지, 검색, 사용량, 메트릭, chain 은 모두 `codex_projects`, `codex_sessions`, `codex_messages` 기준으로 응답한다.
 
-startup 에서는 `DASHBOARD_ENABLE_LEGACY_RUNTIME=0` 으로 Codex 전용 bootstrap 이 가능하다. 이 모드에서는 primary UI/API 에 필요한 Codex 스키마와 보조 설정 테이블만 생성하고, legacy runtime table 생성은 생략한다.
+startup bootstrap 역시 Codex 전용이다. primary UI/API 에 필요한 스키마와 보조 설정 테이블만 생성하며, legacy runtime table bootstrap 은 더 이상 수행하지 않는다.
 
 ### codex_parser.py — JSONL 파싱 엔진
 
@@ -399,7 +399,7 @@ codex-web-dashboard-retention.service → 오래된 데이터 정리
 ```yaml
 # .github/workflows/ci.yml
 - ruff (lint)
-- pytest 174 tests (~6s)
+- pytest 전체 스위트
 - node --check (JS syntax)
 ```
 
@@ -434,7 +434,7 @@ codex_collector.py                POST /api/ingest
 - `codex_collector.py`: stdlib-only 독립 스크립트. 원격 서버의 Codex 로그를 감시하며 변경된 JSONL 레코드를 대시보드 서버로 전송.
 - `GET /api/codex-collector.py`: 대시보드 서버에서 Codex collector 스크립트 다운로드 (원격 서버 설치 편의).
 - `POST /api/nodes`: 노드 등록 시 일회성 `ingest_key` 발급. `POST /api/nodes/{id}/rotate-key` 로 재발급.
-- `sessions.source_node` 컬럼으로 로컬/원격 세션 구분. `?node=` 필터로 노드별 조회.
+- `codex_sessions.source_node` 컬럼으로 로컬/원격 세션 구분. `?node=` 필터로 노드별 조회.
 
 ### 플랜 감지
 

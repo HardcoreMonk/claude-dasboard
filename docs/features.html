@@ -139,7 +139,7 @@ footer a{color:var(--accent);text-decoration:none}
     <div class="card">
       <h3>WebSocket Live Update</h3>
       <p>watchdog (inotify) + 30s safety poll detects JSONL changes. Batched via 800ms debounce, pushed to all WS clients.</p>
-      <span class="tag">watcher.py + app.js</span>
+      <span class="tag">codex_watcher.py + app.js</span>
     </div>
     <div class="card">
       <h3>4-Phase Project Status</h3>
@@ -285,7 +285,7 @@ codex_collector.py                      POST /api/ingest
   ~/.codex/{sessions,projects,logs}      X-Ingest-Key auth
   watchdog + 5s poll                      parser.process_record(source_node)
   state file tracking                     DB write + WS broadcast
-  INGEST_KEY env var                      sessions.source_node = node_id</div>
+  INGEST_KEY env var                      codex_sessions.source_node = node_id</div>
   <table>
     <tr><td>Node Registration</td><td>Admin UI: + Add Node button, one-time ingest key, Codex collector command</td></tr>
     <tr><td>Collector Agent</td><td>stdlib-only Python script, no pip install needed</td></tr>

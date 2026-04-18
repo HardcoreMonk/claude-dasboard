@@ -65,7 +65,7 @@ sudo systemctl enable --now codex-web-dashboard
 ### 테스트 & 빌드
 
 ```bash
-./.venv/bin/python -m pytest tests/ -v        # 174 tests
+./.venv/bin/python -m pytest tests/ -v        # 전체 테스트 스위트
 npm run build                                 # bundle.js + tailwind.css
 npm run dev                                   # watch 모드 (개발)
 ```
@@ -161,9 +161,9 @@ dashboard.example.com {
 
 ```
 main.py              FastAPI + WS + 쿠키 세션 인증 + in-app 스케줄러
-database.py          SQLite WAL, v0→v15 마이그레이션, write/read 분리
-parser.py            JSONL 파싱, 비용 계산, cross-platform cwd
-watcher.py           watchdog + safety poll
+database.py          SQLite WAL, v0→v18 마이그레이션, write/read 분리
+codex_parser.py      JSONL 파싱, 비용 계산, cross-platform cwd
+codex_watcher.py     watchdog + safety poll
 codex_collector.py   원격 수집 에이전트 (stdlib only)
 build.js             esbuild + tailwindcss CLI 빌드
 static/
@@ -221,7 +221,7 @@ sudo systemctl enable --now codex-web-dashboard-retention.timer
 | 문서 | 내용 |
 |------|------|
 | [`AGENTS.md`](AGENTS.md) | 프로젝트 최상위 기준 |
-| [`docs/API.md`](docs/API.md) | REST API 62 routes + WebSocket |
+| [`docs/API.md`](docs/API.md) | REST API + WebSocket 계약 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 아키텍처 가이드 |
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | DB 스키마, 마이그레이션, SQL 예제 |
 | [`docs/QUALITY-GATES.md`](docs/QUALITY-GATES.md) | 8단계 품질 게이트 |
