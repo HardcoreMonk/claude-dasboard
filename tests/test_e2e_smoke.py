@@ -278,12 +278,15 @@ def test_executive_landing_positions_codex_as_reporting_brief(e2e_client):
     html = e2e_client.get('/landing/executive').text
 
     assert 'Executive Signal' in html
-    assert 'leadership brief' in html.lower() or '리더십 브리프' in html
+    assert 'id="executiveHero"' in html
+    assert 'id="brief"' in html
+    assert 'id="executiveCloseout"' in html
+    assert '리더십 브리프' in html or '경영 판단용 브리프' in html
     assert '로컬에서 바로 실행' in html
-    assert '비용 추세' in html or 'cost trend' in html.lower()
-    assert 'forecast' in html.lower() or '예측' in html
-    assert 'model usage' in html.lower() or '모델 사용량' in html or '모델 믹스' in html
-    assert 'distribution' in html.lower() or '분포' in html
+    assert '비용 추세' in html
+    assert '예측' in html
+    assert '모델 사용량' in html or '모델 분포' in html
+    assert '주간 변화' in html
 
 
 def test_overview_balanced_portal_regions_exist(e2e_client):
