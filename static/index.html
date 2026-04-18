@@ -89,41 +89,68 @@
 
 <!-- ─── EXPLORE ─── -->
 <section class="view hidden" id="view-explore" data-view="explore">
-  <div class="search-shell anim-in">
-    <section class="search-main search-card">
-      <div class="search-hero">
-        <p class="search-eyebrow">Codex Dashboard</p>
-        <h1 class="search-title">검색부터 시작하는 세션 탐색</h1>
-        <p class="search-subtitle">메시지, 툴 호출, 에이전트 응답을 한 번에 찾고 오른쪽 패널에서 앞뒤 문맥을 확인합니다.</p>
+  <div class="explore-shell anim-in">
+    <header class="explore-shell-head">
+      <div>
+        <p class="explore-shell-kicker">Explore workspace</p>
+        <h1 class="explore-shell-title">검색 먼저, 세션과 대화는 그 다음</h1>
+        <p class="explore-shell-copy">명령 팔레트는 어디서든 열리고, 탐색은 검색에서 시작합니다. 세션과 대화는 같은 탐색 공간 안의 하위 뷰로 유지됩니다.</p>
       </div>
+      <button data-action="openCommandPalette" class="explore-shell-action">명령 팔레트</button>
+    </header>
 
-      <label for="global-search-input" class="search-label">대화 검색</label>
-      <div class="search-input-wrap">
-        <iconify-icon icon="solar:magnifer-linear" width="18" class="search-input-icon"></iconify-icon>
-        <input id="global-search-input" type="search" class="search-input"
-               placeholder="메시지, 툴, 에이전트 문맥 검색"
-               autocomplete="off" spellcheck="false" />
-      </div>
+    <div id="exploreTabs" class="explore-tabs" role="tablist" aria-label="탐색 작업공간">
+      <button class="explore-tab is-active" data-action="showExploreSubview" data-arg="search" data-explore-subview="search" role="tab" aria-selected="true">
+        <iconify-icon icon="solar:magnifer-linear" width="13"></iconify-icon>검색
+      </button>
+      <button class="explore-tab" data-action="showExploreSubview" data-arg="sessions" data-explore-subview="sessions" role="tab" aria-selected="false">
+        <iconify-icon icon="solar:list-check-linear" width="13"></iconify-icon>세션
+      </button>
+      <button class="explore-tab" data-action="showExploreSubview" data-arg="conversations" data-explore-subview="conversations" role="tab" aria-selected="false">
+        <iconify-icon icon="solar:chat-round-line-linear" width="13"></iconify-icon>대화
+      </button>
+      <span id="exploreTabSummary" class="explore-tab-summary">메시지 검색이 기본 작업면입니다.</span>
+    </div>
 
-      <div id="search-filter-bar" class="search-filter-bar">
-        <span class="search-filter-pill">Codex messages</span>
-        <span id="search-result-summary" class="search-summary">검색어를 입력하면 결과가 표시됩니다.</span>
-      </div>
+    <section id="explore-search-surface" class="explore-surface">
+      <div class="search-shell">
+        <section class="search-main search-card">
+          <div class="search-hero">
+            <p class="search-eyebrow">Codex Dashboard</p>
+            <h1 class="search-title">검색부터 시작하는 세션 탐색</h1>
+            <p class="search-subtitle">메시지, 툴 호출, 에이전트 응답을 한 번에 찾고 오른쪽 패널에서 앞뒤 문맥을 확인합니다.</p>
+          </div>
 
-      <div id="search-results-panel" class="search-results-panel" aria-live="polite">
-        <div class="search-empty-state">
-          <p class="search-empty-title">검색어를 입력하세요</p>
-          <p class="search-empty-copy">최근 Codex 세션 메시지에서 일치 항목을 찾습니다.</p>
-        </div>
+          <label for="global-search-input" class="search-label">대화 검색</label>
+          <div class="search-input-wrap">
+            <iconify-icon icon="solar:magnifer-linear" width="18" class="search-input-icon"></iconify-icon>
+            <input id="global-search-input" type="search" class="search-input"
+                   placeholder="메시지, 툴, 에이전트 문맥 검색"
+                   autocomplete="off" spellcheck="false" />
+          </div>
+
+          <div id="search-filter-bar" class="search-filter-bar">
+            <span class="search-filter-pill">Codex messages</span>
+            <span id="search-result-summary" class="search-summary">검색어를 입력하면 결과가 표시됩니다.</span>
+          </div>
+
+          <div id="search-results-panel" class="search-results-panel" aria-live="polite">
+            <div class="search-empty-state">
+              <p class="search-empty-title">검색어를 입력하세요</p>
+              <p class="search-empty-copy">최근 Codex 세션 메시지에서 일치 항목을 찾습니다.</p>
+            </div>
+          </div>
+        </section>
+
+        <aside id="search-context-panel" class="search-context-panel search-card" aria-live="polite">
+          <div class="search-empty-state">
+            <p class="search-empty-title">문맥 패널</p>
+            <p class="search-empty-copy">검색 결과를 선택하면 앞뒤 메시지 흐름이 표시됩니다.</p>
+          </div>
+        </aside>
       </div>
     </section>
 
-    <aside id="search-context-panel" class="search-context-panel search-card" aria-live="polite">
-      <div class="search-empty-state">
-        <p class="search-empty-title">문맥 패널</p>
-        <p class="search-empty-copy">검색 결과를 선택하면 앞뒤 메시지 흐름이 표시됩니다.</p>
-      </div>
-    </aside>
   </div>
 </section>
 
@@ -674,8 +701,9 @@
   </div>
 </section>
 
+<div id="explore-legacy-workspace" class="explore-legacy-workspace hidden view">
 <!-- ─── SESSIONS ─── -->
-<section class="view hidden" id="view-sessions">
+<section class="view hidden" id="view-sessions" data-view="sessions">
   <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
       <div class="px-5 py-3 border-b border-white/[0.05]">
@@ -758,7 +786,7 @@
 </section>
 
 <!-- ─── CONVERSATIONS ─── -->
-<section class="view hidden" id="view-conversations">
+<section class="view hidden" id="view-conversations" data-view="conversations">
   <div class="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-3 min-h-[70vh] anim-in">
     <!-- List -->
     <div class="bg-white/5 ring-1 ring-white/[0.07] rounded-bezel overflow-hidden flex flex-col">
@@ -810,6 +838,8 @@
     </div>
   </div>
 </section>
+
+</div>
 
 <!-- ─── MODELS ─── -->
 <section class="view hidden" id="view-models">

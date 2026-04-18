@@ -106,6 +106,7 @@ REQUIRED_IDS = [
     # Shell groups
     'overviewKpiGrid', 'overviewAlertGrid', 'overviewFlowGrid', 'overviewEntryGrid',
     # Explore search surface
+    'exploreTabs', 'exploreTabSummary', 'explore-search-surface', 'explore-legacy-workspace',
     'global-search-input', 'search-results-panel', 'search-context-panel',
     # Overview hero (Hero cards)
     'pdDayCost', 'pdDayDetail', 'pdDayDelta',
@@ -184,6 +185,40 @@ def test_explore_view_renders_search_surface(e2e_client):
     assert 'id="search-results-panel"' in explore_html
     assert 'id="search-context-panel"' in explore_html
     assert 'data-action="openCommandPalette"' in html
+
+
+def test_explore_keeps_global_command_palette_and_legacy_subviews(e2e_client):
+    html = e2e_client.get('/').text
+    explore_start = html.index('<section class="view hidden" id="view-explore"')
+    overview_start = html.index('<!-- ─── OVERVIEW ─── -->')
+    explore_html = html[explore_start:overview_start]
+    all_js = Path('static/app.js').read_text()
+
+    assert 'data-action="openCommandPalette"' in html
+    assert 'id="exploreTabs"' in explore_html
+    assert 'id="exploreTabSummary"' in explore_html
+    assert 'id="explore-search-surface"' in explore_html
+    assert 'id="global-search-input"' in explore_html
+    assert 'data-explore-subview="search"' in explore_html
+    assert 'data-explore-subview="sessions"' in explore_html
+    assert 'data-explore-subview="conversations"' in explore_html
+    assert 'id="view-sessions"' in html
+    assert 'id="view-conversations"' in html
+
+    assert re.search(
+        r'function\s+loadExploreDashboard\(\)\s*\{\s*activateExploreSubview\(state\.activeSubview\s*\|\|\s*[\'"]search[\'"]\);\s*renderSearchView\(\);\s*\}',
+        all_js,
+        re.S,
+    )
+    assert re.search(
+        r'if\s*\(view\s*===\s*[\'"]explore[\'"]\)\s*state\.activeSubview\s*=\s*[\'"]search[\'"];',
+        all_js,
+    )
+    assert re.search(
+        r'if\s*\(\(e\.metaKey\s*\|\|\s*e\.ctrlKey\)\s*&&\s*e\.key\.toLowerCase\(\)\s*===\s*[\'"]k[\'"]\)\s*\{\s*e\.preventDefault\(\);\s*openCommandPalette\(\);',
+        all_js,
+        re.S,
+    )
 
 
 def test_shell_removes_claude_conversation_and_admin_copy(e2e_client):
@@ -310,6 +345,30 @@ def test_grouped_navigation_routing_is_backed_by_app_js():
     assert valid_views
     assert grouped_handlers
     assert legacy_persistence
+
+
+def test_search_is_available_as_global_tool_and_explore_workspace(e2e_client):
+    html = e2e_client.get('/').text
+    all_js = Path('static/app.js').read_text()
+
+    assert 'data-action="openCommandPalette"' in html
+    assert 'id="view-explore"' in html
+    assert 'id="exploreTabs"' in html
+    assert 'id="explore-search-surface"' in html
+    assert 'id="explore-legacy-workspace"' in html
+    assert 'id="global-search-input"' in html
+    assert 'data-action="showExploreSubview"' in html
+
+    assert re.search(
+        r'function\s+loadExploreDashboard\(\)\s*\{\s*renderExploreShell\(state\.activeSubview\s*\|\|\s*[\'"]search[\'"]\);\s*\}',
+        all_js,
+        re.S,
+    )
+    assert re.search(
+        r'function\s+renderExploreShell\(subView\s*=\s*[\'"]search[\'"]\)\s*\{.*?renderSearchView\(\);.*?loadSessions\(\);.*?loadConvList\(\);',
+        all_js,
+        re.S,
+    )
 
 
 def test_search_flow_round_trip_matches_frontend_contract(e2e_client):

@@ -175,6 +175,7 @@ const LEGACY_SUBVIEWS = new Set([
   'search', 'cost', 'sessions', 'conversations',
   'models', 'projects', 'subagents', 'timeline', 'export',
 ]);
+const EXPLORE_SUBVIEWS = new Set(['search', 'sessions', 'conversations']);
 
 function defaultView() {
   return 'overview';
@@ -189,7 +190,7 @@ function loadOverviewDashboard() {
 }
 
 function loadExploreDashboard() {
-  renderSearchView();
+  renderExploreShell(state.activeSubview || 'search');
 }
 
 function loadAnalysisDashboard() {
@@ -211,6 +212,74 @@ function legacySubviewGroup(view) {
   return null;
 }
 
+function normalizeExploreSubview(view) {
+  return EXPLORE_SUBVIEWS.has(view) ? view : 'search';
+}
+
+function updateExploreSubviewTabs(view) {
+  document.querySelectorAll('[data-explore-subview]').forEach(btn => {
+    const active = btn.dataset.exploreSubview === view;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    btn.tabIndex = active ? 0 : -1;
+  });
+  const summary = document.getElementById('exploreTabSummary');
+  if (!summary) return;
+  if (view === 'sessions') summary.textContent = '세션 목록을 탐색 작업면 안에서 바로 확인합니다.';
+  else if (view === 'conversations') summary.textContent = '대화 뷰어를 같은 탐색 군집 안에서 유지합니다.';
+  else summary.textContent = '메시지 검색이 기본 작업면입니다.';
+}
+
+function ensureExploreWorkspaceMount() {
+  const workspace = document.getElementById('explore-legacy-workspace');
+  if (!workspace) return;
+  ['view-sessions', 'view-conversations'].forEach((id) => {
+    const section = document.getElementById(id);
+    if (!section || section.parentElement === workspace) return;
+    workspace.appendChild(section);
+  });
+}
+
+function activateExploreSubview(view) {
+  const next = normalizeExploreSubview(view || state.activeSubview || 'search');
+  state.activeSubview = next;
+  ensureExploreWorkspaceMount();
+
+  const searchSurface = document.getElementById('explore-search-surface');
+  const legacyWorkspace = document.getElementById('explore-legacy-workspace');
+  const sessionsView = document.getElementById('view-sessions');
+  const conversationsView = document.getElementById('view-conversations');
+
+  if (searchSurface) searchSurface.classList.toggle('hidden', next !== 'search');
+  if (legacyWorkspace) legacyWorkspace.classList.toggle('hidden', next === 'search');
+  if (sessionsView) sessionsView.classList.toggle('hidden', next !== 'sessions');
+  if (conversationsView) conversationsView.classList.toggle('hidden', next !== 'conversations');
+
+  updateExploreSubviewTabs(next);
+}
+
+function renderExploreShell(subView = 'search') {
+  const next = normalizeExploreSubview(subView);
+  activateExploreSubview(next);
+  if (next === 'search') {
+    renderSearchView();
+    return;
+  }
+  if (next === 'sessions') {
+    loadSessions();
+    return;
+  }
+  loadConvList();
+}
+
+function showExploreSubview(subView = 'search') {
+  const next = normalizeExploreSubview(subView);
+  state.activeSubview = next;
+  history.replaceState(null, '', `#/explore/${next}`);
+  showView('explore', { updateHash: false, runLoader: false, preserveSubview: true });
+  renderExploreShell(next);
+}
+
 function openLegacySubview(view) {
   const group = legacySubviewGroup(view);
   if (!group) {
@@ -218,18 +287,13 @@ function openLegacySubview(view) {
     showView(view);
     return;
   }
+  if (group === 'explore') {
+    showExploreSubview(view);
+    return;
+  }
   state.activeSubview = view;
   history.replaceState(null, '', `#/${group}/${view}`);
-  if (view === 'search') {
-    showView(group, { updateHash: false, runLoader: false });
-    renderSearchView();
-  } else if (view === 'sessions') {
-    showView(group, { updateHash: false, runLoader: false });
-    loadSessions();
-  } else if (view === 'conversations') {
-    showView(group, { updateHash: false, runLoader: false });
-    loadConvList();
-  } else if (view === 'cost') {
+  if (view === 'cost') {
     showView(group, { updateHash: false, runLoader: false });
     loadCharts();
   } else if (view === 'models') {
@@ -3454,7 +3518,10 @@ document.addEventListener('keydown', (e) => {
       document.getElementById('global-search-input'),
       document.getElementById('sessionSearch'),
       document.getElementById('convSearch'),
-    ].filter(Boolean);
+    ].filter(Boolean).filter(f => {
+      const style = getComputedStyle(f);
+      return !f.closest('.hidden') && style.display !== 'none' && style.visibility !== 'hidden';
+    });
     // Prefer the one visible in the current view
     const current = document.querySelector('.view:not(.hidden)');
     const first = focusables.find(f => current && current.contains(f)) || focusables[0];
