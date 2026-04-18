@@ -1276,86 +1276,101 @@ def api_projects_top(
         SUM(total_input_tokens + total_output_tokens) AS total_tokens,
         MAX(updated_at) AS last_active
     '''
-    # Two separate GROUP BY scans (top-by-cost + active) kept intentionally
-    # simple over a merged single-scan because (a) current scale is <few hundred
-    # project groups (ms-level), (b) DB-side LIMIT makes each scan cheap, and
-    # (c) unifying would force aggregating every project into Python. Revisit
-    # if group cardinality grows by >10×.
+    # The three SELECTs (top / active / previews) run inside one BEGIN
+    # DEFERRED so they share a WAL read-snapshot. Without it, each
+    # autocommit read takes its own snapshot — a writer committing between
+    # the top and active queries could produce inconsistent output (e.g. a
+    # project in `active` whose mirror in `projects` still has is_active=
+    # false). DEFERRED is WAL-compatible and does not block writers.
+    #
+    # Two full aggregate scans (top + active) rather than one merged scan:
+    # each still SCAN sessions + temp B-tree for GROUP BY/ORDER BY (LIMIT
+    # only trims the output, not the scan). At current scale (~few hundred
+    # project groups) both complete in single-digit ms, so the duplication
+    # is immaterial. Revisit if group cardinality grows >10×; unifying
+    # would otherwise force aggregating every project into Python.
     with read_db() as db:
-        top_rows = db.execute(f'''
-            SELECT {_project_cols}
-            FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
-            ORDER BY total_cost DESC LIMIT ?
-        ''', (limit,)).fetchall()
-        projects = []
-        for r in top_rows:
-            d = dict(r)
-            d['is_active'] = bool(d.get('last_active') and d['last_active'] >= active_cutoff)
-            projects.append(d)
-
-        active_projects = []
-        if include_active:
-            active_rows = db.execute(f'''
+        db.execute("BEGIN DEFERRED")
+        try:
+            top_rows = db.execute(f'''
                 SELECT {_project_cols}
                 FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
-                HAVING MAX(updated_at) >= ?
-                ORDER BY MAX(updated_at) DESC LIMIT ?
-            ''', (active_cutoff, active_limit)).fetchall()
-            for r in active_rows:
+                ORDER BY total_cost DESC LIMIT ?
+            ''', (limit,)).fetchall()
+            projects = []
+            for r in top_rows:
                 d = dict(r)
-                d['is_active'] = True
-                active_projects.append(d)
+                d['is_active'] = bool(d.get('last_active') and d['last_active'] >= active_cutoff)
+                projects.append(d)
 
-        if with_last_message and (projects or active_projects):
-            # One preview fetch per unique project_path across both lists.
-            all_paths = list({p['project_path'] for p in projects}
-                             | {p['project_path'] for p in active_projects})
-            ph = ','.join(['?'] * len(all_paths))
-            preview_rows = db.execute(f'''
-                WITH ranked AS (
-                    SELECT m.content_preview, m.timestamp, m.model, m.session_id,
-                           s.project_path,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY s.project_path
-                               ORDER BY
-                                   CASE WHEN m.content_preview NOT LIKE '[Tool:%%'
-                                        AND m.content_preview NOT LIKE '[Extended Thinking]%%'
-                                        AND m.content_preview NOT LIKE '[생각중:%%'
-                                        AND LENGTH(m.content_preview) >= 20
-                                   THEN 0 ELSE 1 END,
-                                   m.timestamp DESC, m.id DESC
-                           ) AS rn
-                    FROM messages m
-                    JOIN sessions s ON m.session_id = s.id
-                    WHERE s.project_path IN ({ph})
-                      AND m.role = 'assistant'
-                      AND m.content_preview IS NOT NULL
-                      AND m.content_preview != ''
-                )
-                SELECT * FROM ranked WHERE rn = 1
-            ''', all_paths).fetchall()
-            preview_map = {r['project_path']: r for r in preview_rows}
+            active_projects = []
+            if include_active:
+                active_rows = db.execute(f'''
+                    SELECT {_project_cols}
+                    FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
+                    HAVING MAX(updated_at) >= ?
+                    ORDER BY MAX(updated_at) DESC LIMIT ?
+                ''', (active_cutoff, active_limit)).fetchall()
+                for r in active_rows:
+                    d = dict(r)
+                    d['is_active'] = True
+                    active_projects.append(d)
 
-            def _attach(p):
-                row = preview_map.get(p['project_path'])
-                if row:
-                    preview = row['content_preview'] or ''
-                    for prefix in ('[Extended Thinking]', '[생각중:'):
-                        if preview.startswith(prefix):
-                            preview = preview[len(prefix):].lstrip(' ]:')
-                    p['last_message'] = {
-                        'preview':      preview[:2000],
-                        'summary_line': summarize_preview(preview),
-                        'timestamp':    row['timestamp'],
-                        'model':        row['model'],
-                        'session_id':   row['session_id'],
-                    }
-                else:
-                    p['last_message'] = None
-            for p in projects:
-                _attach(p)
-            for p in active_projects:
-                _attach(p)
+            if with_last_message and (projects or active_projects):
+                # One preview fetch per unique project_path across both lists.
+                all_paths = list({p['project_path'] for p in projects}
+                                 | {p['project_path'] for p in active_projects})
+                ph = ','.join(['?'] * len(all_paths))
+                preview_rows = db.execute(f'''
+                    WITH ranked AS (
+                        SELECT m.content_preview, m.timestamp, m.model, m.session_id,
+                               s.project_path,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY s.project_path
+                                   ORDER BY
+                                       CASE WHEN m.content_preview NOT LIKE '[Tool:%%'
+                                            AND m.content_preview NOT LIKE '[Extended Thinking]%%'
+                                            AND m.content_preview NOT LIKE '[생각중:%%'
+                                            AND LENGTH(m.content_preview) >= 20
+                                       THEN 0 ELSE 1 END,
+                                       m.timestamp DESC, m.id DESC
+                               ) AS rn
+                        FROM messages m
+                        JOIN sessions s ON m.session_id = s.id
+                        WHERE s.project_path IN ({ph})
+                          AND m.role = 'assistant'
+                          AND m.content_preview IS NOT NULL
+                          AND m.content_preview != ''
+                    )
+                    SELECT * FROM ranked WHERE rn = 1
+                ''', all_paths).fetchall()
+                preview_map = {r['project_path']: r for r in preview_rows}
+
+                def _attach(p):
+                    row = preview_map.get(p['project_path'])
+                    if row:
+                        preview = row['content_preview'] or ''
+                        for prefix in ('[Extended Thinking]', '[생각중:'):
+                            if preview.startswith(prefix):
+                                preview = preview[len(prefix):].lstrip(' ]:')
+                        p['last_message'] = {
+                            'preview':      preview[:2000],
+                            'summary_line': summarize_preview(preview),
+                            'timestamp':    row['timestamp'],
+                            'model':        row['model'],
+                            'session_id':   row['session_id'],
+                        }
+                    else:
+                        p['last_message'] = None
+                for p in projects:
+                    _attach(p)
+                for p in active_projects:
+                    _attach(p)
+        finally:
+            # read-only transaction — commit to release the snapshot even
+            # if a SELECT raised. Matches read_db's contract that the
+            # cached connection is left in a clean (autocommit) state.
+            db.commit()
 
     result = {'projects': projects}
     if include_active:
