@@ -56,6 +56,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / 'static'
+LANDING_DIR = Path(__file__).parent / 'landing-pages'
 BACKUP_DIR = Path.home() / '.claude' / 'dashboard-backups'
 CREDENTIALS_PATH = Path.home() / '.claude' / '.credentials.json'
 _AUTH_PW = os.environ.get('DASHBOARD_PASSWORD')
@@ -271,8 +272,9 @@ app.add_middleware(
 # metrics SECOND. At runtime the order is: metrics → auth → route.
 
 _AUTH_BYPASS = {'/api/health', '/metrics', '/api/ingest', '/api/collector.py',
-                '/api/auth/login', '/api/auth/me', '/login', '/features'}
-_AUTH_BYPASS_PREFIX = ('/static/',)
+                '/api/auth/login', '/api/auth/me', '/login', '/features',
+                '/landing', '/landing/'}
+_AUTH_BYPASS_PREFIX = ('/static/', '/landing/')
 
 if _AUTH_PW:
     @app.middleware("http")
@@ -427,6 +429,41 @@ async def features_page():
         Path(__file__).parent / 'docs' / 'features.html',
         headers={'Cache-Control': 'no-store'},
     )
+
+
+# ─── Landing pages (public — auth bypass in middleware) ─────────────────────
+# Standalone HTML (Supanova-style) intro pages for unauthenticated visitors.
+# Served from landing-pages/ so the dashboard can expose a public front door
+# without bundling them into the authenticated SPA.
+
+@app.get("/landing")
+@app.get("/landing/")
+async def landing_index():
+    return FileResponse(LANDING_DIR / 'index.html',
+                        headers={'Cache-Control': 'public, max-age=300'})
+
+
+@app.get("/landing/{path:path}")
+async def landing_file(path: str):
+    try:
+        target = (LANDING_DIR / path).resolve()
+    except Exception:
+        return JSONResponse({'error': 'bad path'}, status_code=400)
+    # Path traversal guard: resolved target must live under LANDING_DIR.
+    if not str(target).startswith(str(LANDING_DIR.resolve()) + os.sep) \
+            and target != LANDING_DIR.resolve():
+        return JSONResponse({'error': 'not found'}, status_code=404)
+    # Directory → serve its index.html if present.
+    if target.is_dir():
+        idx = target / 'index.html'
+        if idx.is_file():
+            target = idx
+        else:
+            return JSONResponse({'error': 'not found'}, status_code=404)
+    if not target.is_file():
+        return JSONResponse({'error': 'not found'}, status_code=404)
+    return FileResponse(target,
+                        headers={'Cache-Control': 'public, max-age=300'})
 
 
 # ─── Health ───────────────────────────────────────────────────────────────────
