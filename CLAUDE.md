@@ -23,7 +23,7 @@
 | `static/overview.js` | 히어로 카드, 활성+TOP 5 (2그룹), 예측 |
 | `static/search.js` | 전문 검색 — 3섹션 컨텍스트 뷰어, 역할 필터, 세션 점프 |
 | `static/app.css` | 스타일 + 라이트모드 (WCAG AA 4.5:1) + color-scheme |
-| `landing-pages/` | 공개 소개 페이지 (index + combined + variant-a/b/c). `/landing/` 로 서빙, 인증 우회 |
+| `landing-pages/` | 공개 소개 페이지. `index.html` = `combined.html` (md5 동일, 주 랜딩) + variant-a/b/c 보조 시안 3종. `/landing/` 로 서빙, 인증 우회 |
 | `tests/` | 174 pytest (11개 파일) |
 
 ## 실행·빌드·테스트
@@ -148,8 +148,10 @@ npm run dev      # watch 모드
 - `/landing`, `/landing/`, `/landing/{path}` 라우트 — `LANDING_DIR` 파일 서빙
 - `_AUTH_BYPASS` + `_AUTH_BYPASS_PREFIX('/landing/')` 로 인증 우회 (공개 페이지)
 - Path traversal guard: `STATIC_DIR` 라우트와 동일 패턴 (resolved path가 `LANDING_DIR` 하위인지 검증)
-- Standalone HTML — Tailwind/Pretendard/Iconify CDN만 의존, `bundle.js` 와 무관
+- Standalone HTML — Tailwind/Pretendard/Iconify/Instrument Serif/Geist CDN만 의존, `bundle.js` 와 무관
 - SPA(`/`)와 생명주기 분리: 랜딩 변경 시 SPA 캐시버스팅(`.vN`) 불필요
+- `index.html` 과 `combined.html` 은 동일 파일 (md5 매칭). 수정 시 두 파일 모두 반영 (대체로 `combined.html` 편집 후 `cp` 로 sync)
+- nav 로고(`claude-dashboard`/`cd` 축약)는 `/login` 으로 이동 — 방문자 인증 진입점
 
 ## 프런트 수정 규칙
 

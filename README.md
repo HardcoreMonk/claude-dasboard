@@ -156,12 +156,13 @@ static/
   app.css            스타일 + 라이트모드 (WCAG AA)
   bundle.js          빌드 산출물 (esbuild)
   tailwind.css       빌드 산출물 (tailwindcss)
-landing-pages/       공개 소개 페이지 (인증 우회, /landing/ 로 서빙)
-  index.html         시안 navigator
-  combined.html      통합판 (A+B+C, 01 Local → 02 Team → 03 Proof)
-  variant-a-editorial.html   미니멀 에디토리얼
-  variant-b-dataviz.html     데이터 중심 (대시보드 mockup + 히트맵)
-  variant-c-multinode.html   팀/멀티노드 (아키텍처 다이어그램)
+landing-pages/       공개 소개 페이지 (인증 우회, /landing/ 로 서빙, standalone HTML)
+  index.html         주 랜딩 (= combined.html, 동일 파일). hero + 01 Local → 02 Team
+                     → 03 Proof → CTA. Pretendard + Instrument Serif + Geist Mono
+  combined.html      index.html 미러 (md5 동일)
+  variant-a-editorial.html   보조 시안 — 미니멀 에디토리얼
+  variant-b-dataviz.html     보조 시안 — 데이터 중심 (bento 그리드)
+  variant-c-multinode.html   보조 시안 — 팀/멀티노드 (아키텍처 다이어그램)
 tests/               174 pytest (11개 파일)
 docs/
   API.md             REST API 69 routes
