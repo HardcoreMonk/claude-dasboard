@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>claude-dashboard — 사용량을 숫자로 본다</title>
+  <meta name="description" content="Claude Code 174개 테스트, 62개 라우트, 15버전 마이그레이션을 한 화면에. 오픈소스 대시보드.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Pretendard', 'Geist', 'system-ui', 'sans-serif'],
+            display: ['Geist', 'Pretendard', 'sans-serif'],
+            mono: ['Geist Mono', 'ui-monospace', 'monospace'],
+          },
+          colors: {
+            accent: '#34d399',
+            ink: '#0a0a0a',
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { word-break: keep-all; }
+    .grain { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .03;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E"); }
+    .ambient { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+    .orb { position: absolute; border-radius: 50%; filter: blur(120px); opacity: .4; }
+    .orb-a { width: 500px; height: 500px; background: #34d399; top: -10%; left: 45%; opacity: .08; }
+    .orb-b { width: 400px; height: 400px; background: #60a5fa; bottom: 10%; left: -5%; opacity: .05; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+    .reveal { animation: fadeUp .9s cubic-bezier(.16,1,.3,1) both; }
+    .reveal-delay-1 { animation-delay: .15s; }
+    .reveal-delay-2 { animation-delay: .3s; }
+    .reveal-delay-3 { animation-delay: .45s; }
+    .link-underline { position: relative; }
+    .link-underline::after { content: ''; position: absolute; left: 0; bottom: -2px; width: 100%; height: 1px; background: currentColor; transform: scaleX(0); transform-origin: right; transition: transform .5s cubic-bezier(.16,1,.3,1); }
+    .link-underline:hover::after { transform: scaleX(1); transform-origin: left; }
+    .rule-mark { font-feature-settings: 'tnum'; letter-spacing: -0.02em; }
+    @keyframes drift { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(20px, -15px); } }
+    .orb-a { animation: drift 18s ease-in-out infinite; }
+    .orb-b { animation: drift 22s ease-in-out infinite reverse; }
+  </style>
+</head>
+<body class="bg-ink text-white/90 antialiased min-h-[100dvh] font-sans">
+<div class="grain"></div>
+<div class="ambient"><div class="orb orb-a"></div><div class="orb orb-b"></div></div>
+
+<!-- Nav -->
+<nav class="fixed top-5 left-1/2 -translate-x-1/2 z-40 px-1.5 py-1.5 rounded-full
+            bg-white/[0.04] backdrop-blur-xl border border-white/10
+            shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+  <div class="flex items-center gap-1 text-[12px]">
+    <a href="index.html" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors flex items-center gap-1.5">
+      <iconify-icon icon="solar:arrow-left-linear" width="12"></iconify-icon>
+      <span class="text-white/60">시안 목록</span>
+    </a>
+    <span class="font-display font-semibold tracking-tight px-3">claude-dashboard</span>
+    <a href="#features" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden sm:inline">기능</a>
+    <a href="#proof" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden sm:inline">숫자</a>
+    <a href="https://github.com/HardcoreMonk/claude-dasboard" class="ml-1 px-4 py-1.5 rounded-full bg-accent/90 text-ink font-semibold hover:bg-accent transition-all">GitHub</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-40 md:pt-52 pb-24 md:pb-40">
+  <div class="grid md:grid-cols-12 gap-8">
+    <div class="md:col-span-2 hidden md:block">
+      <div class="font-mono text-[10px] tracking-[0.3em] text-white/30 uppercase writing-mode-vertical mt-2">
+        Open Source · 2026
+      </div>
+    </div>
+    <div class="md:col-span-10">
+      <div class="reveal flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-white/40 mb-8">
+        <span class="w-6 h-px bg-white/20"></span>
+        <span>Usage Observability for Claude Code</span>
+      </div>
+      <h1 class="reveal reveal-delay-1 font-display font-extrabold text-[48px] md:text-[88px] lg:text-[112px] leading-[0.92] tracking-[-0.04em] mb-10">
+        사용량을<br>
+        <span class="text-white/30">숫자로</span> 본다.
+      </h1>
+      <div class="reveal reveal-delay-2 grid md:grid-cols-2 gap-10 md:gap-16 mt-14">
+        <p class="text-white/60 text-lg md:text-xl leading-[1.55] max-w-[38ch]">
+          Claude Code의 모든 세션, 토큰, 비용을 로컬 대시보드에서 추적합니다.
+          프로젝트별 트렌드, 시간대별 활동, 예산 대비 사용률까지 — 한 화면에.
+        </p>
+        <div class="flex flex-col gap-3">
+          <a href="https://github.com/HardcoreMonk/claude-dasboard" class="inline-flex items-center gap-2 px-6 py-4 bg-accent text-ink font-bold text-[15px] rounded-full w-fit hover:scale-[1.02] active:scale-[0.98] transition-transform">
+            <iconify-icon icon="solar:download-linear" width="16"></iconify-icon>
+            5분 안에 설치하기
+          </a>
+          <a href="#features" class="inline-flex items-center gap-2 px-6 py-4 border border-white/15 rounded-full w-fit text-[15px] hover:bg-white/5 transition-colors">
+            기능 살펴보기
+            <iconify-icon icon="solar:arrow-right-linear" width="16"></iconify-icon>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Inline metrics rule -->
+<section id="proof" class="max-w-7xl mx-auto px-6 lg:px-12 py-16 md:py-24 border-y border-white/5">
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-10">
+    <div class="reveal">
+      <div class="font-display font-bold text-4xl md:text-5xl tracking-tighter rule-mark text-accent">174</div>
+      <div class="text-[11px] uppercase tracking-wider text-white/40 mt-2">통과 테스트</div>
+    </div>
+    <div class="reveal reveal-delay-1">
+      <div class="font-display font-bold text-4xl md:text-5xl tracking-tighter rule-mark">62</div>
+      <div class="text-[11px] uppercase tracking-wider text-white/40 mt-2">API Routes</div>
+    </div>
+    <div class="reveal reveal-delay-2">
+      <div class="font-display font-bold text-4xl md:text-5xl tracking-tighter rule-mark">v15</div>
+      <div class="text-[11px] uppercase tracking-wider text-white/40 mt-2">DB 마이그레이션</div>
+    </div>
+    <div class="reveal reveal-delay-3">
+      <div class="font-display font-bold text-4xl md:text-5xl tracking-tighter rule-mark">WAL</div>
+      <div class="text-[11px] uppercase tracking-wider text-white/40 mt-2">SQLite 쓰기/읽기 분리</div>
+    </div>
+  </div>
+</section>
+
+<!-- Features — zig-zag editorial -->
+<section id="features" class="max-w-7xl mx-auto px-6 lg:px-12 py-28 md:py-40">
+  <div class="mb-20 md:mb-28">
+    <div class="text-[11px] uppercase tracking-[0.25em] text-accent mb-5">01 — What it does</div>
+    <h2 class="font-display text-5xl md:text-6xl font-bold tracking-[-0.03em] leading-tight max-w-[18ch]">
+      로컬 파일 하나 실행, <span class="text-white/30">모든 것이 추적된다.</span>
+    </h2>
+  </div>
+
+  <!-- Row 1 — text left, visual right -->
+  <div class="grid md:grid-cols-12 gap-10 md:gap-16 mb-32">
+    <div class="md:col-span-5 md:pt-12">
+      <div class="font-mono text-[11px] text-accent mb-4">/api/stats · /api/projects/top</div>
+      <h3 class="font-display text-3xl md:text-4xl font-semibold tracking-tight leading-tight mb-5">
+        세션 단위로 쪼개고,<br>프로젝트 단위로 합친다.
+      </h3>
+      <p class="text-white/55 text-[15px] leading-[1.7] max-w-[44ch]">
+        JSONL 파일을 watchdog으로 실시간 감시합니다. 세션별 비용은 integer micro-dollars로
+        정확히 누적되고, cwd 기반 프로젝트 그룹핑은 최초 INSERT 시점에 고정되어 절대 오염되지
+        않습니다. 활성 프로젝트는 최근 30분 기준으로 별도 섹션에 분리 표시됩니다.
+      </p>
+    </div>
+    <div class="md:col-span-7">
+      <div class="relative rounded-3xl overflow-hidden border border-white/10 bg-white/[0.02] p-2">
+        <div class="rounded-2xl overflow-hidden bg-gradient-to-br from-[#0f0f0f] to-[#1a1a1a] p-8">
+          <div class="flex items-center gap-2 mb-5">
+            <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
+            <span class="text-[10px] uppercase tracking-[0.25em] text-accent">활성 (최근 30분)</span>
+            <span class="text-[10px] text-white/30">3개</span>
+          </div>
+          <div class="space-y-3">
+            <div class="flex items-center justify-between py-2 border-b border-white/5">
+              <span class="text-sm font-medium">claude-dashboard</span>
+              <span class="font-mono text-xs text-accent">$5,096.95</span>
+            </div>
+            <div class="flex items-center justify-between py-2 border-b border-white/5">
+              <span class="text-sm font-medium text-white/70">naverblog</span>
+              <span class="font-mono text-xs text-white/50">$5,477.89</span>
+            </div>
+            <div class="flex items-center justify-between py-2">
+              <span class="text-sm font-medium text-white/70">purecvisor</span>
+              <span class="font-mono text-xs text-white/50">$31,353.29</span>
+            </div>
+          </div>
+          <div class="mt-8 pt-6 border-t border-white/5">
+            <div class="flex items-center gap-2 mb-3">
+              <iconify-icon icon="solar:crown-bold" width="10" class="text-amber-400"></iconify-icon>
+              <span class="text-[10px] uppercase tracking-[0.25em] text-white/40">TOP 5 누적 비용</span>
+            </div>
+            <div class="flex items-baseline gap-3">
+              <span class="font-display font-bold text-3xl tracking-tighter">$31,353</span>
+              <span class="text-[11px] text-white/40">purecvisor · 46 sessions · 563 subagents</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2 — visual left, text right (zig-zag) -->
+  <div class="grid md:grid-cols-12 gap-10 md:gap-16 mb-32">
+    <div class="md:col-span-7 order-2 md:order-1">
+      <div class="rounded-3xl border border-white/10 bg-white/[0.02] p-8 md:p-12">
+        <div class="font-mono text-[11px] text-white/40 mb-6">PLAN USAGE · DAILY BUDGET</div>
+        <div class="grid grid-cols-7 gap-1.5 mb-6">
+          <div class="h-20 rounded bg-accent/70"></div>
+          <div class="h-16 rounded bg-accent/50"></div>
+          <div class="h-24 rounded bg-accent/80"></div>
+          <div class="h-12 rounded bg-accent/40"></div>
+          <div class="h-28 rounded bg-accent"></div>
+          <div class="h-20 rounded bg-accent/60"></div>
+          <div class="h-8 rounded bg-accent/30"></div>
+        </div>
+        <div class="flex items-center justify-between text-[11px] text-white/40 font-mono">
+          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+        </div>
+        <div class="mt-8 pt-6 border-t border-white/5 flex items-end justify-between">
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-white/40">예산 소진 예상</div>
+            <div class="font-display font-bold text-2xl tracking-tight text-accent">3일 18시간 후</div>
+          </div>
+          <div class="text-right">
+            <div class="text-[10px] uppercase tracking-wider text-white/40">일일 한도</div>
+            <div class="font-mono text-sm">$50.00</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="md:col-span-5 md:pt-12 order-1 md:order-2">
+      <div class="font-mono text-[11px] text-accent mb-4">/api/forecast · /api/plan/usage</div>
+      <h3 class="font-display text-3xl md:text-4xl font-semibold tracking-tight leading-tight mb-5">
+        언제 예산이<br>바닥날지 안다.
+      </h3>
+      <p class="text-white/55 text-[15px] leading-[1.7] max-w-[44ch]">
+        일/주간 예산을 설정하면 현재 번율(burn rate)로 소진 시점을 예측합니다. EOM 투영, 평균 토큰/일,
+        캐시 효율 — 사용량 데이터가 의사결정이 됩니다. 6개의 Chart.js 차트와 시간별 히트맵이
+        기본 제공됩니다.
+      </p>
+    </div>
+  </div>
+
+  <!-- Row 3 — inline callout -->
+  <div class="grid md:grid-cols-12 gap-10 md:gap-16">
+    <div class="md:col-span-5 md:pt-12">
+      <div class="font-mono text-[11px] text-accent mb-4">WAL · BEGIN IMMEDIATE · 174 tests</div>
+      <h3 class="font-display text-3xl md:text-4xl font-semibold tracking-tight leading-tight mb-5">
+        과할 정도로<br>안전하게 만들었다.
+      </h3>
+      <p class="text-white/55 text-[15px] leading-[1.7] max-w-[44ch]">
+        SQLite WAL 모드로 쓰기와 읽기를 분리합니다. 관리자 액션은 audit log에 전부 기록되고,
+        모든 SQL은 파라미터화, ORDER BY는 화이트리스트, HTML은 createElement/textContent 기반.
+        프리미엄보다 견고함을 택한 설계.
+      </p>
+    </div>
+    <div class="md:col-span-7">
+      <div class="grid grid-cols-2 gap-4">
+        <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <iconify-icon icon="solar:shield-check-linear" width="22" class="text-accent mb-4"></iconify-icon>
+          <div class="font-display font-semibold text-lg mb-1">쿠키 세션 + HMAC</div>
+          <p class="text-white/40 text-xs leading-relaxed">Rate limit 5회/분/IP. SameSite=Lax. Bcrypt 해시.</p>
+        </div>
+        <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <iconify-icon icon="solar:server-path-linear" width="22" class="text-accent mb-4"></iconify-icon>
+          <div class="font-display font-semibold text-lg mb-1">원자적 트랜잭션</div>
+          <p class="text-white/40 text-xs leading-relaxed">v1→v15 마이그레이션 모두 차분 적용 + idempotent.</p>
+        </div>
+        <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <iconify-icon icon="solar:test-tube-linear" width="22" class="text-accent mb-4"></iconify-icon>
+          <div class="font-display font-semibold text-lg mb-1">pytest 174 통과</div>
+          <p class="text-white/40 text-xs leading-relaxed">Contract, E2E, WS, parser, migrations 커버.</p>
+        </div>
+        <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <iconify-icon icon="solar:graph-up-linear" width="22" class="text-accent mb-4"></iconify-icon>
+          <div class="font-display font-semibold text-lg mb-1">Prometheus metrics</div>
+          <p class="text-white/40 text-xs leading-relaxed">/metrics 엔드포인트, 라우트 템플릿 기반 집계.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Editorial quote -->
+<section class="max-w-7xl mx-auto px-6 lg:px-12 py-28 md:py-40">
+  <div class="grid md:grid-cols-12 gap-10">
+    <div class="md:col-span-1 font-display text-6xl md:text-7xl text-accent leading-none">"</div>
+    <div class="md:col-span-11">
+      <blockquote class="font-display text-3xl md:text-5xl font-medium tracking-[-0.02em] leading-[1.15] text-white/85 mb-10 max-w-[32ch]">
+        비용이 얼마나 드는지 감이 안 왔어요.<br>
+        <span class="text-white/40">이제는 정확히 $31,353 썼다고 말할 수 있습니다.</span>
+      </blockquote>
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-full bg-gradient-to-br from-accent/40 to-accent/10 border border-accent/30 flex items-center justify-center font-display font-bold text-accent">박</div>
+        <div>
+          <div class="font-semibold text-[15px]">박도현</div>
+          <div class="text-white/40 text-xs">시니어 엔지니어 · Stellar Labs</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="max-w-5xl mx-auto px-6 lg:px-12 py-28 md:py-40 text-center">
+  <div class="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-white/40 mb-8">
+    <span class="w-8 h-px bg-white/20"></span>
+    <span>MIT License · Self-hosted</span>
+    <span class="w-8 h-px bg-white/20"></span>
+  </div>
+  <h2 class="font-display font-extrabold text-5xl md:text-7xl lg:text-8xl tracking-[-0.04em] leading-[0.95] mb-10">
+    한 번 돌리면<br><span class="text-accent">전부 알게 된다.</span>
+  </h2>
+  <p class="text-white/50 text-base md:text-lg max-w-2xl mx-auto mb-12 leading-relaxed">
+    설치에 5분, 이후 모든 Claude Code 세션은 자동 추적됩니다. Python 3.12+, SQLite 이외 의존 없음.
+  </p>
+  <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+    <a href="https://github.com/HardcoreMonk/claude-dasboard" class="inline-flex items-center gap-2 px-8 py-4 bg-accent text-ink font-bold text-[15px] rounded-full hover:scale-[1.02] active:scale-[0.98] transition-transform">
+      <iconify-icon icon="mdi:github" width="18"></iconify-icon>
+      GitHub에서 보기
+    </a>
+    <a href="#" class="font-mono text-[13px] text-white/50 hover:text-white/90 link-underline">
+      git clone && ./start.sh
+    </a>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="max-w-7xl mx-auto px-6 lg:px-12 py-10 border-t border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+  <div class="font-display font-semibold tracking-tight">claude-dashboard</div>
+  <div class="flex items-center gap-6 text-[11px] text-white/40 font-mono">
+    <a href="index.html" class="link-underline">← 다른 시안</a>
+    <span>MIT</span>
+    <span>v87</span>
+    <span>2026</span>
+  </div>
+</footer>
+
+</body>
+</html>

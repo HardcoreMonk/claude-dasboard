@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>claude-dashboard — 팀 전체의 Claude Code를 하나의 대시보드에</title>
+  <meta name="description" content="stdlib 수집 에이전트 하나면 팀원의 모든 기기에서 Claude Code 사용량을 중앙 집중. 감사 로그, 예산 관리, 노드별 뷰.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Pretendard', 'Geist', 'system-ui', 'sans-serif'],
+            display: ['Geist', 'Pretendard', 'sans-serif'],
+            mono: ['Geist Mono', 'ui-monospace', 'monospace'],
+          },
+          colors: {
+            accent: '#34d399',
+            ink: '#0a0a0a',
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { word-break: keep-all; }
+    .grain { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E"); }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+    .reveal { animation: fadeUp .8s cubic-bezier(.16,1,.3,1) both; }
+    .reveal-1 { animation-delay: .1s; } .reveal-2 { animation-delay: .2s; } .reveal-3 { animation-delay: .3s; }
+    .tnum { font-variant-numeric: tabular-nums; }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.85); } }
+    .pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
+    @keyframes beam { 0% { stroke-dashoffset: 60; } 100% { stroke-dashoffset: 0; } }
+    .beam { stroke-dasharray: 6 6; animation: beam 1.5s linear infinite; }
+    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+    .float-a { animation: float 4s ease-in-out infinite; }
+    .float-b { animation: float 5s ease-in-out infinite .8s; }
+    .float-c { animation: float 4.5s ease-in-out infinite 1.5s; }
+    .hex-grid { background-color: #0a0a0a;
+      background-image:
+        radial-gradient(circle at 25% 30%, rgba(52, 211, 153, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 80% 70%, rgba(96, 165, 250, 0.06) 0%, transparent 45%);
+    }
+    .node { transition: all .4s cubic-bezier(.16,1,.3,1); }
+    .node:hover { transform: translateY(-2px); filter: brightness(1.2); }
+  </style>
+</head>
+<body class="bg-ink text-white/90 antialiased min-h-[100dvh] font-sans">
+<div class="grain"></div>
+
+<!-- Nav -->
+<nav class="sticky top-0 z-40 backdrop-blur-xl bg-ink/80 border-b border-white/[0.06]">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-5">
+      <a href="index.html" class="text-[11px] text-white/40 hover:text-white/80 flex items-center gap-1">
+        <iconify-icon icon="solar:arrow-left-linear" width="12"></iconify-icon> 시안
+      </a>
+      <div class="w-px h-4 bg-white/10"></div>
+      <div class="flex items-center gap-2.5">
+        <div class="relative w-8 h-8 rounded-lg bg-gradient-to-br from-accent/80 to-accent/30 flex items-center justify-center">
+          <iconify-icon icon="solar:server-path-bold" width="16" class="text-ink"></iconify-icon>
+          <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-accent pulse-dot ring-2 ring-ink"></span>
+        </div>
+        <div>
+          <div class="font-display font-bold text-sm tracking-tight">claude-dashboard</div>
+          <div class="text-[9px] text-white/40 -mt-0.5">Team · Multi-node</div>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center gap-1 text-[12px]">
+      <a href="#architecture" class="px-3 py-1.5 rounded-lg text-white/60 hover:bg-white/5 hidden md:inline">아키텍처</a>
+      <a href="#features" class="px-3 py-1.5 rounded-lg text-white/60 hover:bg-white/5 hidden md:inline">기능</a>
+      <a href="#security" class="px-3 py-1.5 rounded-lg text-white/60 hover:bg-white/5 hidden md:inline">보안</a>
+      <a href="https://github.com/HardcoreMonk/claude-dasboard" class="ml-2 px-3.5 py-1.5 rounded-lg bg-accent text-ink font-semibold hover:brightness-110 transition-all">
+        팀에 설치
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero — asymmetric -->
+<section class="hex-grid relative overflow-hidden">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 md:pt-32 pb-20 md:pb-28">
+    <div class="grid lg:grid-cols-12 gap-10 items-start">
+      <div class="lg:col-span-7">
+        <div class="reveal inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-accent/25 bg-accent/5 text-accent text-[11px] font-semibold uppercase tracking-[0.2em] mb-8">
+          <iconify-icon icon="solar:users-group-rounded-bold" width="13"></iconify-icon>
+          For Teams & Organizations
+        </div>
+        <h1 class="reveal reveal-1 font-display font-extrabold text-5xl md:text-6xl lg:text-7xl tracking-[-0.035em] leading-[1.02] mb-8">
+          팀 전체의<br>
+          <span class="text-accent">Claude Code</span>를<br>
+          하나의 화면에.
+        </h1>
+        <p class="reveal reveal-2 text-white/55 text-lg md:text-xl leading-[1.55] max-w-[52ch] mb-10">
+          팀원 각자의 노트북에서 돌아가는 Claude Code를 stdlib 수집 에이전트 하나로
+          중앙 대시보드에 모읍니다. 의존성 없음. 방화벽 친화적. 노드별 필터 + 팀 전체 집계.
+        </p>
+        <div class="reveal reveal-3 flex flex-wrap items-center gap-3">
+          <a href="https://github.com/HardcoreMonk/claude-dasboard" class="inline-flex items-center gap-2 px-6 py-3.5 bg-accent text-ink font-bold text-[14px] rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-transform">
+            <iconify-icon icon="solar:rocket-2-linear" width="16"></iconify-icon>
+            팀에 배포하기
+          </a>
+          <a href="#architecture" class="inline-flex items-center gap-2 px-6 py-3.5 border border-white/15 rounded-xl text-[14px] hover:bg-white/5 transition-colors">
+            아키텍처 보기
+            <iconify-icon icon="solar:arrow-right-linear" width="14"></iconify-icon>
+          </a>
+        </div>
+      </div>
+
+      <!-- Mini status panel -->
+      <div class="lg:col-span-5 reveal reveal-2">
+        <div class="p-1 rounded-2xl bg-white/[0.04] border border-white/10">
+          <div class="p-6 rounded-xl bg-[#0f0f0f] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+            <div class="flex items-center justify-between mb-5">
+              <div class="text-[10px] uppercase tracking-[0.2em] text-white/40 font-semibold">Live Nodes</div>
+              <div class="flex items-center gap-1.5 text-[10px] text-accent">
+                <span class="w-1.5 h-1.5 rounded-full bg-accent pulse-dot"></span>
+                4 online
+              </div>
+            </div>
+            <div class="space-y-3">
+              <div class="node flex items-center gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.05]">
+                <div class="w-9 h-9 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center">
+                  <iconify-icon icon="solar:laptop-minimalistic-linear" width="18" class="text-accent"></iconify-icon>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-semibold">박도현-mbp</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">active</span>
+                  </div>
+                  <div class="text-[10px] text-white/40 font-mono">14 sessions · $128.47 오늘</div>
+                </div>
+                <span class="text-[10px] text-white/30 font-mono">2s ago</span>
+              </div>
+              <div class="node flex items-center gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.05]">
+                <div class="w-9 h-9 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+                  <iconify-icon icon="solar:monitor-linear" width="18" class="text-blue-300"></iconify-icon>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-semibold">이서진-desktop</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">active</span>
+                  </div>
+                  <div class="text-[10px] text-white/40 font-mono">8 sessions · $62.18 오늘</div>
+                </div>
+                <span class="text-[10px] text-white/30 font-mono">18s ago</span>
+              </div>
+              <div class="node flex items-center gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.05]">
+                <div class="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                  <iconify-icon icon="solar:server-linear" width="18" class="text-amber-300"></iconify-icon>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-semibold">build-runner-01</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">active</span>
+                  </div>
+                  <div class="text-[10px] text-white/40 font-mono">46 sessions · $315.44 오늘</div>
+                </div>
+                <span class="text-[10px] text-white/30 font-mono">1m ago</span>
+              </div>
+              <div class="node flex items-center gap-3 p-3 rounded-lg bg-white/[0.01] border border-white/[0.05] opacity-60">
+                <div class="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">
+                  <iconify-icon icon="solar:laptop-minimalistic-linear" width="18" class="text-white/40"></iconify-icon>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-semibold text-white/60">하윤서-mbp</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">idle</span>
+                  </div>
+                  <div class="text-[10px] text-white/30 font-mono">0 sessions · $0 오늘</div>
+                </div>
+                <span class="text-[10px] text-white/20 font-mono">47m ago</span>
+              </div>
+            </div>
+            <div class="mt-5 pt-4 border-t border-white/5 flex items-center justify-between">
+              <div>
+                <div class="text-[10px] text-white/40 uppercase tracking-wider">팀 오늘 비용</div>
+                <div class="font-display font-bold text-2xl tracking-tight text-accent tnum">$506.09</div>
+              </div>
+              <div class="text-right">
+                <div class="text-[10px] text-white/40 uppercase tracking-wider">주간 한도</div>
+                <div class="font-mono text-sm tnum">$3,500</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture diagram -->
+<section id="architecture" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 md:py-32 border-t border-white/5">
+  <div class="mb-14 max-w-2xl">
+    <div class="text-[11px] uppercase tracking-[0.25em] text-accent font-semibold mb-4">아키텍처</div>
+    <h2 class="font-display text-4xl md:text-5xl font-bold tracking-tight leading-[1.1] mb-4">
+      수집 에이전트 하나가<br>전부입니다.
+    </h2>
+    <p class="text-white/55 text-base md:text-lg leading-relaxed">
+      팀원의 기기에 Python 3.9+만 있으면 됩니다. <code class="font-mono text-accent/80 text-sm">collector.py</code>가
+      <code class="font-mono text-accent/80 text-sm">~/.claude/projects/</code>의 JSONL을 읽어
+      INGEST_KEY로 서명한 뒤 중앙 대시보드로 POST합니다. 네트워크는 outbound HTTPS만 있으면 됩니다.
+    </p>
+  </div>
+
+  <!-- Architecture SVG-like diagram -->
+  <div class="relative p-6 md:p-10 rounded-3xl border border-white/10 bg-gradient-to-br from-white/[0.02] to-transparent overflow-hidden">
+    <div class="grid grid-cols-3 gap-6 md:gap-10 items-center">
+      <!-- Left — nodes -->
+      <div class="space-y-4">
+        <div class="float-a flex items-center gap-3 p-4 rounded-xl border border-white/10 bg-[#0f0f0f]">
+          <iconify-icon icon="solar:laptop-minimalistic-bold" width="22" class="text-accent"></iconify-icon>
+          <div class="flex-1">
+            <div class="text-sm font-semibold">박도현-mbp</div>
+            <div class="text-[10px] text-white/40 font-mono">collector.py</div>
+          </div>
+        </div>
+        <div class="float-b flex items-center gap-3 p-4 rounded-xl border border-white/10 bg-[#0f0f0f]">
+          <iconify-icon icon="solar:monitor-bold" width="22" class="text-blue-300"></iconify-icon>
+          <div class="flex-1">
+            <div class="text-sm font-semibold">이서진-desktop</div>
+            <div class="text-[10px] text-white/40 font-mono">collector.py</div>
+          </div>
+        </div>
+        <div class="float-c flex items-center gap-3 p-4 rounded-xl border border-white/10 bg-[#0f0f0f]">
+          <iconify-icon icon="solar:server-bold" width="22" class="text-amber-300"></iconify-icon>
+          <div class="flex-1">
+            <div class="text-sm font-semibold">build-runner-01</div>
+            <div class="text-[10px] text-white/40 font-mono">systemd service</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Middle — beam SVG -->
+      <div class="relative h-48 flex items-center justify-center">
+        <svg viewBox="0 0 200 200" class="w-full h-full absolute">
+          <line x1="10" y1="40" x2="190" y2="100" stroke="#34d399" stroke-width="1.5" stroke-opacity=".4" class="beam"/>
+          <line x1="10" y1="100" x2="190" y2="100" stroke="#34d399" stroke-width="1.5" stroke-opacity=".4" class="beam"/>
+          <line x1="10" y1="160" x2="190" y2="100" stroke="#34d399" stroke-width="1.5" stroke-opacity=".4" class="beam"/>
+        </svg>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[140%] text-center">
+          <div class="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">HTTPS + HMAC</div>
+        </div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-[60%] text-center">
+          <div class="text-[10px] uppercase tracking-[0.25em] text-white/30 font-semibold">INGEST_KEY</div>
+        </div>
+      </div>
+
+      <!-- Right — dashboard -->
+      <div class="p-1 rounded-2xl bg-gradient-to-br from-accent/40 to-accent/5 border border-accent/30">
+        <div class="p-5 rounded-xl bg-[#0f0f0f]">
+          <div class="flex items-center gap-2 mb-4">
+            <iconify-icon icon="solar:graph-new-up-bold" width="20" class="text-accent"></iconify-icon>
+            <div>
+              <div class="text-sm font-bold">claude-dashboard</div>
+              <div class="text-[9px] text-white/40 font-mono">8765 · FastAPI</div>
+            </div>
+          </div>
+          <div class="space-y-2 text-[11px]">
+            <div class="flex items-center justify-between p-2 rounded bg-white/5">
+              <span class="text-white/60">/api/ingest</span>
+              <span class="text-accent font-mono">+3 nodes</span>
+            </div>
+            <div class="flex items-center justify-between p-2 rounded bg-white/5">
+              <span class="text-white/60">SQLite WAL</span>
+              <span class="text-white/40 font-mono">242k msgs</span>
+            </div>
+            <div class="flex items-center justify-between p-2 rounded bg-white/5">
+              <span class="text-white/60">Chart.js</span>
+              <span class="text-white/40 font-mono">live</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Legend -->
+    <div class="mt-8 pt-6 border-t border-white/5 flex flex-wrap items-center gap-x-8 gap-y-2 text-[11px] text-white/40 font-mono">
+      <span><span class="inline-block w-2 h-2 rounded-full bg-accent mr-1.5"></span>collector.py — 의존성 없음, 단일 파일</span>
+      <span><span class="inline-block w-2 h-2 rounded-full bg-blue-400/70 mr-1.5"></span>--node-id 로 노드 구분</span>
+      <span><span class="inline-block w-2 h-2 rounded-full bg-amber-400/70 mr-1.5"></span>systemd / launchd 로 상주</span>
+    </div>
+  </div>
+</section>
+
+<!-- Features — zig-zag -->
+<section id="features" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-28">
+  <div class="mb-14 max-w-2xl">
+    <div class="text-[11px] uppercase tracking-[0.25em] text-accent font-semibold mb-4">기능</div>
+    <h2 class="font-display text-4xl md:text-5xl font-bold tracking-tight leading-[1.1]">
+      팀이 필요한 것,<br>이미 들어 있습니다.
+    </h2>
+  </div>
+
+  <div class="space-y-6">
+    <!-- Feature 1 -->
+    <div class="grid md:grid-cols-12 gap-6 items-center">
+      <div class="md:col-span-5 p-8 rounded-2xl border border-white/10 bg-white/[0.02]">
+        <iconify-icon icon="solar:document-add-linear" width="28" class="text-accent mb-5"></iconify-icon>
+        <h3 class="font-display font-bold text-xl md:text-2xl mb-3 leading-tight">관리자 감사 로그</h3>
+        <p class="text-white/55 text-sm leading-relaxed">
+          모든 admin 액션은 <code class="font-mono text-accent/80 text-xs">admin_audit</code> 테이블에 기록됩니다.
+          누가, 언제, 어디서 (IP), 무엇을 했는지. 백업/보존/노드 CRUD 전부.
+        </p>
+      </div>
+      <div class="md:col-span-7 p-5 rounded-2xl border border-white/10 bg-[#0f0f0f] font-mono text-[11px]">
+        <div class="flex items-center gap-1.5 text-[9px] uppercase tracking-wider text-white/40 mb-3">
+          <iconify-icon icon="solar:shield-check-linear" width="11"></iconify-icon>
+          admin_audit · latest 4
+        </div>
+        <div class="space-y-1.5">
+          <div class="flex items-baseline gap-3 py-1">
+            <span class="text-white/30 tnum w-20">16:43:22</span>
+            <span class="text-accent w-28">backup</span>
+            <span class="text-white/50 flex-1 truncate">size=412MB, path=/backups/</span>
+            <span class="text-emerald-400">ok</span>
+          </div>
+          <div class="flex items-baseline gap-3 py-1">
+            <span class="text-white/30 tnum w-20">16:29:18</span>
+            <span class="text-accent w-28">retention</span>
+            <span class="text-white/50 flex-1 truncate">days=90, deleted=1,247</span>
+            <span class="text-emerald-400">ok</span>
+          </div>
+          <div class="flex items-baseline gap-3 py-1">
+            <span class="text-white/30 tnum w-20">15:02:07</span>
+            <span class="text-accent w-28">node.create</span>
+            <span class="text-white/50 flex-1 truncate">node_id=build-runner-01</span>
+            <span class="text-emerald-400">ok</span>
+          </div>
+          <div class="flex items-baseline gap-3 py-1">
+            <span class="text-white/30 tnum w-20">14:55:31</span>
+            <span class="text-red-400 w-28">node.delete</span>
+            <span class="text-white/50 flex-1 truncate">unauthorized IP 10.0.2.14</span>
+            <span class="text-red-400">error</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feature 2 -->
+    <div class="grid md:grid-cols-12 gap-6 items-center">
+      <div class="md:col-span-7 p-6 rounded-2xl border border-white/10 bg-[#0f0f0f] order-2 md:order-1">
+        <div class="flex items-center gap-3 mb-5">
+          <iconify-icon icon="solar:wallet-money-linear" width="20" class="text-accent"></iconify-icon>
+          <div class="text-[11px] uppercase tracking-wider text-white/50 font-semibold">팀 예산 현황 · 주간</div>
+        </div>
+        <div class="grid grid-cols-3 gap-4 mb-6">
+          <div class="p-3 rounded-lg bg-white/[0.03]">
+            <div class="text-[9px] uppercase tracking-wider text-white/40">소진</div>
+            <div class="font-display font-bold text-lg tnum">$2,143</div>
+          </div>
+          <div class="p-3 rounded-lg bg-white/[0.03]">
+            <div class="text-[9px] uppercase tracking-wider text-white/40">한도</div>
+            <div class="font-display font-bold text-lg tnum text-white/60">$3,500</div>
+          </div>
+          <div class="p-3 rounded-lg bg-accent/10 border border-accent/20">
+            <div class="text-[9px] uppercase tracking-wider text-accent">잔여</div>
+            <div class="font-display font-bold text-lg tnum text-accent">$1,357</div>
+          </div>
+        </div>
+        <div class="h-2 rounded-full bg-white/5 overflow-hidden">
+          <div class="h-full w-[61%] bg-gradient-to-r from-accent to-accent/60"></div>
+        </div>
+        <div class="flex items-center justify-between mt-2 text-[10px] text-white/40 font-mono tnum">
+          <span>61% 사용</span>
+          <span>3일 2시간 남음</span>
+        </div>
+      </div>
+      <div class="md:col-span-5 p-8 rounded-2xl border border-white/10 bg-white/[0.02] order-1 md:order-2">
+        <iconify-icon icon="solar:chart-2-linear" width="28" class="text-accent mb-5"></iconify-icon>
+        <h3 class="font-display font-bold text-xl md:text-2xl mb-3 leading-tight">팀 예산 · 번율 예측</h3>
+        <p class="text-white/55 text-sm leading-relaxed">
+          주간 한도를 설정하면 지금 번율(burn rate)로 언제 소진되는지 계산합니다.
+          사용 패턴 급변 시 Prometheus 알람으로 연결 가능.
+        </p>
+      </div>
+    </div>
+
+    <!-- Feature 3 -->
+    <div class="grid md:grid-cols-12 gap-6 items-center">
+      <div class="md:col-span-5 p-8 rounded-2xl border border-white/10 bg-white/[0.02]">
+        <iconify-icon icon="solar:filter-linear" width="28" class="text-accent mb-5"></iconify-icon>
+        <h3 class="font-display font-bold text-xl md:text-2xl mb-3 leading-tight">노드별 필터링</h3>
+        <p class="text-white/55 text-sm leading-relaxed">
+          전체 세션 목록을 노드별로 필터링. "박도현의 이번 주 사용량만" 같은 쿼리가
+          한 클릭. WebSocket 실시간 푸시로 특정 노드에 작업이 들어오면 UI에 즉시 반영.
+        </p>
+      </div>
+      <div class="md:col-span-7 p-5 rounded-2xl border border-white/10 bg-[#0f0f0f]">
+        <div class="flex flex-wrap items-center gap-2 mb-4">
+          <span class="text-[10px] uppercase tracking-wider text-white/40 font-semibold mr-1">노드 필터:</span>
+          <button class="px-3 py-1 rounded-full bg-accent text-ink text-[11px] font-semibold flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-ink"></span>박도현-mbp
+          </button>
+          <button class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-white/60 flex items-center gap-1.5 hover:bg-white/10 transition">
+            <span class="w-1.5 h-1.5 rounded-full bg-blue-400/70"></span>이서진-desktop
+          </button>
+          <button class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-white/60 flex items-center gap-1.5 hover:bg-white/10 transition">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-400/70"></span>build-runner-01
+          </button>
+          <button class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-white/60">
+            + 2 more
+          </button>
+        </div>
+        <div class="text-[11px] text-white/40 font-mono">results: 142 sessions · $2,143.88 · last 7 days</div>
+        <div class="mt-4 space-y-2 text-[12px]">
+          <div class="flex items-center justify-between p-2.5 rounded bg-white/[0.02]">
+            <span class="font-mono text-accent">[박도현-mbp]</span>
+            <span class="text-white/60">claude-dashboard · overview 개편</span>
+            <span class="font-mono text-white/40 tnum">$12.43</span>
+          </div>
+          <div class="flex items-center justify-between p-2.5 rounded bg-white/[0.02]">
+            <span class="font-mono text-accent">[박도현-mbp]</span>
+            <span class="text-white/60">purecvisor · auth refactor</span>
+            <span class="font-mono text-white/40 tnum">$8.71</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Security / Trust -->
+<section id="security" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-28">
+  <div class="mb-12 max-w-2xl">
+    <div class="text-[11px] uppercase tracking-[0.25em] text-accent font-semibold mb-4">Security Guarantees</div>
+    <h2 class="font-display text-4xl md:text-5xl font-bold tracking-tight leading-[1.1]">
+      Self-hosted.<br>
+      <span class="text-white/40">팀 데이터는 팀의 서버에.</span>
+    </h2>
+  </div>
+
+  <div class="grid md:grid-cols-4 gap-4">
+    <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+      <iconify-icon icon="solar:key-minimalistic-square-linear" width="22" class="text-accent mb-4"></iconify-icon>
+      <div class="font-display font-semibold text-base mb-1">HMAC INGEST_KEY</div>
+      <p class="text-white/40 text-xs leading-relaxed">노드별 키로 수집 요청 서명. 유출 시 키만 로테이트.</p>
+    </div>
+    <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+      <iconify-icon icon="solar:shield-check-linear" width="22" class="text-accent mb-4"></iconify-icon>
+      <div class="font-display font-semibold text-base mb-1">쿠키 세션 + Bcrypt</div>
+      <p class="text-white/40 text-xs leading-relaxed">HMAC 서명 쿠키. Rate limit 5회/분/IP. SameSite=Lax.</p>
+    </div>
+    <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+      <iconify-icon icon="solar:lock-keyhole-linear" width="22" class="text-accent mb-4"></iconify-icon>
+      <div class="font-display font-semibold text-base mb-1">Outbound HTTPS만</div>
+      <p class="text-white/40 text-xs leading-relaxed">노드가 대시보드를 부름. Inbound 포트 오픈 불필요.</p>
+    </div>
+    <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+      <iconify-icon icon="solar:document-text-linear" width="22" class="text-accent mb-4"></iconify-icon>
+      <div class="font-display font-semibold text-base mb-1">감사 로그 완전성</div>
+      <p class="text-white/40 text-xs leading-relaxed">admin 액션 100% 기록. 실패 케이스도 누락 없이.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Scenario quote -->
+<section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 md:py-32">
+  <div class="grid md:grid-cols-12 gap-10">
+    <div class="md:col-span-1 font-display text-6xl text-accent/70 leading-none">"</div>
+    <div class="md:col-span-11">
+      <blockquote class="font-display text-2xl md:text-4xl font-medium tracking-[-0.02em] leading-[1.2] text-white/85 mb-10 max-w-[48ch]">
+        한 명당 얼마 쓰는지, 어느 프로젝트에 집중하는지, 전부 파악됩니다. <span class="text-white/40">매주 월요일 대시보드만 봐도 조직이 보입니다.</span>
+      </blockquote>
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-full bg-gradient-to-br from-accent/40 to-accent/10 border border-accent/30 flex items-center justify-center font-display font-bold text-accent">하</div>
+        <div>
+          <div class="font-semibold text-[15px]">하윤서</div>
+          <div class="text-white/40 text-xs">엔지니어링 리드 · Lumina AI (12명 팀)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA — full bleed -->
+<section class="border-t border-white/5">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-24 md:py-32 text-center">
+    <div class="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-white/40 mb-8">
+      <span class="w-8 h-px bg-white/15"></span>
+      <span>배포 가이드 포함</span>
+      <span class="w-8 h-px bg-white/15"></span>
+    </div>
+    <h2 class="font-display font-extrabold text-4xl md:text-6xl tracking-[-0.03em] leading-[1.05] mb-6">
+      팀에 배포하는 데<br><span class="text-accent">10분이면 충분합니다.</span>
+    </h2>
+    <p class="text-white/55 text-base md:text-lg max-w-2xl mx-auto mb-10">
+      docker-compose 또는 systemd. 각 팀원 기기에는 <code class="font-mono text-accent/80 text-sm">curl | python3 collector.py --node-id ...</code> 한 줄.
+    </p>
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+      <a href="https://github.com/HardcoreMonk/claude-dasboard" class="inline-flex items-center gap-2 px-7 py-4 bg-accent text-ink font-bold text-[14px] rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-transform">
+        <iconify-icon icon="mdi:github" width="18"></iconify-icon>
+        팀에 배포하기
+      </a>
+      <div class="inline-flex items-center gap-2 px-5 py-4 border border-white/10 rounded-xl font-mono text-[12px] text-white/60 bg-white/[0.02]">
+        <iconify-icon icon="solar:code-linear" width="14"></iconify-icon>
+        curl | python3 collector.py --node-id $(hostname)
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="border-t border-white/5">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-[11px] text-white/40">
+      <div>
+        <div class="font-display font-semibold tracking-tight text-white/70">claude-dashboard · Team</div>
+        <div class="text-[10px] mt-1">FastAPI + SQLite WAL · stdlib collector · MIT</div>
+      </div>
+      <div class="flex items-center gap-5 font-mono">
+        <a href="index.html" class="hover:text-white/80">← 시안 목록</a>
+        <a href="variant-a-editorial.html" class="hover:text-white/80">A</a>
+        <a href="variant-b-dataviz.html" class="hover:text-white/80">B</a>
+        <span class="text-accent">C</span>
+        <span>v87</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
