@@ -359,10 +359,23 @@ collector.py                            POST /api/ingest
 </section>
 
 <!-- ═══ 14 ═══ -->
+<section id="landing">
+  <h2><span class="badge">NEW</span> Public Landing Pages <code>/landing/</code></h2>
+  <p>Self-contained intro pages for unauthenticated visitors. Bundled with Supanova design patterns (Pretendard, Emerald accent, Double-Bezel cards). Served from <code>landing-pages/</code> with full auth bypass and path-traversal guard.</p>
+  <div class="grid">
+    <div class="card"><h3>Combined</h3><p>A+B+C integrated story: 01 Local → 02 Team → 03 Proof. Features editorial hero, dashboard mockup, architecture diagram, 눈대중 vs 실측 comparison table, dual quotes, massive CTA.</p></div>
+    <div class="card"><h3>Variant A — Editorial</h3><p>Minimal editorial tone, massive typography, extreme whitespace. Zig-zag features. For senior-developer taste.</p></div>
+    <div class="card"><h3>Variant B — Data-Viz</h3><p>Split hero with live dashboard mockup, metric bar, weekly heatmap, model/stop-reason donuts, comparison table. For power users.</p></div>
+    <div class="card"><h3>Variant C — Multi-node</h3><p>Team/organization angle: live-nodes panel, collector architecture diagram, audit log console, team budget, security trust cards.</p></div>
+    <div class="card"><h3>Standalone HTML</h3><p>No build step. CDN only (Tailwind, Pretendard, Geist, Iconify Solar, Motion One). DOM-API rendering (XSS-safe).</p></div>
+    <div class="card"><h3>Dashboard Integration</h3><p>Login page footer links to <code>/landing/</code>. Auth middleware bypasses <code>/landing/*</code>. Path traversal guard matches <code>/static/*</code> pattern.</p></div>
+  </div>
+</section>
+
 <section id="infra">
   <h2><span class="badge">14</span> Developer Infrastructure</h2>
   <div class="stat-row">
-    <div class="stat"><div class="val">58</div><div class="label">API Routes</div></div>
+    <div class="stat"><div class="val">69</div><div class="label">API Routes</div></div>
     <div class="stat"><div class="val">174</div><div class="label">Tests</div></div>
     <div class="stat"><div class="val">186KB</div><div class="label">Bundle</div></div>
     <div class="stat"><div class="val">28KB</div><div class="label">CSS</div></div>
@@ -385,7 +398,7 @@ collector.py                            POST /api/ingest
 </section>
 
 <footer>
-  Claude Dashboard Feature Reference &mdash; Generated 2026-04-14 &mdash; <a href="/">Open Dashboard</a>
+  Claude Dashboard Feature Reference &mdash; Generated 2026-04-14 &mdash; <a href="/">Open Dashboard</a> &middot; <a href="/landing/">Public Landing</a>
 </footer>
 
 </div>

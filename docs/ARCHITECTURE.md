@@ -16,11 +16,11 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
            |
      [SQLite WAL 쓰기]          database.py
            |
-     [FastAPI 62 routes]        main.py
-       /       \
-   REST API   WebSocket
-       \       /
-     [SPA 프론트엔드]            static/*.js
+     [FastAPI 69 routes]        main.py
+       /    |    \
+   REST   WS   /landing/  ← 공개 소개 (인증 우회)
+       \    |    /
+     [SPA 프론트엔드]            static/*.js    landing-pages/*.html
 ```
 
 단일 프로세스 (uvicorn) 가 파일 감시, DB 관리, API 서빙, WebSocket 브로드캐스트를 모두 처리한다.
@@ -46,7 +46,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 | 그룹 | 라우트 | 역할 |
 |---|---|---|
 | 인증 | `/login`, `/api/auth/login`, `/logout`, `/me` | 쿠키 세션 인증 (HMAC 서명, rate limit 5/min/IP) |
-| 페이지 | `/features` | Feature Reference HTML 페이지 (인증 우회) |
+| 페이지 | `/features`, `/landing`, `/landing/*` | Feature Reference · 공개 소개 페이지 (모두 인증 우회) |
 | 헬스 | `/api/health` | 서버 상태 + DB 메시지/세션 카운트 |
 | 메트릭 | `/metrics` | Prometheus text format (인증 우회) |
 | 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 세션 CRUD, 메시지 조회, 검색 점프, subagent 체인 |
@@ -70,7 +70,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 ```
 
 - `metrics`: 모든 요청을 `http_requests_total{method,path,status}` 로 카운트 (라우트 템플릿 기반, cardinality 제어)
-- `auth`: `DASHBOARD_PASSWORD` 설정 시 쿠키 세션 검증 (`dash_session`). `/`, `/static/*`, `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login` 은 우회
+- `auth`: `DASHBOARD_PASSWORD` 설정 시 쿠키 세션 검증 (`dash_session`). `/static/*`, `/landing/*`, `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features` 은 우회
 
 ### database.py — SQLite 데이터 계층
 

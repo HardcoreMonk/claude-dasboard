@@ -10,7 +10,7 @@
 
 | 파일 | 역할 |
 |------|------|
-| `main.py` | FastAPI 62 routes + WS + 쿠키 세션 인증 + /api/ingest + 보존 스케줄러 |
+| `main.py` | FastAPI 69 routes + WS + 쿠키 세션 인증 + /api/ingest + /landing/ 공개 + 보존 스케줄러 |
 | `database.py` | SQLite WAL, write/read 분리, v0→v15 마이그레이션 |
 | `parser.py` | JSONL 파싱 (assistant/user/system), 비용 계산, source_node |
 | `watcher.py` | watchdog + safety poll, WatcherMetrics DI |
@@ -23,6 +23,7 @@
 | `static/overview.js` | 히어로 카드, 활성+TOP 5 (2그룹), 예측 |
 | `static/search.js` | 전문 검색 — 3섹션 컨텍스트 뷰어, 역할 필터, 세션 점프 |
 | `static/app.css` | 스타일 + 라이트모드 (WCAG AA 4.5:1) + color-scheme |
+| `landing-pages/` | 공개 소개 페이지 (index + combined + variant-a/b/c). `/landing/` 로 서빙, 인증 우회 |
 | `tests/` | 174 pytest (11개 파일) |
 
 ## 실행·빌드·테스트
@@ -141,6 +142,14 @@ npm run dev      # watch 모드
 - `index.html`은 `bundle.vN.js` + `tailwind.vN.css` 2개만 로드 (현재 v=87)
 - 서버가 `.vN` strip하여 실제 파일 서빙
 - 빌드 산출물은 git tracked — 배포 시 Node 불필요
+
+### 공개 랜딩 페이지 (`landing-pages/` → `/landing/`)
+
+- `/landing`, `/landing/`, `/landing/{path}` 라우트 — `LANDING_DIR` 파일 서빙
+- `_AUTH_BYPASS` + `_AUTH_BYPASS_PREFIX('/landing/')` 로 인증 우회 (공개 페이지)
+- Path traversal guard: `STATIC_DIR` 라우트와 동일 패턴 (resolved path가 `LANDING_DIR` 하위인지 검증)
+- Standalone HTML — Tailwind/Pretendard/Iconify CDN만 의존, `bundle.js` 와 무관
+- SPA(`/`)와 생명주기 분리: 랜딩 변경 시 SPA 캐시버스팅(`.vN`) 불필요
 
 ## 프런트 수정 규칙
 

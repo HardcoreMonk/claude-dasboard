@@ -4,7 +4,7 @@ Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간
 다중 서버의 Claude Code 데이터를 중앙 수집하고, claude.ai 웹 대화 export 도 통합 뷰어에서 검색할 수 있다.
 
 ```
-~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 62 routes  →  SPA 브라우저
+~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 69 routes  →  SPA 브라우저 · 공개 /landing/
                                                                   ↑
                                 [원격 서버] collector.py  →  POST /api/ingest
 ```
@@ -137,7 +137,7 @@ dashboard.example.com {
 ## 프로젝트 구조
 
 ```
-main.py              FastAPI 62 routes + WS + 쿠키 세션 인증 + in-app 스케줄러
+main.py              FastAPI 69 routes + WS + 쿠키 세션 인증 + /landing/ 공개 라우트 + in-app 스케줄러
 database.py          SQLite WAL, v0→v14 마이그레이션, write/read 분리
 parser.py            JSONL 파싱, 비용 계산, cross-platform cwd
 watcher.py           watchdog + safety poll
@@ -156,9 +156,15 @@ static/
   app.css            스타일 + 라이트모드 (WCAG AA)
   bundle.js          빌드 산출물 (esbuild)
   tailwind.css       빌드 산출물 (tailwindcss)
+landing-pages/       공개 소개 페이지 (인증 우회, /landing/ 로 서빙)
+  index.html         시안 navigator
+  combined.html      통합판 (A+B+C, 01 Local → 02 Team → 03 Proof)
+  variant-a-editorial.html   미니멀 에디토리얼
+  variant-b-dataviz.html     데이터 중심 (대시보드 mockup + 히트맵)
+  variant-c-multinode.html   팀/멀티노드 (아키텍처 다이어그램)
 tests/               174 pytest (11개 파일)
 docs/
-  API.md             REST API 58 routes
+  API.md             REST API 69 routes
   ARCHITECTURE.md    아키텍처 가이드
   SCHEMA.md          DB 스키마 + 마이그레이션
   QUALITY-GATES.md   8단계 품질 게이트
@@ -197,7 +203,7 @@ sudo systemctl enable --now claude-dashboard-retention.timer
 
 | 문서 | 내용 |
 |------|------|
-| [`docs/API.md`](docs/API.md) | REST API 62 routes + WebSocket |
+| [`docs/API.md`](docs/API.md) | REST API 69 routes + WebSocket |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 아키텍처 가이드 |
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | DB 스키마, 마이그레이션, SQL 예제 |
 | [`docs/QUALITY-GATES.md`](docs/QUALITY-GATES.md) | 8단계 품질 게이트 |
