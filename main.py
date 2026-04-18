@@ -343,19 +343,6 @@ _CLEANUP_LEAD_MARK  = re.compile(r'^[#>\-*]+\s*', re.MULTILINE)
 _CLEANUP_WHITESPACE = re.compile(r'\s+')
 
 
-def _iso_to_epoch(iso: Optional[str]) -> float:
-    """Parse an ISO-8601 UTC timestamp into a float epoch. Returns 0 on
-    anything unparseable so it can be used as a stable sort key."""
-    if not iso:
-        return 0.0
-    try:
-        # DB stores ``YYYY-MM-DDTHH:MM:SS[.fraction]Z``
-        s = iso.rstrip('Z').replace('T', ' ')
-        return datetime.strptime(s[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=_tz.utc).timestamp()
-    except (ValueError, TypeError):
-        return 0.0
-
-
 def summarize_preview(content_preview: str, max_len: int = 1500) -> str:
     """Collapse a stored content_preview into a single flat paragraph.
 
@@ -1289,6 +1276,11 @@ def api_projects_top(
         SUM(total_input_tokens + total_output_tokens) AS total_tokens,
         MAX(updated_at) AS last_active
     '''
+    # Two separate GROUP BY scans (top-by-cost + active) kept intentionally
+    # simple over a merged single-scan because (a) current scale is <few hundred
+    # project groups (ms-level), (b) DB-side LIMIT makes each scan cheap, and
+    # (c) unifying would force aggregating every project into Python. Revisit
+    # if group cardinality grows by >10×.
     with read_db() as db:
         top_rows = db.execute(f'''
             SELECT {_project_cols}
