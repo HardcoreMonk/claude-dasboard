@@ -3,7 +3,47 @@
 @tailwind utilities;
 
 /* ── Base ── */
-body { font-feature-settings: 'ss01','tnum'; }
+body {
+  font-feature-settings: 'ss01','tnum';
+  word-break: keep-all;
+}
+body:not(.theme-light) {
+  background:
+    radial-gradient(circle at top, rgba(34,211,238,.10), transparent 28%),
+    radial-gradient(circle at 18% 12%, rgba(16,185,129,.08), transparent 24%),
+    linear-gradient(180deg, #09090b 0%, #0b0f14 52%, #09090b 100%);
+  color: rgba(255,255,255,.84);
+}
+body.theme-light {
+  background:
+    radial-gradient(circle at top right, rgba(16,185,129,.10), transparent 26%),
+    linear-gradient(180deg, #fafbfc 0%, #f4f6f8 100%);
+  color: rgba(15,23,42,.86);
+}
+body.theme-light::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(15,23,42,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15,23,42,.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  opacity: .55;
+}
+body.theme-light > * { position: relative; z-index: 1; }
+body.theme-light main { position: relative; z-index: 1; }
+.metric-nums,
+.overview-kpi-value,
+.overview-alert-card__value,
+.overview-stat-chip__value,
+.overview-flow-band__value,
+.overview-project-cost,
+.plan-value,
+.search-result-topline,
+.search-context-meta {
+  font-variant-numeric: tabular-nums;
+}
 ::-webkit-scrollbar { width:5px; height:5px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.08); border-radius:4px; }
@@ -34,6 +74,93 @@ body:not(.theme-light) .text-white\/35  { color: rgba(255,255,255,.48); }
 
 /* ── Chart sizing ── */
 .chart-h { position:relative; height:220px; }
+
+/* ── Shared dashboard surfaces ── */
+.dashboard-surface,
+.dashboard-shell {
+  position: relative;
+  isolation: isolate;
+  border-radius: 30px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.03);
+  box-shadow: 0 24px 64px rgba(0,0,0,.24);
+  backdrop-filter: blur(18px);
+}
+.dashboard-surface::before,
+.dashboard-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: .65;
+}
+.dashboard-surface > *,
+.dashboard-shell > * {
+  position: relative;
+  z-index: 1;
+}
+body:not(.theme-light) .dashboard-surface,
+body:not(.theme-light) .dashboard-shell {
+  border-color: rgba(255,255,255,.08);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.025));
+  box-shadow: 0 28px 72px rgba(0,0,0,.34);
+}
+body.theme-light .dashboard-surface,
+body.theme-light .dashboard-shell {
+  border-color: rgba(15,23,42,.08);
+  background: rgba(255,255,255,.72);
+  box-shadow: 0 24px 64px rgba(15,23,42,.08);
+}
+body:not(.theme-light) .dashboard-surface--overview,
+body:not(.theme-light) .overview-console {
+  background:
+    radial-gradient(circle at top right, rgba(34,211,238,.10), transparent 28%),
+    radial-gradient(circle at 20% 0%, rgba(16,185,129,.08), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
+}
+body:not(.theme-light) .dashboard-surface--explore,
+body:not(.theme-light) .explore-shell {
+  background:
+    radial-gradient(circle at top right, rgba(16,185,129,.14), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+}
+body:not(.theme-light) .dashboard-shell--analysis {
+  background:
+    radial-gradient(circle at top right, rgba(59,130,246,.10), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+}
+body:not(.theme-light) .dashboard-shell--admin {
+  background:
+    radial-gradient(circle at top right, rgba(245,158,11,.10), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+}
+body.theme-light .dashboard-surface--overview,
+body.theme-light .overview-console {
+  background:
+    radial-gradient(circle at top right, rgba(16,185,129,.12), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,.86), rgba(255,255,255,.68));
+}
+body.theme-light .dashboard-surface--explore,
+body.theme-light .explore-shell {
+  background:
+    radial-gradient(circle at top right, rgba(59,130,246,.10), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,.72));
+}
+body.theme-light .dashboard-shell--analysis {
+  background:
+    radial-gradient(circle at top right, rgba(59,130,246,.08), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,.84), rgba(255,255,255,.7));
+}
+body.theme-light .dashboard-shell--admin {
+  background:
+    radial-gradient(circle at top right, rgba(245,158,11,.08), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,.84), rgba(255,255,255,.7));
+}
+body.theme-light .dashboard-surface::before,
+body.theme-light .dashboard-shell::before {
+  background: linear-gradient(180deg, rgba(15,23,42,.03), transparent 30%);
+}
 
 /* ── Tool blocks (conversation) ── */
 .tool-hdr { cursor:pointer; }
@@ -695,6 +822,38 @@ body.theme-light .conv-msg-focused { box-shadow: inset 0 0 0 1.5px rgba(4,120,87
     inset 0 1px 0 rgba(255,255,255,.05),
     0 20px 60px rgba(0,0,0,.24);
   padding: 1rem;
+}
+#overviewAxisGrid {
+  background:
+    radial-gradient(circle at top right, rgba(34,211,238,.14), transparent 28%),
+    radial-gradient(circle at 16% 0%, rgba(16,185,129,.10), transparent 22%),
+    linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+}
+#overviewActionGrid {
+  background:
+    radial-gradient(circle at top right, rgba(59,130,246,.10), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
+}
+#overviewOpsSummary {
+  background:
+    radial-gradient(circle at top right, rgba(16,185,129,.10), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+}
+#overviewProductivitySummary {
+  background:
+    radial-gradient(circle at top right, rgba(245,158,11,.10), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+}
+#overviewReportingSummary {
+  background:
+    radial-gradient(circle at top right, rgba(168,85,247,.10), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+}
+#overviewOpsPreview,
+#overviewProductivityPreview,
+#overviewReportingPreview {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
 }
 .overview-region-head {
   display: flex;

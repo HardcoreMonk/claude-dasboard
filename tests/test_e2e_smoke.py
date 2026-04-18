@@ -251,6 +251,7 @@ def test_public_landing_pages_are_exposed_without_auth(e2e_client, path, marker)
 
 def test_overview_balanced_portal_regions_exist(e2e_client):
     html = e2e_client.get('/').text
+    css = Path('static/app.css').read_text()
     required = [
         'overviewAxisGrid',
         'overviewActionGrid',
@@ -263,6 +264,21 @@ def test_overview_balanced_portal_regions_exist(e2e_client):
     ]
     missing = [item for item in required if f'id="{item}"' not in html]
     assert not missing
+    assert '#overviewAxisGrid' in css
+
+
+def test_dashboard_theme_system_has_dark_and_light_personas(e2e_client):
+    html = e2e_client.get('/').text
+    css = Path('static/app.css').read_text()
+
+    assert 'body:not(.theme-light)' in css
+    assert 'body.theme-light' in css
+    assert 'font-variant-numeric: tabular-nums' in css
+    assert 'word-break: keep-all' in css
+    assert 'dashboard-surface--overview' in html
+    assert 'dashboard-surface--explore' in html
+    assert 'dashboard-shell--analysis' in html
+    assert 'dashboard-shell--admin' in html
 
 
 def test_shell_removes_claude_conversation_and_admin_copy(e2e_client):
