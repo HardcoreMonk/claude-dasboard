@@ -165,7 +165,7 @@ start_watching()
 
 ```
 index.html          Tailwind 쉘 + 10개 뷰 섹션 + nav + 모달 + data-action 이벤트 위임
-login.html          독립 로그인 페이지
+login.html          독립 로그인 페이지 — Instrument Serif 에디토리얼 히어로 + Iconify Solar + ambient orb + 한국어 UI (Redesign Engine 적용)
   ├─ main.js        ES module entry point (import 순서 정의)
   ├─ app.js         코어: state, bus, accessors, WS, routing, utils, h(), 4단계 상태 감지
   ├─ charts.js      Chart.js 6개 차트 (usage, models, dailyCost, cache, stopReason, modelCache)
@@ -374,7 +374,7 @@ claude-dashboard-retention.service → 오래된 데이터 정리
 ```yaml
 # .github/workflows/ci.yml
 - ruff (lint)
-- pytest 174 tests (~6s)
+- pytest 175 tests (~11s)
 - node --check (JS syntax)
 ```
 
@@ -431,7 +431,7 @@ collector.py                      POST /api/ingest
 
 ## 테스트 커버리지
 
-174 pytest across 11 test files:
+175 pytest across 11 test files:
 
 | 파일 | 테스트 수 | 영역 |
 |---|---|---|

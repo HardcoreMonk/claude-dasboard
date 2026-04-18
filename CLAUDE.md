@@ -24,14 +24,14 @@
 | `static/search.js` | 전문 검색 — 3섹션 컨텍스트 뷰어, 역할 필터, 세션 점프 |
 | `static/app.css` | 스타일 + 라이트모드 (WCAG AA 4.5:1) + color-scheme |
 | `landing-pages/` | 공개 소개 페이지. `index.html` = `combined.html` (md5 동일, 주 랜딩) + variant-a/b/c 보조 시안 3종. `/landing/` 로 서빙, 인증 우회 |
-| `tests/` | 174 pytest (11개 파일) |
+| `tests/` | 175 pytest (11개 파일) |
 
 ## 실행·빌드·테스트
 
 ```bash
 ./start.sh                                    # .env 로드 + npm build + uvicorn
 npm run build                                 # bundle.js + tailwind.css
-./.venv/bin/python -m pytest tests/ -v        # 174 tests
+./.venv/bin/python -m pytest tests/ -v        # 175 tests
 
 # 원격 수집
 curl -o collector.py http://dashboard:8765/api/collector.py
@@ -153,6 +153,7 @@ npm run dev      # watch 모드
 - Standalone HTML — Tailwind/Pretendard/Iconify/Instrument Serif/Geist CDN만 의존, `bundle.js` 와 무관
 - SPA(`/app`)와 생명주기 분리: 랜딩 변경 시 SPA 캐시버스팅(`.vN`) 불필요
 - `index.html` 과 `combined.html` 은 동일 파일 (md5 매칭). 수정 시 두 파일 모두 반영 (대체로 `combined.html` 편집 후 `cp` 로 sync)
+- **랜딩 푸터 없음 (v89+)**: CTA 섹션 이후 바로 종료. claude-dashboard 브랜드 / 스택 메타 / variant A/B/C 링크 모두 제거. variant는 직접 URL 접근만 가능 (navigation 없음)
 - nav 로고(`claude-dashboard`/`cd` 축약)는 `/login` 으로 이동 — 방문자 인증 진입점
 - `/login` 성공 시 `/app` 로 리다이렉트 (기존 `/` 에서 변경)
 
@@ -162,6 +163,7 @@ npm run dev      # watch 모드
 - **이벤트**: `data-action="fnName"` + 중앙 위임. 새 버튼은 inline onclick 대신 `data-action` 사용
 - **상태 접근자**: `getChart`/`setChart`/`destroyChart`, `setPage`/`setAdvFilters` 등. `state.*` 직접 변경 지양
 - **Chart.js 렌더링**: `renderChart(stateKey, canvasId, config)` 사용. `setChart(name, new Chart(...))` 패턴은 `new Chart`가 setChart destroy보다 먼저 평가돼 "Canvas already in use" 에러 발생. `renderChart`는 destroy 보장 + `Chart.getChart(canvas)` 안전망 포함
+- **app.css 유틸리티 (v89+)**: `.text-balance` / `.text-pretty` (text-wrap), `.tnum` (tabular-nums), `.shadow-accent-tint` (emerald 성분 담은 그림자). 헤드라인 orphan 방지 + 숫자 정렬 + 브랜드 톤 그림자 공용
 - **이벤트 버스**: `bus.emit('refresh')` / `bus.on('refresh', fn)` — 모듈 간 직접 함수 호출 대신 사용
 - **WS 이벤트**: `debouncedRefresh`로 batch
 - **에러**: `reportError(ctx, e)` / `reportSuccess(ctx)`
