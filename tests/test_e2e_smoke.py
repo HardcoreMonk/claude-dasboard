@@ -103,6 +103,10 @@ def e2e_client(tmp_path, monkeypatch):
 # read or write. Renaming any of these without updating the JS would
 # break the UI silently; this test catches that.
 REQUIRED_IDS = [
+    # Shell groups
+    'overviewHeroGrid', 'overviewAlertGrid', 'overviewFlowGrid', 'overviewEntryGrid',
+    # Explore search surface
+    'global-search-input', 'search-results-panel', 'search-context-panel',
     # Overview hero (Hero cards)
     'pdDayCost', 'pdDayDetail', 'pdDayDelta',
     'planDailyPct', 'planDailyBar', 'planDailyUsed', 'planDailyRemain',
@@ -130,6 +134,31 @@ REQUIRED_IDS = [
 ]
 
 
+def test_analysis_and_admin_tabs_are_shell_containers_only(e2e_client):
+    html = e2e_client.get('/').text
+
+    analysis_section = re.search(
+        r'<section(?=[^>]*id="view-analysis")[^>]*>(.*?)</section>',
+        html,
+        re.S,
+    )
+    admin_section = re.search(
+        r'<section(?=[^>]*id="view-admin")[^>]*>(.*?)</section>',
+        html,
+        re.S,
+    )
+
+    assert analysis_section, 'analysis shell section missing'
+    assert admin_section, 'admin shell section missing'
+
+    for section_html, shell_id in (
+        (analysis_section.group(1), 'analysisTabs'),
+        (admin_section.group(1), 'adminTabs'),
+    ):
+        assert f'id="{shell_id}"' in section_html
+        assert '<button' not in section_html, f'{shell_id} should stay a shell container'
+
+
 def test_html_shell_has_all_required_ids(e2e_client):
     r = e2e_client.get('/')
     assert r.status_code == 200
@@ -142,15 +171,19 @@ def test_html_shell_has_all_required_ids(e2e_client):
     )
 
 
-def test_search_landing_renders_primary_search_ui(e2e_client):
+def test_explore_view_renders_search_surface(e2e_client):
     r = e2e_client.get('/')
 
     assert r.status_code == 200
     html = r.text
-    assert 'data-view="search"' in html
-    assert 'id="global-search-input"' in html
-    assert 'id="search-results-panel"' in html
-    assert 'id="search-context-panel"' in html
+    explore_start = html.index('<section class="view hidden" id="view-explore"')
+    overview_start = html.index('<!-- ─── OVERVIEW ─── -->')
+    explore_html = html[explore_start:overview_start]
+
+    assert 'id="global-search-input"' in explore_html
+    assert 'id="search-results-panel"' in explore_html
+    assert 'id="search-context-panel"' in explore_html
+    assert 'data-action="openCommandPalette"' in html
 
 
 def test_shell_removes_claude_conversation_and_admin_copy(e2e_client):
@@ -186,34 +219,49 @@ def test_legacy_claude_and_collector_routes_are_not_exposed(e2e_client, path):
     assert r.status_code == 404
 
 
-def test_search_landing_is_default_shell_view(e2e_client):
+def test_overview_is_default_shell_view(e2e_client):
     html = e2e_client.get('/').text
 
-    search_nav = re.search(
-        r'<button(?=[^>]*data-view="search")(?=[^>]*class="([^"]*)")[^>]*>',
-        html,
-    )
+    nav_block = re.search(r'<nav[^>]*>(.*?)</nav>', html, re.S)
     overview_nav = re.search(
-        r'<button(?=[^>]*data-view="overview")(?=[^>]*class="([^"]*)")[^>]*>',
-        html,
-    )
-    search_view = re.search(
-        r'<section(?=[^>]*id="view-search")(?=[^>]*class="([^"]*)")[^>]*>',
+        r'<button(?=[^>]*class="([^"]*nav-pill[^"]*)")(?=[^>]*data-view="overview")[^>]*>',
         html,
     )
     overview_view = re.search(
         r'<section(?=[^>]*id="view-overview")(?=[^>]*class="([^"]*)")[^>]*>',
         html,
     )
+    explore_view = re.search(
+        r'<section(?=[^>]*id="view-explore")(?=[^>]*class="([^"]*)")[^>]*>',
+        html,
+    )
+    analysis_view = re.search(
+        r'<section(?=[^>]*id="view-analysis")(?=[^>]*class="([^"]*)")[^>]*>',
+        html,
+    )
+    admin_view = re.search(
+        r'<section(?=[^>]*id="view-admin")(?=[^>]*class="([^"]*)")[^>]*>',
+        html,
+    )
 
-    assert search_nav, 'search nav button missing'
+    assert nav_block, 'top navigation block missing'
     assert overview_nav, 'overview nav button missing'
-    assert search_view, 'search view section missing'
     assert overview_view, 'overview view section missing'
-    assert 'active' in search_nav.group(1).split()
-    assert 'active' not in overview_nav.group(1).split()
-    assert 'hidden' not in search_view.group(1).split()
-    assert 'hidden' in overview_view.group(1).split()
+    assert explore_view, 'explore view section missing'
+    assert analysis_view, 'analysis view section missing'
+    assert admin_view, 'admin view section missing'
+
+    nav_buttons = re.findall(
+        r'<button(?=[^>]*class="[^"]*nav-pill[^"]*")[^>]*data-view="([^"]+)"[^>]*>',
+        nav_block.group(1),
+    )
+    assert nav_buttons == ['overview', 'explore', 'analysis', 'admin']
+
+    assert 'active' in overview_nav.group(1).split()
+    assert 'hidden' not in overview_view.group(1).split()
+    assert 'hidden' in explore_view.group(1).split()
+    assert 'hidden' in analysis_view.group(1).split()
+    assert 'hidden' in admin_view.group(1).split()
 
 
 def test_search_flow_round_trip_matches_frontend_contract(e2e_client):

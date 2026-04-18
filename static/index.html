@@ -29,35 +29,17 @@
             backdrop-blur-xl bg-white/[0.06] border border-white/[0.07]
             rounded-full px-1.5 py-1 flex items-center gap-0.5
             shadow-[0_8px_32px_rgba(0,0,0,.4)]">
-  <button class="nav-pill active spring px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-tight" data-view="search">
-    <iconify-icon icon="solar:magnifer-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>검색
-  </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="overview">
+  <button class="nav-pill active spring px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-tight" data-view="overview">
     <iconify-icon icon="solar:chart-square-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>개요
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="cost">
-    <iconify-icon icon="solar:graph-up-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>비용
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="explore">
+    <iconify-icon icon="solar:magnifer-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>탐색
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="sessions">
-    <iconify-icon icon="solar:list-check-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>세션
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="analysis">
+    <iconify-icon icon="solar:graph-up-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>분석
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="conversations">
-    <iconify-icon icon="solar:chat-round-line-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>대화
-  </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="models">
-    <iconify-icon icon="solar:cpu-bolt-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>모델
-  </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="projects">
-    <iconify-icon icon="solar:folder-open-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>프로젝트
-  </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="subagents">
-    <iconify-icon icon="solar:widget-2-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>Subagent
-  </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="timeline">
-    <iconify-icon icon="solar:calendar-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>타임라인
-  </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="export">
-    <iconify-icon icon="solar:database-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>관리
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="admin">
+    <iconify-icon icon="solar:settings-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>관리
   </button>
 
   <!-- WS badge -->
@@ -105,8 +87,8 @@
      ═══════════════════════════════════════════════════════════════════════ -->
 <main class="pt-20 pb-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
-<!-- ─── SEARCH ─── -->
-<section class="view" id="view-search" data-view="search">
+<!-- ─── EXPLORE ─── -->
+<section class="view hidden" id="view-explore" data-view="explore">
   <div class="search-shell anim-in">
     <section class="search-main search-card">
       <div class="search-hero">
@@ -146,11 +128,60 @@
 </section>
 
 <!-- ─── OVERVIEW ─── -->
-<!-- 기본 레이아웃: TOP 5 프로젝트 전체 폭. 각 행 오른쪽에 눈 아이콘 버튼이
-     있고, 해당 버튼 클릭 시에만 우측에서 drawer 형태의 preview 패널이
-     fixed 위치로 슬라이드 in. 행 본체 클릭은 기존 프로젝트 모달로 드릴. -->
-<section class="view hidden" id="view-overview">
-  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+<section class="view" id="view-overview" data-view="overview">
+  <div id="overviewHeroGrid" class="grid grid-cols-1 gap-3 lg:grid-cols-3 anim-in">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <p class="text-[10px] font-bold uppercase tracking-widest text-white/35">Shell</p>
+        <h2 class="mt-2 text-lg font-extrabold text-white/90">Overview-first dashboard shell</h2>
+        <p class="mt-2 text-sm text-white/45">개요가 기본 화면이고 탐색, 분석, 관리가 그 아래 계층으로 정리됩니다.</p>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <p class="text-[10px] font-bold uppercase tracking-widest text-white/35">Global search</p>
+        <p class="mt-2 text-sm text-white/45">명령 팔레트와 탐색 탭에서 검색을 시작합니다.</p>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <p class="text-[10px] font-bold uppercase tracking-widest text-white/35">Sections</p>
+        <p class="mt-2 text-sm text-white/45">overview / explore / analysis / admin 네 개의 최상위 영역만 노출합니다.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="overviewAlertGrid" class="grid grid-cols-1 gap-3 lg:grid-cols-2 mt-3 anim-in anim-d1">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <p class="text-xs font-bold text-white/40">Signals</p>
+        <p class="mt-2 text-sm text-white/45">경고, 상태, 요약 신호는 여기에서 모읍니다.</p>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <p class="text-xs font-bold text-white/40">Status</p>
+        <p class="mt-2 text-sm text-white/45">운영 상태와 오늘의 요약은 상단 지표로 유지됩니다.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="overviewFlowGrid" class="grid grid-cols-1 gap-3 lg:grid-cols-2 mt-3 anim-in anim-d2">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <p class="text-xs font-bold text-white/40">Flow</p>
+        <p class="mt-2 text-sm text-white/45">개요에서 탐색과 분석으로 내려가는 기본 흐름을 보여줍니다.</p>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <p class="text-xs font-bold text-white/40">Entry points</p>
+        <p class="mt-2 text-sm text-white/45">명령 팔레트와 탐색 뷰가 검색 진입점입니다.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="overviewEntryGrid" class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mt-3 anim-in anim-d3">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
       <span class="text-xs font-bold text-white/40">TOP 5 프로젝트 <span class="text-white/20 font-normal text-[10px]">행 클릭 → 프로젝트 상세, 👁 버튼 → 마지막 대화 미리보기</span></span>
       <div id="topProjectsList" class="mt-3 space-y-1">
@@ -205,6 +236,32 @@
      class="fixed inset-0 z-30 bg-black/30 transition-opacity duration-300"
      style="opacity:0;pointer-events:none"
      data-action="topPreviewClose"></div>
+
+<!-- ─── ANALYSIS ─── -->
+<section class="view hidden" id="view-analysis" data-view="analysis">
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <div id="analysisTabs" class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">Analysis shell</span>
+        <span class="text-[10px] text-white/30">하위 IA는 후속 작업에서 채워집니다.</span>
+      </div>
+      <p class="mt-3 text-sm text-white/45">분석 영역은 탭 컨테이너만 예약된 shell 입니다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── ADMIN ─── -->
+<section class="view hidden" id="view-admin" data-view="admin">
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <div id="adminTabs" class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">Admin shell</span>
+        <span class="text-[10px] text-white/30">운영 하위 탭은 후속 작업에서 채워집니다.</span>
+      </div>
+      <p class="mt-3 text-sm text-white/45">관리 영역은 shell 컨테이너만 남겨둡니다.</p>
+    </div>
+  </div>
+</section>
 
 <!-- ─── COST ─── -->
 <section class="view hidden" id="view-cost">
