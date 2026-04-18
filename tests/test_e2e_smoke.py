@@ -231,6 +231,34 @@ def test_explore_keeps_global_command_palette_and_legacy_subviews(e2e_client):
     )
 
 
+@pytest.mark.parametrize(
+    'path, marker',
+    [
+        ('/landing/ops', 'Ops Control'),
+        ('/landing/team', 'Team Recall'),
+        ('/landing/executive', 'Executive Signal'),
+    ],
+)
+def test_public_landing_pages_are_exposed_without_auth(e2e_client, path, marker):
+    r = e2e_client.get(path)
+    assert r.status_code == 200
+    assert 'text/html' in r.headers.get('content-type', '')
+    assert marker in r.text
+    assert '로컬에서 바로 실행' in r.text
+
+
+def test_overview_balanced_portal_regions_exist(e2e_client):
+    html = e2e_client.get('/').text
+    required = [
+        'overviewAxisGrid',
+        'overviewOpsPreview',
+        'overviewProductivityPreview',
+        'overviewReportingPreview',
+    ]
+    missing = [item for item in required if f'id="{item}"' not in html]
+    assert not missing
+
+
 def test_shell_removes_claude_conversation_and_admin_copy(e2e_client):
     html = e2e_client.get('/').text
 
