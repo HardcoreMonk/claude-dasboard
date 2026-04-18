@@ -3,12 +3,561 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
   <title>Team Recall - Codex Dashboard</title>
+  <style>
+    :root {
+      --bg: #061018;
+      --bg-2: #08131d;
+      --panel: rgba(13, 21, 33, 0.84);
+      --panel-strong: rgba(18, 28, 42, 0.96);
+      --line: rgba(233, 242, 255, 0.09);
+      --line-strong: rgba(233, 242, 255, 0.16);
+      --text: #edf4ff;
+      --muted: #a6b7cc;
+      --faint: #74849b;
+      --accent: #9af0cf;
+      --accent-2: #8ec8ff;
+      --accent-3: #ffcf86;
+      --shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+      --radius-xl: 30px;
+      --radius-lg: 22px;
+      --radius-md: 16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 18% 18%, rgba(154, 240, 207, 0.14), transparent 24%),
+        radial-gradient(circle at 82% 12%, rgba(142, 200, 255, 0.16), transparent 22%),
+        radial-gradient(circle at 70% 78%, rgba(255, 207, 134, 0.11), transparent 24%),
+        linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 50%, #050c12 100%);
+      color: var(--text);
+      font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+      letter-spacing: -0.02em;
+    }
+
+    body {
+      min-height: 100vh;
+      padding: 28px;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.9), transparent 82%);
+      opacity: 0.45;
+    }
+
+    .wrap {
+      position: relative;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .page {
+      position: relative;
+      padding: 28px;
+      border-radius: 34px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.04), transparent 14%),
+        linear-gradient(180deg, rgba(8, 13, 20, 0.94), rgba(9, 15, 24, 0.98));
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(20px);
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 28px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .mark {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 30%, #fff, var(--accent) 42%, rgba(154,240,207,0.15) 72%);
+      box-shadow: 0 0 0 6px rgba(154, 240, 207, 0.08);
+    }
+
+    .meta {
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      color: var(--faint);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .hero-copy,
+    .hero-side,
+    .section,
+    .workflow,
+    .footer-band {
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.016));
+    }
+
+    .hero-copy {
+      padding: 34px;
+      background:
+        radial-gradient(circle at 100% 0%, rgba(142, 200, 255, 0.13), transparent 28%),
+        radial-gradient(circle at 0% 100%, rgba(154, 240, 207, 0.1), transparent 32%),
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.016));
+    }
+
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(44px, 7vw, 80px);
+      line-height: 0.95;
+      letter-spacing: -0.06em;
+    }
+
+    .lede {
+      margin: 18px 0 0;
+      max-width: 60ch;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.72;
+    }
+
+    .hero-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .chip {
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .btn:hover { transform: translateY(-1px); }
+
+    .btn-primary {
+      color: #07120f;
+      background: linear-gradient(135deg, #b2ffe1, #8ec8ff);
+      box-shadow: 0 14px 40px rgba(142, 200, 255, 0.18);
+    }
+
+    .btn-secondary {
+      color: var(--text);
+      border-color: var(--line-strong);
+      background: rgba(255,255,255,0.03);
+    }
+
+    .hero-side {
+      display: grid;
+      gap: 14px;
+      padding: 20px;
+      background:
+        linear-gradient(180deg, rgba(18, 28, 42, 0.98), rgba(10, 16, 24, 0.92));
+    }
+
+    .signal {
+      padding: 18px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+    }
+
+    .signal-label {
+      margin: 0 0 10px;
+      color: var(--faint);
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    .signal-value {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.15;
+      letter-spacing: -0.05em;
+    }
+
+    .signal-note {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+    }
+
+    .metric dt {
+      color: var(--faint);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .metric dd {
+      margin: 8px 0 0;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+    }
+
+    .section-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .section {
+      padding: 20px;
+      background: rgba(255,255,255,0.025);
+    }
+
+    .section h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      letter-spacing: -0.03em;
+    }
+
+    .section p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 15px;
+    }
+
+    .stack {
+      margin-top: 14px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .stack-item {
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .workflow {
+      margin-top: 18px;
+      padding: 22px;
+      background: linear-gradient(180deg, rgba(14, 22, 33, 0.98), rgba(10, 16, 24, 0.9));
+    }
+
+    .workflow-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .workflow-head h2 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -0.04em;
+    }
+
+    .workflow-head span {
+      color: var(--faint);
+      font-size: 13px;
+    }
+
+    .workflow-flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .step {
+      min-height: 118px;
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015));
+    }
+
+    .step-index {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: rgba(154, 240, 207, 0.14);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .step h3 {
+      margin: 12px 0 8px;
+      font-size: 16px;
+      letter-spacing: -0.03em;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .footer-band {
+      margin-top: 18px;
+      padding: 18px 20px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      background:
+        radial-gradient(circle at 10% 20%, rgba(255, 207, 134, 0.1), transparent 20%),
+        rgba(255,255,255,0.025);
+    }
+
+    .footer-band strong {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    .footer-band p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .section-grid,
+      .workflow-flow {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar,
+      .footer-band,
+      .workflow-head {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      body { padding: 18px; }
+      .page { padding: 18px; border-radius: 26px; }
+      .hero-copy { padding: 24px; }
+    }
+
+    @media (max-width: 640px) {
+      h1 { font-size: clamp(36px, 14vw, 54px); }
+      .lede { font-size: 16px; }
+      .metrics { grid-template-columns: 1fr; }
+      .hero-actions { flex-direction: column; }
+      .btn { width: 100%; }
+    }
+  </style>
 </head>
 <body>
-  <main>
-    <h1>Team Recall</h1>
-    <p>로컬에서 바로 실행</p>
-  </main>
+  <div class="wrap">
+    <main class="page">
+      <div class="topbar">
+        <div class="brand"><span class="mark"></span>Codex Dashboard · Team Recall</div>
+        <div class="meta">search-first · sessions → projects · Subagent traceability</div>
+      </div>
+
+      <section class="hero" aria-labelledby="team-recall-title">
+        <div class="hero-copy">
+          <p class="eyebrow">TEAM RECALL WORKSPACE</p>
+          <h1 id="team-recall-title">팀이 다시 찾고, 이어서 풀어내는 Codex 작업공간</h1>
+          <p class="lede">
+            이 페이지는 팀 세션을 검색하고, 프로젝트 맥락으로 정리하고, 이전 결정을 빠르게 복기하는
+            search-first 워크스페이스입니다. 세션 기록이 프로젝트 흐름으로 이어지고, 필요한 경우
+            Subagent traceability까지 한 화면에서 따라갈 수 있습니다.
+          </p>
+
+          <div class="hero-chips" aria-label="핵심 특징">
+            <span class="chip">search-first 탐색</span>
+            <span class="chip">세션 검색</span>
+            <span class="chip">프로젝트 연결</span>
+            <span class="chip">Subagent traceability</span>
+          </div>
+
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="/"><strong>로컬에서 바로 실행</strong></a>
+            <a class="btn btn-secondary" href="#workflow">세션과 프로젝트 흐름 보기</a>
+          </div>
+        </div>
+
+        <aside class="hero-side" aria-label="팀 워크스페이스 하이라이트">
+          <div class="signal">
+            <p class="signal-label">Recall mode</p>
+            <p class="signal-value">세션을 찾는 순간부터 프로젝트가 보입니다</p>
+            <p class="signal-note">
+              검색 결과를 따라가며 대화, 파일, 도구 사용, 후속 작업을 한 번에 복기합니다.
+            </p>
+          </div>
+          <dl class="metrics">
+            <div class="metric">
+              <dt>Search</dt>
+              <dd>빠름</dd>
+            </div>
+            <div class="metric">
+              <dt>Sessions</dt>
+              <dd>연결</dd>
+            </div>
+            <div class="metric">
+              <dt>Projects</dt>
+              <dd>정리</dd>
+            </div>
+          </dl>
+        </aside>
+      </section>
+
+      <section class="section-grid" aria-label="팀 랜딩 핵심 메시지">
+        <article class="section">
+          <h2>검색 우선</h2>
+          <p>먼저 찾고, 그다음 해석합니다. 팀의 기억은 검색 가능한 세션에서 출발합니다.</p>
+          <div class="stack">
+            <div class="stack-item">세션 제목, 메시지, 도구 호출을 같이 훑는 탐색 흐름</div>
+            <div class="stack-item">재방문했을 때도 바로 이어지는 컨텍스트</div>
+          </div>
+        </article>
+        <article class="section">
+          <h2>sessions → projects</h2>
+          <p>개별 세션은 프로젝트 맥락으로 묶여야 의미가 생깁니다. 팀 흐름을 프로젝트 단위로 복원합니다.</p>
+          <div class="stack">
+            <div class="stack-item">세션에서 프로젝트로 내려가는 연결 구조</div>
+            <div class="stack-item">프로젝트별로 누적된 의사결정과 후속 작업</div>
+          </div>
+        </article>
+        <article class="section">
+          <h2>Subagent traceability</h2>
+          <p>누가 어떤 서브에이전트로 무엇을 했는지 남아 있어야 팀 복기가 가능합니다.</p>
+          <div class="stack">
+            <div class="stack-item">Subagent traceability로 작업 경로 추적</div>
+            <div class="stack-item">도구 사용과 산출물을 근거로 검증 가능하게 유지</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="workflow" id="workflow" aria-labelledby="workflow-title">
+        <div class="workflow-head">
+          <h2 id="workflow-title">팀 리콜 흐름</h2>
+          <span>search → sessions → projects → subagents</span>
+        </div>
+
+        <div class="workflow-flow">
+          <article class="step">
+            <span class="step-index">1</span>
+            <h3>Search</h3>
+            <p>키워드와 세부 흔적을 바로 찾아서, 어떤 팀 맥락이든 진입점을 만듭니다.</p>
+          </article>
+          <article class="step">
+            <span class="step-index">2</span>
+            <h3>Sessions</h3>
+            <p>세션을 열어 대화의 흐름과 도구 사용을 확인하고, 어떤 일이 실제로 일어났는지 봅니다.</p>
+          </article>
+          <article class="step">
+            <span class="step-index">3</span>
+            <h3>Projects</h3>
+            <p>세션을 프로젝트에 붙여 누적된 결정, 진행 중 작업, 후속 조치를 정리합니다.</p>
+          </article>
+          <article class="step">
+            <span class="step-index">4</span>
+            <h3>Subagent Traceability</h3>
+            <p>서브에이전트가 남긴 흔적을 따라가며 팀이 재현 가능한 작업 기록을 유지합니다.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="footer-band" aria-label="로컬 실행 안내">
+        <div>
+          <strong>로컬에서 바로 실행되는 팀 복기 페이지</strong>
+          <p>Codex Dashboard 안에서 검색, 세션, 프로젝트, Subagent traceability를 이어 붙이는 진입점입니다.</p>
+        </div>
+        <a class="btn btn-secondary" href="/">대시보드로 돌아가기</a>
+      </section>
+    </main>
+  </div>
 </body>
 </html>

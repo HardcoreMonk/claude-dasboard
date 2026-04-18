@@ -249,6 +249,20 @@ def test_public_landing_pages_are_exposed_without_auth(e2e_client, path, marker)
     assert '로컬에서 바로 실행' in r.text
 
 
+def test_team_landing_positions_codex_as_recall_workspace(e2e_client):
+    html = e2e_client.get('/landing/team').text
+
+    assert 'Team Recall' in html
+    assert '팀이 다시 찾고, 이어서 풀어내는 Codex 작업공간' in html
+    assert 'search-first 워크스페이스' in html
+    assert 'search-first 탐색' in html
+    assert '세션 검색' in html
+    assert 'sessions → projects' in html
+    assert '프로젝트 맥락' in html
+    assert 'Subagent traceability' in html
+    assert '로컬에서 바로 실행' in html
+
+
 def test_ops_landing_positions_codex_as_operations_console(e2e_client):
     html = e2e_client.get('/landing/ops').text
 
