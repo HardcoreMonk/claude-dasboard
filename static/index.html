@@ -157,54 +157,90 @@
 <!-- ─── OVERVIEW ─── -->
 <section class="view" id="view-overview" data-view="overview">
   <div class="overview-console anim-in">
-    <section id="overviewKpiGrid" class="overview-region" role="region" aria-labelledby="overviewKpiTitle">
-      <div class="overview-region-head">
-        <div>
-          <p class="overview-region-kicker">Operations console</p>
-          <h2 id="overviewKpiTitle" class="overview-region-title">KPI</h2>
+    <div class="grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
+      <section id="overviewAxisGrid" class="overview-region" role="region" aria-labelledby="overviewAxisTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">Balanced portal</p>
+            <h2 id="overviewAxisTitle" class="overview-region-title">Axis</h2>
+          </div>
+          <span class="overview-region-chip">live</span>
         </div>
-        <span class="overview-region-chip">live</span>
-      </div>
-      <div id="overviewKpiBody" class="overview-region-body">
-        <div class="overview-skeleton-grid">
-          <div class="overview-skeleton-card"></div>
-          <div class="overview-skeleton-card"></div>
-          <div class="overview-skeleton-card"></div>
+        <div id="overviewAxisBody" class="overview-region-body">
+          <div class="overview-skeleton-grid">
+            <div class="overview-skeleton-card"></div>
+            <div class="overview-skeleton-card"></div>
+          </div>
         </div>
-        <div class="overview-skeleton-strip">
-          <div class="overview-skeleton-pill"></div>
-          <div class="overview-skeleton-pill"></div>
-          <div class="overview-skeleton-pill"></div>
-          <div class="overview-skeleton-pill"></div>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <section id="overviewAlertGrid" class="overview-region" role="region" aria-labelledby="overviewAlertTitle">
-      <div class="overview-region-head">
-        <div>
-          <p class="overview-region-kicker">Signals</p>
-          <h2 id="overviewAlertTitle" class="overview-region-title">Alerts</h2>
+      <section id="overviewActionGrid" class="overview-region" role="region" aria-labelledby="overviewActionTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">Command surface</p>
+            <h2 id="overviewActionTitle" class="overview-region-title">Actions</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--cyan">quick</span>
         </div>
-        <span class="overview-region-chip overview-region-chip--amber">watch</span>
-      </div>
-      <div id="overviewAlertBody" class="overview-region-body">
-        <div class="overview-skeleton-grid overview-skeleton-grid--compact">
-          <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
-          <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+        <div id="overviewActionBody" class="overview-region-body">
+          <div class="overview-skeleton-grid">
+            <div class="overview-skeleton-card"></div>
+            <div class="overview-skeleton-card"></div>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
 
-    <section id="overviewFlowGrid" class="overview-region" role="region" aria-labelledby="overviewFlowTitle">
+    <div class="grid gap-4 lg:grid-cols-2">
+      <section id="overviewOpsSummary" class="overview-region" role="region" aria-labelledby="overviewOpsTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">Operations summary</p>
+            <h2 id="overviewOpsTitle" class="overview-region-title">Ops</h2>
+          </div>
+          <span class="overview-region-chip">kpi</span>
+        </div>
+        <div id="overviewOpsSummaryBody" class="overview-region-body">
+          <div class="overview-skeleton-grid">
+            <div class="overview-skeleton-card"></div>
+            <div class="overview-skeleton-card"></div>
+            <div class="overview-skeleton-card"></div>
+          </div>
+          <div class="overview-skeleton-strip">
+            <div class="overview-skeleton-pill"></div>
+            <div class="overview-skeleton-pill"></div>
+            <div class="overview-skeleton-pill"></div>
+            <div class="overview-skeleton-pill"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="overviewProductivitySummary" class="overview-region" role="region" aria-labelledby="overviewProductivityTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">Productivity summary</p>
+            <h2 id="overviewProductivityTitle" class="overview-region-title">Productivity</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--amber">watch</span>
+        </div>
+        <div id="overviewProductivitySummaryBody" class="overview-region-body">
+          <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section id="overviewReportingSummary" class="overview-region" role="region" aria-labelledby="overviewReportingTitle">
       <div class="overview-region-head">
         <div>
-          <p class="overview-region-kicker">Signal flow</p>
-          <h2 id="overviewFlowTitle" class="overview-region-title">Flow</h2>
+          <p class="overview-region-kicker">Reporting summary</p>
+          <h2 id="overviewReportingTitle" class="overview-region-title">Reporting</h2>
         </div>
         <span class="overview-region-chip overview-region-chip--cyan">router</span>
       </div>
-      <div id="overviewFlowBody" class="overview-region-body">
+      <div id="overviewReportingSummaryBody" class="overview-region-body">
         <div class="overview-skeleton-grid overview-skeleton-grid--compact">
           <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
           <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
@@ -212,29 +248,63 @@
       </div>
     </section>
 
-    <section id="overviewEntryGrid" class="overview-region" role="region" aria-labelledby="overviewEntryTitle">
-      <div class="overview-region-head">
-        <div>
-          <p class="overview-region-kicker">Entry surface</p>
-          <h2 id="overviewEntryTitle" class="overview-region-title">Entry</h2>
+    <div class="grid gap-4 lg:grid-cols-3">
+      <section id="overviewOpsPreview" class="overview-region" role="region" aria-labelledby="overviewOpsPreviewTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">Ops preview</p>
+            <h2 id="overviewOpsPreviewTitle" class="overview-region-title">Top projects</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--emerald">list</span>
         </div>
-        <span class="overview-region-chip overview-region-chip--emerald">top</span>
-      </div>
-      <div id="overviewEntryBody" class="overview-region-body">
-        <div class="overview-entry-shell">
-          <div class="overview-entry-shell__head">
-            <div>
-              <div class="overview-entry-shell__title">Top projects</div>
-              <div class="overview-entry-shell__sub">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</div>
+        <div id="overviewOpsPreviewBody" class="overview-region-body">
+          <div class="overview-entry-shell">
+            <div class="overview-entry-shell__head">
+              <div>
+                <div class="overview-entry-shell__title">Top projects</div>
+                <div class="overview-entry-shell__sub">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</div>
+              </div>
+              <button data-action="openCommandPalette" class="overview-entry-shell__action">명령 팔레트</button>
             </div>
-            <button data-action="openCommandPalette" class="overview-entry-shell__action">명령 팔레트</button>
-          </div>
-          <div id="topProjectsList" class="overview-project-list">
-            <div class="overview-project-empty dots">로딩 중</div>
+            <div id="topProjectsList" class="overview-project-list">
+              <div class="overview-project-empty dots">로딩 중</div>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <section id="overviewProductivityPreview" class="overview-region" role="region" aria-labelledby="overviewProductivityPreviewTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">Productivity preview</p>
+            <h2 id="overviewProductivityPreviewTitle" class="overview-region-title">Usage</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--amber">periods</span>
+        </div>
+        <div id="overviewProductivityPreviewBody" class="overview-region-body">
+          <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="overviewReportingPreview" class="overview-region" role="region" aria-labelledby="overviewReportingPreviewTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">Reporting preview</p>
+            <h2 id="overviewReportingPreviewTitle" class="overview-region-title">Sources</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--cyan">router</span>
+        </div>
+        <div id="overviewReportingPreviewBody" class="overview-region-body">
+          <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </section>
 

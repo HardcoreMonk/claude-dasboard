@@ -104,7 +104,9 @@ def e2e_client(tmp_path, monkeypatch):
 # break the UI silently; this test catches that.
 REQUIRED_IDS = [
     # Shell groups
-    'overviewKpiGrid', 'overviewAlertGrid', 'overviewFlowGrid', 'overviewEntryGrid',
+    'overviewAxisGrid', 'overviewActionGrid',
+    'overviewOpsSummary', 'overviewProductivitySummary', 'overviewReportingSummary',
+    'overviewOpsPreview', 'overviewProductivityPreview', 'overviewReportingPreview',
     # Explore search surface
     'exploreTabs', 'exploreTabSummary', 'explore-search-surface', 'explore-legacy-workspace',
     'global-search-input', 'search-results-panel', 'search-context-panel',
@@ -251,6 +253,10 @@ def test_overview_balanced_portal_regions_exist(e2e_client):
     html = e2e_client.get('/').text
     required = [
         'overviewAxisGrid',
+        'overviewActionGrid',
+        'overviewOpsSummary',
+        'overviewProductivitySummary',
+        'overviewReportingSummary',
         'overviewOpsPreview',
         'overviewProductivityPreview',
         'overviewReportingPreview',
@@ -335,20 +341,28 @@ def test_overview_is_default_shell_view(e2e_client):
     assert 'hidden' in explore_view.group(1).split()
     assert 'hidden' in analysis_view.group(1).split()
     assert 'hidden' in admin_view.group(1).split()
-    assert 'id="overviewKpiGrid"' in html
-    assert 'id="overviewAlertGrid"' in html
-    assert 'id="overviewFlowGrid"' in html
-    assert 'id="overviewEntryGrid"' in html
+    assert 'id="overviewAxisGrid"' in html
+    assert 'id="overviewActionGrid"' in html
+    assert 'id="overviewOpsSummary"' in html
+    assert 'id="overviewProductivitySummary"' in html
+    assert 'id="overviewReportingSummary"' in html
+    assert 'id="overviewOpsPreview"' in html
+    assert 'id="overviewProductivityPreview"' in html
+    assert 'id="overviewReportingPreview"' in html
 
 
 def test_overview_shell_contains_ops_console_regions(e2e_client):
     html = e2e_client.get('/').text
 
     region_pairs = [
-        ('overviewKpiGrid', 'overviewKpiTitle'),
-        ('overviewAlertGrid', 'overviewAlertTitle'),
-        ('overviewFlowGrid', 'overviewFlowTitle'),
-        ('overviewEntryGrid', 'overviewEntryTitle'),
+        ('overviewAxisGrid', 'overviewAxisTitle'),
+        ('overviewActionGrid', 'overviewActionTitle'),
+        ('overviewOpsSummary', 'overviewOpsTitle'),
+        ('overviewProductivitySummary', 'overviewProductivityTitle'),
+        ('overviewReportingSummary', 'overviewReportingTitle'),
+        ('overviewOpsPreview', 'overviewOpsPreviewTitle'),
+        ('overviewProductivityPreview', 'overviewProductivityPreviewTitle'),
+        ('overviewReportingPreview', 'overviewReportingPreviewTitle'),
     ]
     for region_id, title_id in region_pairs:
         assert f'id="{region_id}"' in html

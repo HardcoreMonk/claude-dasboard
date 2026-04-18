@@ -50,7 +50,17 @@ function overviewRelativeTime(iso) {
 }
 
 function renderOverviewShell() {
-  overviewSetHtml('overviewKpiBody', `
+  overviewSetHtml('overviewAxisBody', `
+    <div class="overview-skeleton-grid">
+      <div class="overview-skeleton-card"></div>
+      <div class="overview-skeleton-card"></div>
+    </div>`);
+  overviewSetHtml('overviewActionBody', `
+    <div class="overview-skeleton-grid">
+      <div class="overview-skeleton-card"></div>
+      <div class="overview-skeleton-card"></div>
+    </div>`);
+  overviewSetHtml('overviewOpsSummaryBody', `
     <div class="overview-skeleton-grid">
       <div class="overview-skeleton-card"></div>
       <div class="overview-skeleton-card"></div>
@@ -62,17 +72,17 @@ function renderOverviewShell() {
       <div class="overview-skeleton-pill"></div>
       <div class="overview-skeleton-pill"></div>
     </div>`);
-  overviewSetHtml('overviewAlertBody', `
+  overviewSetHtml('overviewProductivitySummaryBody', `
     <div class="overview-skeleton-grid overview-skeleton-grid--compact">
       <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
       <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
     </div>`);
-  overviewSetHtml('overviewFlowBody', `
+  overviewSetHtml('overviewReportingSummaryBody', `
     <div class="overview-skeleton-grid overview-skeleton-grid--compact">
       <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
       <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
     </div>`);
-  overviewSetHtml('overviewEntryBody', `
+  overviewSetHtml('overviewOpsPreviewBody', `
     <div class="overview-entry-shell">
       <div class="overview-entry-shell__head">
         <div>
@@ -84,6 +94,16 @@ function renderOverviewShell() {
       <div id="topProjectsList" class="overview-project-list">
         <div class="overview-project-empty dots">로딩 중</div>
       </div>
+    </div>`);
+  overviewSetHtml('overviewProductivityPreviewBody', `
+    <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+      <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+      <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+    </div>`);
+  overviewSetHtml('overviewReportingPreviewBody', `
+    <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+      <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+      <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
     </div>`);
 }
 
@@ -151,7 +171,46 @@ function overviewStatRows() {
   return rows.slice(0, 6);
 }
 
-function renderOverviewKpi() {
+function renderOverviewAxisGrid() {
+  const rows = overviewStatRows().slice(0, 3);
+  const usage = overviewState.usage || {};
+  const topSession = (usage.top_sessions || [])[0];
+  overviewSetHtml('overviewAxisBody', `
+    <div class="grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
+      <div class="rounded-[28px] border border-white/[0.07] bg-white/[0.03] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <div class="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Portal axis</div>
+        <div class="mt-2 text-xl font-extrabold tracking-tight text-white/92">Ops, productivity, reporting를 같은 축에 놓습니다.</div>
+        <p class="mt-2 text-[13px] leading-6 text-white/56">기존 KPI, alert, flow, top-projects 데이터를 유지한 채 배치를 다시 잡았습니다. 상단 그룹 네비게이션과 이 영역의 빠른 동작 버튼으로 같은 데이터 위를 오가게 합니다.</p>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button data-action="showView" data-arg="overview" class="overview-flow-path__pill overview-flow-path__pill--active">overview</button>
+          <button data-action="showView" data-arg="explore" class="overview-flow-path__pill">explore</button>
+          <button data-action="showView" data-arg="analysis" class="overview-flow-path__pill">analysis</button>
+          <button data-action="showView" data-arg="admin" class="overview-flow-path__pill">admin</button>
+        </div>
+      </div>
+      <div class="grid gap-3 sm:grid-cols-3">
+        ${rows.map((row) => `
+          <article class="rounded-[24px] border border-white/[0.06] bg-white/[0.025] p-4">
+            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">${esc(row.label)}</div>
+            <div class="mt-2 text-2xl font-extrabold tracking-tight text-white/92">${row.value}</div>
+            <div class="mt-1 text-[11px] leading-5 text-white/45">${esc(row.detail)}</div>
+          </article>
+        `).join('')}
+      </div>
+      <div class="rounded-[24px] border border-white/[0.06] bg-white/[0.025] p-4 lg:col-span-2">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Latest active</div>
+            <div class="mt-1 text-sm font-bold text-white/90">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
+          </div>
+          <span class="overview-region-chip overview-region-chip--cyan">live</span>
+        </div>
+        <div class="mt-2 text-[11px] leading-5 text-white/45">${esc(topSession ? `${topSession.project_name || '—'} · ${fmtN(topSession.message_count || 0)} messages` : 'usage summary unavailable')}</div>
+      </div>
+    </div>`);
+}
+
+function renderOverviewOpsSummary() {
   const stats = overviewState.stats || {};
   const today = stats.today || {};
   const all = stats.all_time || {};
@@ -169,7 +228,7 @@ function renderOverviewKpi() {
   const burnoutLabel = forecast.daily_budget_burnout_seconds != null
     ? `${overviewDurationLabel(forecast.daily_budget_burnout_seconds)} 후`
     : '예산 미설정';
-  overviewSetHtml('overviewKpiBody', `
+  overviewSetHtml('overviewOpsSummaryBody', `
     <div class="overview-kpi-grid">
       <article class="overview-kpi-card overview-kpi-card--primary">
         <div class="overview-kpi-head">
@@ -226,7 +285,7 @@ function renderOverviewKpi() {
     </div>`);
 }
 
-function renderOverviewAlerts() {
+function renderOverviewProductivitySummary() {
   const plan = overviewState.plan || {};
   const usage = overviewState.usage || {};
   const forecast = overviewState.forecast || {};
@@ -244,7 +303,7 @@ function renderOverviewAlerts() {
     { label: 'Weekly spend', tone: weeklyTone, value: overviewPlanPct(weekly), detail: `${fmt$(weekly.used_cost || 0)} / ${fmt$(weekly.limit_cost || 0)} · 재설정 ${overviewResetLabel(weekly.reset_at)}` },
     { label: 'Forecast risk', tone: forecastTone, value: fmt$(forecast.projected_eom_cost), detail: `${forecast.days_left_in_month || 0}일 남음 · ${fmt$(forecast.avg_cost_per_day || 0)}/day` },
   ];
-  overviewSetHtml('overviewAlertBody', `
+  overviewSetHtml('overviewProductivitySummaryBody', `
     <div class="overview-alert-grid">
       <article class="overview-alert-card ${overviewToneClass(dailyTone)}">
         <div class="overview-alert-card__head">
@@ -285,13 +344,13 @@ function renderOverviewAlerts() {
     </div>`);
 }
 
-function renderOverviewFlow() {
+function renderOverviewReportingSummary() {
   const stats = overviewState.stats || {};
   const forecast = overviewState.forecast || {};
   const plan = overviewState.plan || {};
   const usage = overviewState.usage || {};
   const lastUpdated = state.lastUpdated || {};
-  overviewSetHtml('overviewFlowBody', `
+  overviewSetHtml('overviewReportingSummaryBody', `
     <div class="overview-flow-grid">
       <article class="overview-flow-card">
         <div class="overview-flow-card__head">
@@ -341,6 +400,185 @@ function renderOverviewFlow() {
         <span class="overview-flow-band__label">Today</span>
         <span class="overview-flow-band__value">${fmt$(stats.today?.cost_usd || 0)}</span>
       </div>
+    </div>`);
+}
+
+function renderOverviewActionGrid() {
+  overviewSetHtml('overviewActionBody', `
+    <div class="grid gap-3 sm:grid-cols-2">
+      <button data-action="openCommandPalette" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
+        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Command</div>
+        <div class="mt-2 text-sm font-bold text-white/90">명령 팔레트</div>
+        <div class="mt-1 text-[11px] leading-5 text-white/46">검색, 점프, 모달을 한 번에 여는 빠른 진입점입니다.</div>
+      </button>
+      <button data-action="drillToSessionsToday" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
+        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Today</div>
+        <div class="mt-2 text-sm font-bold text-white/90">오늘 세션</div>
+        <div class="mt-1 text-[11px] leading-5 text-white/46">오늘 날짜로 세션 탐색을 바로 맞춥니다.</div>
+      </button>
+      <button data-action="drillToSessionsWeek" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
+        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Week</div>
+        <div class="mt-2 text-sm font-bold text-white/90">이번 주 세션</div>
+        <div class="mt-1 text-[11px] leading-5 text-white/46">이번 주 범위로 요약된 세션 흐름을 봅니다.</div>
+      </button>
+      <button data-action="showView" data-arg="explore" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
+        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Navigate</div>
+        <div class="mt-2 text-sm font-bold text-white/90">탐색으로 이동</div>
+        <div class="mt-1 text-[11px] leading-5 text-white/46">검색 중심 워크스페이스로 전환합니다.</div>
+      </button>
+      <button data-action="showView" data-arg="analysis" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
+        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Navigate</div>
+        <div class="mt-2 text-sm font-bold text-white/90">분석으로 이동</div>
+        <div class="mt-1 text-[11px] leading-5 text-white/46">비용과 시계열 분석 화면으로 전환합니다.</div>
+      </button>
+      <button data-action="showView" data-arg="admin" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
+        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Navigate</div>
+        <div class="mt-2 text-sm font-bold text-white/90">관리로 이동</div>
+        <div class="mt-1 text-[11px] leading-5 text-white/46">백업, 로그, 운영 도구를 여는 포털입니다.</div>
+      </button>
+    </div>`);
+}
+
+function renderOverviewOpsPreview() {
+  overviewSetHtml('overviewOpsPreviewBody', `
+    <div class="overview-entry-shell">
+      <div class="overview-entry-shell__head">
+        <div>
+          <div class="overview-entry-shell__title">Top projects</div>
+          <div class="overview-entry-shell__sub">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</div>
+        </div>
+        <button data-action="openCommandPalette" class="overview-entry-shell__action">명령 팔레트</button>
+      </div>
+      <div id="topProjectsList" class="overview-project-list">
+        <div class="overview-project-empty dots">로딩 중</div>
+      </div>
+    </div>`);
+}
+
+function renderOverviewProductivityPreview() {
+  const periods = overviewState.periods || {};
+  const day = periods.day || {};
+  const week = periods.week || {};
+  const month = periods.month || {};
+  const forecast = overviewState.forecast || {};
+  const dailyTone = overviewStatusTone(overviewState.plan?.daily?.percentage || 0);
+  const weeklyTone = overviewStatusTone(overviewState.plan?.weekly?.percentage || 0);
+  overviewSetHtml('overviewProductivityPreviewBody', `
+    <div class="grid gap-3">
+      <article class="rounded-[24px] border border-white/[0.07] bg-white/[0.03] p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Period usage</div>
+            <div class="mt-1 text-sm font-bold text-white/90">오늘 · 이번 주 · 이번 달</div>
+          </div>
+          <span class="overview-region-chip overview-region-chip--amber">periods</span>
+        </div>
+        <div class="mt-4 grid gap-2 sm:grid-cols-3">
+          <div class="rounded-[20px] border border-white/[0.06] bg-white/[0.02] p-3">
+            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Day</div>
+            <div class="mt-1 text-lg font-extrabold text-white/92">${fmt$(day.cost || 0)}</div>
+            <div class="mt-1 text-[11px] text-white/45">${fmtN(day.messages || 0)}건 · 캐시 ${fmtTok(day.cache_read_tokens || 0)}</div>
+          </div>
+          <div class="rounded-[20px] border border-white/[0.06] bg-white/[0.02] p-3">
+            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Week</div>
+            <div class="mt-1 text-lg font-extrabold text-white/92">${fmt$(week.cost || 0)}</div>
+            <div class="mt-1 text-[11px] text-white/45">${fmtN(week.messages || 0)}건 · ${overviewResetLabel(week.reset_at)}</div>
+          </div>
+          <div class="rounded-[20px] border border-white/[0.06] bg-white/[0.02] p-3">
+            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Month</div>
+            <div class="mt-1 text-lg font-extrabold text-white/92">${fmt$(month.cost || 0)}</div>
+            <div class="mt-1 text-[11px] text-white/45">${fmtN(month.messages || 0)}건 · 캐시 ${fmtTok(month.cache_read_tokens || 0)}</div>
+          </div>
+        </div>
+      </article>
+      <article class="rounded-[24px] border border-white/[0.07] bg-white/[0.03] p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Forecast burn-out</div>
+            <div class="mt-1 text-sm font-bold text-white/90">예측과 남은 시간</div>
+          </div>
+          <span class="overview-region-chip overview-region-chip--cyan">forecast</span>
+        </div>
+        <div class="mt-4 grid gap-2">
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">월말 예측</span>
+            <span class="font-bold text-white/90">${fmt$(forecast.projected_eom_cost || 0)}</span>
+          </div>
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">일평균</span>
+            <span class="font-bold text-white/90">${fmt$(forecast.avg_cost_per_day || 0)}</span>
+          </div>
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">Burn-out</span>
+            <span class="font-bold ${dailyTone === 'danger' ? 'text-red-400/90' : dailyTone === 'warning' ? 'text-amber-300/90' : 'text-emerald-300/90'}">${overviewDurationLabel(forecast.daily_budget_burnout_seconds)}</span>
+          </div>
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">주간 Burn-out</span>
+            <span class="font-bold ${weeklyTone === 'danger' ? 'text-red-400/90' : weeklyTone === 'warning' ? 'text-amber-300/90' : 'text-emerald-300/90'}">${overviewDurationLabel(forecast.weekly_budget_burnout_seconds)}</span>
+          </div>
+        </div>
+      </article>
+    </div>`);
+}
+
+function renderOverviewReportingPreview() {
+  const lastUpdated = state.lastUpdated || {};
+  const usage = overviewState.usage || {};
+  const byRole = usage.by_role || {};
+  const topSession = (usage.top_sessions || [])[0];
+  overviewSetHtml('overviewReportingPreviewBody', `
+    <div class="grid gap-3">
+      <article class="rounded-[24px] border border-white/[0.07] bg-white/[0.03] p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Source freshness</div>
+            <div class="mt-1 text-sm font-bold text-white/90">업데이트 타임라인</div>
+          </div>
+          <span class="overview-region-chip overview-region-chip--cyan">fresh</span>
+        </div>
+        <div class="mt-4 grid gap-2">
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">stats</span>
+            <span class="font-bold text-white/90">${esc(overviewRelativeTime(lastUpdated.stats ? new Date(lastUpdated.stats).toISOString() : null))}</span>
+          </div>
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">periods</span>
+            <span class="font-bold text-white/90">${esc(overviewRelativeTime(lastUpdated.periods ? new Date(lastUpdated.periods).toISOString() : null))}</span>
+          </div>
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">forecast</span>
+            <span class="font-bold text-white/90">${esc(overviewRelativeTime(lastUpdated.forecast ? new Date(lastUpdated.forecast).toISOString() : null))}</span>
+          </div>
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">projects</span>
+            <span class="font-bold text-white/90">${esc(overviewRelativeTime(lastUpdated.topProjects ? new Date(lastUpdated.topProjects).toISOString() : null))}</span>
+          </div>
+        </div>
+      </article>
+      <article class="rounded-[24px] border border-white/[0.07] bg-white/[0.03] p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Usage mix</div>
+            <div class="mt-1 text-sm font-bold text-white/90">최근 활동 요약</div>
+          </div>
+          <span class="overview-region-chip overview-region-chip--emerald">mix</span>
+        </div>
+        <div class="mt-4 grid gap-2">
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">sessions</span>
+            <span class="font-bold text-white/90">${fmtN(usage.sessions || 0)}세션</span>
+          </div>
+          <div class="flex items-center justify-between rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <span class="text-white/45">role mix</span>
+            <span class="font-bold text-white/90">user ${fmtN(byRole.user || 0)} · assistant ${fmtN(byRole.assistant || 0)} · tool ${fmtN(byRole.tool || 0)} · agent ${fmtN(byRole.agent || 0)}</span>
+          </div>
+          <div class="rounded-[18px] border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px]">
+            <div class="text-white/45">latest active</div>
+            <div class="mt-1 font-bold text-white/90">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
+            <div class="mt-1 text-white/45">${esc(topSession ? `${topSession.project_name || '—'} · ${fmtN(topSession.message_count || 0)} messages` : 'no recent sessions')}</div>
+          </div>
+        </div>
+      </article>
     </div>`);
 }
 
@@ -405,9 +643,14 @@ function renderTopProjects(projects) {
 }
 
 function renderOverviewConsole() {
-  renderOverviewKpi();
-  renderOverviewAlerts();
-  renderOverviewFlow();
+  renderOverviewAxisGrid();
+  renderOverviewActionGrid();
+  renderOverviewOpsSummary();
+  renderOverviewProductivitySummary();
+  renderOverviewReportingSummary();
+  renderOverviewOpsPreview();
+  renderOverviewProductivityPreview();
+  renderOverviewReportingPreview();
 }
 
 function loadOverviewDashboard() {
