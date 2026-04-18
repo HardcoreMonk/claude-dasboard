@@ -6,7 +6,7 @@
 
 ## 맥락
 
-Claude Code 세션 데이터를 저장할 DB가 필요. 선택지: PostgreSQL, MySQL, SQLite, DuckDB.
+Codex CLI 세션 데이터를 저장할 DB가 필요. 선택지: PostgreSQL, MySQL, SQLite, DuckDB.
 
 ## 결정
 

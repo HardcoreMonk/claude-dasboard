@@ -24,7 +24,7 @@ def test_save_and_load_state(tmp_path):
     """Round-trip: save_state then load_state recovers the same data."""
     state_file = tmp_path / 'state.json'
     state = {
-        '/home/user/.claude/projects/demo/s1.jsonl': {
+        '/home/user/.codex/projects/demo/s1.jsonl': {
             'last_line': 42,
             'mtime': 1700000000.0,
             'size': 8192,

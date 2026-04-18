@@ -175,7 +175,7 @@ def test_ingest_valid_records(client):
     r = client.post('/api/ingest',
                      json={
                          'node_id': 'ingest-node',
-                         'file_path': '/home/user/.claude/projects/demo/session.jsonl',
+                         'file_path': '/home/user/.codex/projects/demo/session.jsonl',
                          'records': [record],
                      },
                      headers={'X-Ingest-Key': key})
@@ -215,7 +215,7 @@ def test_ingest_creates_session(client):
     client.post('/api/ingest',
                 json={
                     'node_id': 'sess-node',
-                    'file_path': '/home/user/.claude/projects/rp/session.jsonl',
+                    'file_path': '/home/user/.codex/projects/rp/session.jsonl',
                     'records': [record],
                 },
                 headers={'X-Ingest-Key': key})

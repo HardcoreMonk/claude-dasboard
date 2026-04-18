@@ -6,19 +6,19 @@
 
 ## 맥락
 
-다른 서버의 `~/.claude/projects/` JSONL 데이터를 중앙 대시보드에 수집해야 함. 3가지 방식 검토:
+다른 서버의 `~/.codex/projects/` JSONL 데이터를 중앙 대시보드에 수집해야 함. 3가지 방식 검토:
 - A) rsync로 원격 파일 동기화
 - B) 원격 경량 에이전트가 HTTP push
 - C) 각 서버에서 대시보드 운영 후 DB 머지
 
 ## 결정
 
-**방식 B** — `collector.py` 경량 에이전트.
+**방식 B** — `codex_collector.py` 경량 에이전트.
 
 ## 설계
 
 ```
-[원격] collector.py → JSONL 감시 → POST /api/ingest (X-Ingest-Key) → [대시보드] process_record(source_node=node_id)
+[원격] codex_collector.py → JSONL 감시 → POST /api/ingest (X-Ingest-Key) → [대시보드] process_record(source_node=node_id)
 ```
 
 ## 근거

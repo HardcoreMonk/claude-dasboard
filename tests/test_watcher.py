@@ -131,17 +131,17 @@ def test_constructor_defaults_to_noop_metrics():
 
 
 def test_codex_watch_files_include_codex_only(tmp_path, monkeypatch):
-    claude_root = tmp_path / '.claude' / 'projects'
-    claude_root.mkdir(parents=True)
-    claude_log = claude_root / 'session.jsonl'
-    claude_log.write_text('{"type":"assistant"}\n', encoding='utf-8')
+    legacy_root = tmp_path / '.legacy' / 'projects'
+    legacy_root.mkdir(parents=True)
+    legacy_log = legacy_root / 'session.jsonl'
+    legacy_log.write_text('{"type":"assistant"}\n', encoding='utf-8')
     codex_log = tmp_path / '.codex' / 'projects' / 'demo' / 'session.jsonl'
     codex_log.parent.mkdir(parents=True)
     codex_log.write_text('{"type":"message"}\n', encoding='utf-8')
 
     files = watcher._iter_watch_files(tmp_path)
 
-    assert claude_log not in files
+    assert legacy_log not in files
     assert codex_log in files
 
 
@@ -182,11 +182,12 @@ def test_process_file_recovers_after_truncation(tmp_path, monkeypatch):
     monkeypatch.setattr(database, 'DB_PATH', db_path)
     database.init_db()
 
-    file_path = tmp_path / 'session.jsonl'
+    file_path = tmp_path / '.codex' / 'projects' / 'demo' / 'session.jsonl'
+    file_path.parent.mkdir(parents=True)
     file_path.write_text(
         '\n'.join([
-            '{"type":"assistant","sessionId":"s1","uuid":"u1","timestamp":"2026-04-16T10:00:00Z","cwd":"/home/user/projects/demo","message":{"model":"claude-opus-4-6","usage":{"input_tokens":1},"content":[{"type":"text","text":"first"}]}}',
-            '{"type":"assistant","sessionId":"s1","uuid":"u2","timestamp":"2026-04-16T10:01:00Z","cwd":"/home/user/projects/demo","message":{"model":"claude-opus-4-6","usage":{"input_tokens":1},"content":[{"type":"text","text":"second"}]}}',
+            '{"type":"message","sessionId":"codex-s1","timestamp":"2026-04-16T10:00:00Z","project_path":"/tmp/codex-demo","role":"assistant","content":"first"}',
+            '{"type":"message","sessionId":"codex-s1","timestamp":"2026-04-16T10:01:00Z","project_path":"/tmp/codex-demo","role":"assistant","content":"second"}',
         ]) + '\n',
         encoding='utf-8',
     )
@@ -198,7 +199,7 @@ def test_process_file_recovers_after_truncation(tmp_path, monkeypatch):
     assert len(first['records']) == 2
 
     file_path.write_text(
-        '{"type":"assistant","sessionId":"s1","uuid":"u3","timestamp":"2026-04-16T10:02:00Z","cwd":"/home/user/projects/demo","message":{"model":"claude-opus-4-6","usage":{"input_tokens":1},"content":[{"type":"text","text":"rewritten"}]}}\n',
+        '{"type":"message","sessionId":"codex-s1","timestamp":"2026-04-16T10:02:00Z","project_path":"/tmp/codex-demo","role":"assistant","content":"rewritten"}\n',
         encoding='utf-8',
     )
 
@@ -213,8 +214,8 @@ def test_process_file_recovers_after_truncation(tmp_path, monkeypatch):
             (str(file_path),),
         ).fetchone()
         count = db.execute(
-            'SELECT COUNT(*) AS n FROM messages WHERE session_id = ?',
-            ('s1',),
+            'SELECT COUNT(*) AS n FROM codex_messages WHERE session_id = ?',
+            ('codex-s1',),
         ).fetchone()
 
     assert state['last_line'] == 1
@@ -251,10 +252,6 @@ def test_process_file_routes_codex_logs_to_codex_storage(tmp_path, monkeypatch):
         'SELECT COUNT(*) AS n FROM codex_messages WHERE session_id = ?',
         ('codex-s1',),
     ).fetchone()
-    legacy_count = conn.execute(
-        'SELECT COUNT(*) AS n FROM messages WHERE session_id = ?',
-        ('codex-s1',),
-    ).fetchone()
     session_row = conn.execute(
         'SELECT message_count, user_message_count FROM codex_sessions WHERE id = ?',
         ('codex-s1',),
@@ -262,7 +259,6 @@ def test_process_file_routes_codex_logs_to_codex_storage(tmp_path, monkeypatch):
     conn.close()
 
     assert codex_count['n'] == 3
-    assert legacy_count['n'] == 0
     assert session_row['message_count'] == 3
     assert session_row['user_message_count'] == 1
 

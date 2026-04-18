@@ -6,7 +6,7 @@
 
 ## 맥락
 
-Claude API 비용을 DB에 저장해야 함. 선택지: float, DECIMAL, integer micro-dollars.
+Codex 런타임 비용 메타데이터를 DB에 저장해야 함. 선택지: float, DECIMAL, integer micro-dollars.
 
 ## 결정
 
