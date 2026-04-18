@@ -15,7 +15,7 @@ Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간
 |------|------|
 | 백엔드 | Python 3.12, FastAPI, uvicorn, watchdog |
 | 저장소 | SQLite WAL + FTS5, micro-dollar 정수 비용, v14 스키마 |
-| 프런트 | esbuild 번들 (198KB) + Tailwind v3 빌드 (51KB) + Pretendard + Chart.js |
+| 프런트 | esbuild 번들 (222KB) + Tailwind v3 빌드 (60KB) + Pretendard + Chart.js. SPA 하단 nav + 우측 유틸 pill 2-cluster 구조 |
 | 테스트 | 174 pytest (10초), CI: ruff + bandit + pip-audit + esbuild |
 
 ## 빠른 시작

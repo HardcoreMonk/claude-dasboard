@@ -232,7 +232,7 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
     });
   }
 
-  setChart('timeline', new Chart(canvas, {
+  renderChart('timeline', 'chartTimeline', {
     data: { labels: visibleProjects, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
@@ -314,7 +314,7 @@ function _renderTimelineChart(data, dateFrom, dateTo) {
       id: 'parentChildLinks',
       afterDatasetsDraw: (chart) => _drawParentLinks(chart, barMeta),
     }],
-  }));
+  });
 
   _renderTimelineLegend(sessions, data.truncated, projects.length, collapsedCount, concurrentZones.length);
 }
@@ -893,12 +893,11 @@ function _renderTrendChart(thisWeekData, lastWeekData) {
   const thisData = aggregate(thisWeekData), lastData = aggregate(lastWeekData);
   const labels = ['\uC6D4', '\uD654', '\uC218', '\uBAA9', '\uAE08', '\uD1A0', '\uC77C'];
 
-  destroyChart('trend');
   const canvas = document.getElementById('chartTrend');
   if (!canvas) return;
   const tc = themeColors();
 
-  setChart('trend', new Chart(canvas, {
+  renderChart('trend', 'chartTrend', {
     type: 'bar',
     data: { labels, datasets: [
       { label: '\uC774\uBC88 \uC8FC', data: thisData, backgroundColor: 'rgba(52,211,153,0.35)', borderColor: CC.emerald, borderWidth: 1, borderRadius: 3 },
@@ -912,7 +911,7 @@ function _renderTrendChart(thisWeekData, lastWeekData) {
       },
       scales: { x: { grid: grd(), ticks: tck() }, y: { grid: grd(), ticks: { ...tck(), callback: v => '$' + v.toFixed(2) } } },
     },
-  }));
+  });
 }
 
 

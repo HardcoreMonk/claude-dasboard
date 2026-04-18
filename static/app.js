@@ -3146,9 +3146,8 @@ function renderProjectDailyChart(daily) {
   const labels = sorted.map(d => d.date ? d.date.slice(5) : '');
   const costs = sorted.map(d => Number(d.cost) || 0);
   const msgs = sorted.map(d => Number(d.messages) || 0);
-  // Destroy any prior instance on the same canvas (modal reopened)
-  if (state.charts.projDaily) { try { state.charts.projDaily.destroy(); } catch {} state.charts.projDaily = null; }
-  state.charts.projDaily = new Chart(canvas, {
+  // Use renderChart — handles destroy + Canvas.getChart safety net + state tracking.
+  renderChart('projDaily', 'projDailyChart', {
     type: 'bar',
     data: {
       labels,
@@ -3220,6 +3219,10 @@ function renderProjectDailyChart(daily) {
     },
   });
 }
+
+// Alias so `state.charts.projDaily` references still work (charts.js
+// refreshChartsForTheme uses `getChart('projDaily')` which expects same key).
+// renderChart already stores via setChart, so this is compatible.
 
 function renderProjectSessionsTab() {
   if (!projectData) { document.getElementById('projTabContent').innerHTML = '<div class="text-center text-white/25 text-xs py-12">데이터 없음</div>'; return; }
