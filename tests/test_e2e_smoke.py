@@ -289,6 +289,29 @@ def test_executive_landing_positions_codex_as_reporting_brief(e2e_client):
     assert '주간 변화' in html
 
 
+@pytest.mark.parametrize(
+    'path',
+    ['/', '/landing/ops', '/landing/team', '/landing/executive'],
+)
+def test_codex_dashboard_identity_is_shared_across_shell_and_landing_pages(e2e_client, path):
+    html = e2e_client.get(path).text
+
+    assert 'Codex Dashboard' in html
+    if path == '/':
+        assert '운영 / 생산성 / 보고' in html
+    else:
+        assert '로컬에서 바로 실행' in html
+
+
+def test_overview_keeps_balanced_portal_copy(e2e_client):
+    html = e2e_client.get('/').text
+
+    assert '운영 / 생산성 / 보고' in html
+    assert 'Operations summary' not in html
+    assert 'Productivity summary' not in html
+    assert 'Reporting summary' not in html
+
+
 def test_overview_balanced_portal_regions_exist(e2e_client):
     html = e2e_client.get('/').text
     css = Path('static/app.css').read_text()
@@ -343,6 +366,22 @@ def test_codex_branding_is_visible_in_shell_and_login(e2e_client):
     assert 'Codex Usage Dashboard' in login_html
     assert 'Codex Usage Dashboard' in start_script
     assert 'Claude Usage Dashboard' not in start_script
+
+
+def test_dashboard_and_landing_share_codex_identity(e2e_client):
+    shell = e2e_client.get('/').text
+    ops = e2e_client.get('/landing/ops').text
+    team = e2e_client.get('/landing/team').text
+    executive = e2e_client.get('/landing/executive').text
+
+    assert 'Codex Dashboard' in shell
+    assert 'Codex Dashboard' in ops
+    assert 'Codex Dashboard' in team
+    assert 'Codex Dashboard' in executive
+    assert '운영' in shell and '생산성' in shell and '보고' in shell
+    assert '로컬에서 바로 실행' in ops
+    assert '로컬에서 바로 실행' in team
+    assert '로컬에서 바로 실행' in executive
 
 
 @pytest.mark.parametrize(

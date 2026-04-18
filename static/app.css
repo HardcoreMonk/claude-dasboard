@@ -162,6 +162,18 @@ body.theme-light .dashboard-shell::before {
   background: linear-gradient(180deg, rgba(15,23,42,.03), transparent 30%);
 }
 
+.overview-balance-line {
+  margin: 0 0 1rem;
+  color: rgba(255,255,255,.64);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+body.theme-light .overview-balance-line {
+  color: rgba(15,23,42,.58);
+}
+
 /* ── Tool blocks (conversation) ── */
 .tool-hdr { cursor:pointer; }
 .tool-hdr .arr { transition:transform .3s; font-size:13px; }
