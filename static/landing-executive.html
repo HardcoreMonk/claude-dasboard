@@ -3,12 +3,595 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light" />
   <title>Executive Signal - Codex Dashboard</title>
+  <style>
+    :root {
+      --bg: #f5f2ea;
+      --bg-soft: #fbf8f2;
+      --panel: rgba(255, 255, 255, 0.78);
+      --panel-strong: rgba(255, 255, 255, 0.94);
+      --line: rgba(36, 42, 56, 0.11);
+      --line-strong: rgba(36, 42, 56, 0.18);
+      --text: #182130;
+      --muted: #5b6473;
+      --faint: #7d8696;
+      --accent: #1f5cff;
+      --accent-2: #1e8b6a;
+      --accent-3: #9d5ce0;
+      --shadow: 0 24px 70px rgba(31, 39, 53, 0.12);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 10% 12%, rgba(31, 92, 255, 0.09), transparent 22%),
+        radial-gradient(circle at 88% 14%, rgba(30, 139, 106, 0.08), transparent 20%),
+        radial-gradient(circle at 72% 88%, rgba(157, 92, 224, 0.08), transparent 24%),
+        linear-gradient(180deg, #f8f5ee 0%, var(--bg) 100%);
+      color: var(--text);
+      font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+      letter-spacing: -0.02em;
+    }
+
+    body {
+      min-height: 100vh;
+      padding: 28px;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(24, 33, 48, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(24, 33, 48, 0.025) 1px, transparent 1px);
+      background-size: 52px 52px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.88), transparent 84%);
+      opacity: 0.65;
+    }
+
+    .wrap {
+      position: relative;
+      max-width: 1220px;
+      margin: 0 auto;
+    }
+
+    .page {
+      position: relative;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 34px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.7), rgba(255,255,255,0.42)),
+        linear-gradient(180deg, #fdfbf6, #f4efe5);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 28px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .mark {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 30%, #fff, var(--accent) 44%, rgba(31,92,255,0.15) 76%);
+      box-shadow: 0 0 0 6px rgba(31, 92, 255, 0.08);
+    }
+
+    .meta {
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.55);
+      color: var(--faint);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .hero-copy,
+    .hero-side,
+    .brief-grid,
+    .close-out {
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.64);
+    }
+
+    .hero-copy {
+      padding: 34px;
+      background:
+        radial-gradient(circle at 100% 0%, rgba(31,92,255,0.12), transparent 28%),
+        radial-gradient(circle at 0% 100%, rgba(30,139,106,0.09), transparent 30%),
+        rgba(255,255,255,0.68);
+    }
+
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 {
+      font-family: "Iowan Old Style", "Baskerville", "Noto Serif KR", Georgia, serif;
+      letter-spacing: -0.04em;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(44px, 6.8vw, 82px);
+      line-height: 0.95;
+    }
+
+    .lede {
+      margin: 18px 0 0;
+      max-width: 60ch;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.75;
+    }
+
+    .hero-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .chip {
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.64);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .btn:hover { transform: translateY(-1px); }
+
+    .btn-primary {
+      color: white;
+      background: linear-gradient(135deg, var(--accent), #1547c9);
+      box-shadow: 0 16px 34px rgba(31, 92, 255, 0.18);
+    }
+
+    .btn-secondary {
+      color: var(--text);
+      border-color: var(--line-strong);
+      background: rgba(255,255,255,0.72);
+    }
+
+    .hero-side {
+      display: grid;
+      gap: 14px;
+      padding: 20px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.82), rgba(248, 245, 237, 0.95));
+    }
+
+    .signal {
+      padding: 18px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+    }
+
+    .signal-label {
+      margin: 0 0 10px;
+      color: var(--faint);
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    .signal-value {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.15;
+      letter-spacing: -0.05em;
+    }
+
+    .signal-note {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+    }
+
+    .metric dt {
+      color: var(--faint);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .metric dd {
+      margin: 8px 0 0;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+    }
+
+    .brief-grid {
+      margin-top: 22px;
+      padding: 22px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    .section-head span,
+    .timeline .stamp,
+    .close-out .note {
+      color: var(--faint);
+      font-size: 13px;
+    }
+
+    .narrative {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .story {
+      padding: 18px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.82);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(31, 92, 255, 0.09);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .story h3 {
+      margin: 14px 0 10px;
+      font-size: 22px;
+      line-height: 1.25;
+    }
+
+    .story p,
+    .timeline p,
+    .close-out p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .story ul {
+      margin: 16px 0 0;
+      padding-left: 18px;
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 14px;
+    }
+
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 160px minmax(0, 1fr) 140px;
+      gap: 14px;
+      align-items: center;
+      padding: 16px 18px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.76);
+    }
+
+    .timeline-row strong {
+      font-size: 16px;
+    }
+
+    .bar {
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(24, 33, 48, 0.08);
+      overflow: hidden;
+    }
+
+    .bar > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+
+    .trend-1 { width: 68%; }
+    .trend-2 { width: 52%; }
+    .trend-3 { width: 41%; }
+
+    .close-out {
+      margin-top: 22px;
+      padding: 22px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .close-out h2 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    .footnote {
+      margin-top: 12px;
+      color: var(--faint);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    @media (max-width: 980px) {
+      body { padding: 18px; }
+      .page { padding: 18px; border-radius: 26px; }
+      .hero, .narrative, .metric-grid, .close-out, .timeline-row {
+        grid-template-columns: 1fr;
+      }
+      .topbar, .section-head, .close-out {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+
+    @media (max-width: 640px) {
+      h1 { font-size: clamp(36px, 14vw, 56px); }
+      .lede { font-size: 16px; }
+      .hero-actions { flex-direction: column; }
+      .btn { width: 100%; }
+      .timeline-row { gap: 10px; }
+    }
+  </style>
 </head>
 <body>
-  <main>
-    <h1>Executive Signal</h1>
-    <p>로컬에서 바로 실행</p>
-  </main>
+  <div class="wrap">
+    <main class="page">
+      <div class="topbar">
+        <div class="brand"><span class="mark"></span>Codex Dashboard · Executive Signal</div>
+        <div class="meta">leadership brief · cost trend · forecast · model mix</div>
+      </div>
+
+      <section class="hero" aria-labelledby="executive-signal-title">
+        <div class="hero-copy">
+          <p class="eyebrow">EXECUTIVE SIGNAL BRIEF</p>
+          <h1 id="executive-signal-title">Codex를 리더십이 바로 읽는 운영 브리프로 정리합니다.</h1>
+          <p class="lede">
+            이 페이지는 주간 비용 추세, forecast, 모델 사용량과 분포를 한 장의 브리프로 묶습니다.
+            세션의 세부 로그를 길게 따라가지 않아도, 경영진이 이번 주 변화와 다음 주 리스크를 바로
+            읽을 수 있게 만드는 executive landing 입니다.
+          </p>
+
+          <div class="hero-chips" aria-label="핵심 신호">
+            <span class="chip">비용 추세</span>
+            <span class="chip">forecast</span>
+            <span class="chip">model usage</span>
+            <span class="chip">distribution</span>
+          </div>
+
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="/" aria-label="로컬에서 바로 실행">로컬에서 바로 실행</a>
+            <a class="btn btn-secondary" href="#brief">주간 브리프 보기</a>
+          </div>
+        </div>
+
+        <aside class="hero-side" aria-label="경영 요약">
+          <div class="signal">
+            <p class="signal-label">current brief</p>
+            <p class="signal-value">Leadership view for Codex Dashboard</p>
+            <p class="signal-note">
+              운영 신호를 보고용 언어로 바꾸고, 의사결정자가 한 번에 읽을 수 있게 요약합니다.
+            </p>
+          </div>
+          <dl class="metric-grid">
+            <div class="metric">
+              <dt>cost trend</dt>
+              <dd>상승 완만</dd>
+            </div>
+            <div class="metric">
+              <dt>forecast</dt>
+              <dd>안정권</dd>
+            </div>
+            <div class="metric">
+              <dt>model mix</dt>
+              <dd>분산</dd>
+            </div>
+          </dl>
+          <div class="signal">
+            <p class="signal-label">weekly change</p>
+            <p class="signal-note">
+              이번 주는 비용이 급격히 튀지 않았고, forecast는 예산 경계선 안에 있습니다.
+              모델 사용량은 고정형이 아니라 업무별로 분포되어 있어, 집중 리스크보다 운영 균형이 더 큰 이야기입니다.
+            </p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="brief-grid" id="brief" aria-labelledby="brief-title">
+        <div class="section-head">
+          <h2 id="brief-title">주간 리더십 브리프</h2>
+          <span>비용 추세 / forecast / model usage / distribution</span>
+        </div>
+
+        <div class="narrative">
+          <article class="story">
+            <span class="tag">Cost</span>
+            <h3>비용은 올라가지만, 속도는 관리 가능한 범위입니다.</h3>
+            <p>
+              이번 주 cost trend는 완만한 상승입니다. 증가 폭은 있었지만 급격한 변곡은 아니며,
+              실행량 대비 지출이 설명 가능한 수준으로 유지되고 있습니다.
+            </p>
+            <ul>
+              <li>주간 변화는 작지만 지속적입니다</li>
+              <li>예산 경계선을 넘는 패턴은 아직 보이지 않습니다</li>
+              <li>리더십 관점에서는 추세 확인이 우선입니다</li>
+            </ul>
+          </article>
+
+          <article class="story">
+            <span class="tag">Forecast</span>
+            <h3>Forecast는 현재 흐름을 기준으로 안정권에 있습니다.</h3>
+            <p>
+              forecast는 다음 주에도 같은 속도로 가정하면 예산 내에 머무를 가능성이 높습니다.
+              필요한 것은 큰 조정보다, 변곡점이 생기는 순간을 빨리 잡는 체계입니다.
+            </p>
+            <ul>
+              <li>주간 예측은 현재 패턴을 따라갑니다</li>
+              <li>급격한 오버런 신호는 아직 약합니다</li>
+              <li>변화가 커질 때만 개입하면 됩니다</li>
+            </ul>
+          </article>
+
+          <article class="story">
+            <span class="tag">Model Mix</span>
+            <h3>모델 사용량과 분포는 특정 모델 쏠림보다 균형이 핵심입니다.</h3>
+            <p>
+              model usage distribution을 보면 작업별로 분포가 갈라져 있어,
+              한 모델에만 과도하게 의존하는 구조는 아닙니다. 이 페이지는 그 균형을 경영진이 바로 읽게 만듭니다.
+            </p>
+            <ul>
+              <li>모델 사용량은 업무 유형에 따라 달라집니다</li>
+              <li>distribution은 리스크와 효율을 함께 보여줍니다</li>
+              <li>기본 질문은 “어디에 쓰였나”보다 “어떻게 분산됐나”입니다</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="timeline" aria-label="주간 변화 차트">
+          <div class="timeline-row">
+            <div>
+              <div class="stamp">Mon → Wed</div>
+              <strong>비용 추세</strong>
+            </div>
+            <div class="bar" aria-hidden="true"><span class="trend-1"></span></div>
+            <div class="mono">+3.8%</div>
+          </div>
+          <div class="timeline-row">
+            <div>
+              <div class="stamp">Wed → Fri</div>
+              <strong>forecast</strong>
+            </div>
+            <div class="bar" aria-hidden="true"><span class="trend-2"></span></div>
+            <div class="mono">안정</div>
+          </div>
+          <div class="timeline-row">
+            <div>
+              <div class="stamp">All week</div>
+              <strong>model usage distribution</strong>
+            </div>
+            <div class="bar" aria-hidden="true"><span class="trend-3"></span></div>
+            <div class="mono">균형</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="close-out" aria-labelledby="close-out-title">
+        <div>
+          <h2 id="close-out-title">Codex Dashboard를 리더십 브리프로 여는 페이지입니다.</h2>
+          <p>
+            <span class="mono">localhost:8617</span>에서 바로 확인하고,
+            비용 추세, forecast, model mix를 한 번에 읽는 executive signal 흐름을 유지합니다.
+          </p>
+          <p class="footnote">
+            이 페이지는 단일 HTML 파일로 동작하며, JavaScript 없이도 로컬 실행 CTA와 보고용 내러티브가 유지됩니다.
+          </p>
+        </div>
+        <a class="btn btn-primary" href="/" aria-label="로컬에서 바로 실행">로컬에서 바로 실행</a>
+      </section>
+    </main>
+  </div>
 </body>
 </html>
