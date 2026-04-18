@@ -113,7 +113,7 @@ def test_get_project_info_prefers_record_cwd():
 
 
 def test_get_project_info_falls_back_without_cwd():
-    # No record → heuristic path (won't match CLAUDE_PROJECTS, lands in except)
+    # No record → heuristic path (won't match PROJECTS_ROOT, lands in except)
     path, name = p.get_project_info('/tmp/fake.jsonl', None)
     assert path == '/tmp'
     assert name == 'tmp'

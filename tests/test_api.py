@@ -162,8 +162,8 @@ def auth_api_client(tmp_path, monkeypatch):
 
 def _boot_api_client(tmp_path, monkeypatch, dashboard_password=None):
     db_file = tmp_path / 'api.db'
-    fake_claude_projects = tmp_path / 'claude-projects'
-    fake_claude_projects.mkdir()
+    fake_projects_root = tmp_path / 'projects'
+    fake_projects_root.mkdir()
 
     if dashboard_password is None:
         monkeypatch.delenv('DASHBOARD_PASSWORD', raising=False)
@@ -192,7 +192,7 @@ def _boot_api_client(tmp_path, monkeypatch, dashboard_password=None):
     monkeypatch.setattr(database, 'DB_PATH', db_file)
 
     import codex_parser as app_parser
-    monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_claude_projects)
+    monkeypatch.setattr(app_parser, 'PROJECTS_ROOT', fake_projects_root)
 
     import main  # noqa: F401 — imported for its side effect of app construction
 
@@ -1892,7 +1892,7 @@ def test_api_works_with_auth_cookie(tmp_path, monkeypatch):
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_file)
     import codex_parser as app_parser
-    monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
+    monkeypatch.setattr(app_parser, 'PROJECTS_ROOT', fake_projects)
     import main
     monkeypatch.setattr(main, '_AUTH_PW', _AUTH_PASSWORD)
     database.init_db()

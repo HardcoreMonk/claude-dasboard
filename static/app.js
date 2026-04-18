@@ -3271,7 +3271,7 @@ function fmt$(n){
   const frac = Math.abs(n) >= 1 ? 2 : 4;
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: frac, maximumFractionDigits: frac });
 }
-function shortModel(m){if(!m)return'—';return m.replace('claude-','').replace(/-\d{8}$/,'');}
+function shortModel(m){if(!m)return'—';return m.replace(/^[a-z]+-/,'').replace(/-\d{8}$/,'');}
 function trimPath(p){if(!p)return'';return p.split('/').filter(Boolean).slice(-2).join('/');}
 function relTime(ts){if(!ts)return'—';const d=new Date(ts);if(isNaN(d))return ts;const df=Date.now()-d.getTime();if(df<6e4)return'방금';if(df<36e5)return Math.floor(df/6e4)+'분 전';if(df<864e5)return Math.floor(df/36e5)+'시간 전';if(df<6048e5)return Math.floor(df/864e5)+'일 전';return d.toLocaleDateString('ko-KR');}
 function fmtTime(ts){if(!ts)return'—';const d=new Date(ts);if(isNaN(d))return ts;return d.toLocaleString('ko-KR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});}

@@ -313,7 +313,7 @@ body.theme-light :focus-visible {
   outline-color: #047857;
 }
 
-/* claude.ai 소스 토글 & 배지 — 라이트모드 가독성 */
+/* Conversation source toggle — light mode readability */
 body.theme-light .conv-source-btn {
   background: rgba(0,0,0,.04);
   color: rgba(0,0,0,.55);

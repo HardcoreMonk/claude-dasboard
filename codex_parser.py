@@ -1,4 +1,4 @@
-"""Codex and legacy JSONL parsing helpers used by runtime ingest paths."""
+"""Codex JSONL parsing helpers used by runtime ingest paths."""
 from __future__ import annotations
 
 import json
@@ -13,7 +13,7 @@ from typing import Any, Generator, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
-CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'
+PROJECTS_ROOT = Path.home() / '.codex' / 'projects'
 CONTENT_MAX_BYTES = 100_000
 
 _stats_lock = threading.Lock()
@@ -158,7 +158,7 @@ def project_info_from_cwd(cwd: str) -> tuple[str, str]:
 def _fallback_project_from_filepath(file_path: str) -> tuple[str, str]:
     path = Path(file_path)
     try:
-        rel = path.relative_to(CLAUDE_PROJECTS)
+        rel = path.relative_to(PROJECTS_ROOT)
         encoded_dir = rel.parts[0]
         decoded_path = '/' + encoded_dir.lstrip('-').replace('-', '/')
         parts = [part for part in encoded_dir.lstrip('-').split('-') if part]

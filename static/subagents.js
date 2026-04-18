@@ -112,9 +112,9 @@ async function loadSubagentDetails() {
 }
 
 function _renderCodexAgentFallback(subagentStats, codexAgents) {
-  const hasClaudeData = (subagentStats?.totals?.count || 0) > 0;
+  const hasRuntimeData = (subagentStats?.totals?.count || 0) > 0;
   const hasCodexData = (codexAgents?.total_runs || 0) > 0;
-  if (hasClaudeData || !hasCodexData) return;
+  if (hasRuntimeData || !hasCodexData) return;
 
   const byType = document.getElementById('subagentByType');
   const byStop = document.getElementById('subagentByStopReason');
