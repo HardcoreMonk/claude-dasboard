@@ -68,7 +68,7 @@ HTTP routes + 1 WebSocket 을 호스팅.
 | 페이지 | `/features` | Feature Reference HTML 페이지 (인증 우회) |
 | 헬스 | `/api/health` | 서버 상태 + DB 메시지/세션 카운트 |
 | 메트릭 | `/metrics` | Prometheus text format (인증 우회) |
-| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 레거시 세션 CRUD 및 관리용 호환 경로 |
+| 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | Codex 기본 세션 조회/관리 경로. legacy runtime table은 호환 계층으로만 유지 |
 | Codex | `/api/search/messages`, `/api/search/messages/{message_id}/context`, `/api/sessions/{id}/replay`, `/api/codex/sessions`, `/api/codex/sessions/{id}/messages`, `/api/codex/projects/{name}/stats`, `/api/codex/projects/{name}/messages`, `/api/timeline/summary`, `/api/usage/summary`, `/api/agents/summary` | Codex 메시지 검색, 문맥 복기, 세션 리플레이, 프로젝트 상세, 타임라인/사용량/agent 요약 |
 | 프로젝트 | `/api/projects`, `/top`, `/{name}/stats`, `/{name}/messages` | 프로젝트 집계, TOP 5, 상세 |
 | 사용량 | `/api/usage/hourly`, `/daily`, `/periods` | 시계열 토큰/비용 집계 |
@@ -137,6 +137,12 @@ SCHEMA_VERSION = 15
 | `indexed_messages` | `codex_messages` 기준 적재된 메시지 수 |
 
 이 필드는 관리자 화면에서 "Codex 인덱스가 실제로 채워졌는지"를 즉시 확인하는 용도이며, 기존 `counts` 블록은 Claude Code/remote/admin 집계와의 하위 호환을 유지한다.
+
+### Codex-first runtime 기본값
+
+대시보드는 이제 Codex-first runtime 을 기본 경로로 사용한다. 세션 상세, 메시지, 검색, 사용량, 메트릭, chain 은 모두 `codex_projects`, `codex_sessions`, `codex_messages` 기준으로 응답하도록 이동 중이며, Claude-era `sessions/messages` 테이블은 호환 계층으로만 남아 있다.
+
+startup 에서는 `DASHBOARD_ENABLE_LEGACY_RUNTIME=0` 으로 Codex 전용 bootstrap 이 가능하다. 이 모드에서는 primary UI/API 에 필요한 Codex 스키마와 보조 설정 테이블만 생성하고, legacy runtime table 생성은 생략한다.
 
 ### parser.py — JSONL 파싱 엔진
 

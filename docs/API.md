@@ -74,7 +74,7 @@ curl -i http://127.0.0.1:8617/api/stats
 | GET | `/api/sessions/{id}/messages` | 대화 (limit/offset, subagent는 sidechain 필터 우회) |
 | GET | `/api/sessions/{id}/message-position?message_id=N` | 특정 메시지의 0-based offset 반환 (검색 결과 → 해당 페이지 점프용). 응답: `{position, total, message_id}` |
 | GET | `/api/sessions/{id}/subagents` | spawn한 subagent 목록 + duration |
-| GET | `/api/sessions/{id}/chain?depth=N` | 디스패치 체인 재귀 walk |
+| GET | `/api/sessions/{id}/chain?depth=N` | Codex 보수적 재귀 chain. 루트 세션 + 저장소에서 명시적으로 증명되는 agent-run 자식만 포함 |
 | DELETE | `/api/sessions/{id}` | preview → confirm |
 | POST / DELETE | `/api/sessions/{id}/pin` | 핀 토글 |
 | POST | `/api/sessions/{id}/tags` | 태그 저장 (콤마 구분) |
@@ -94,6 +94,17 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 | GET | `/api/timeline/summary?limit=N&date_from=&date_to=` | 최근 Codex 이벤트 + 세션 요약 |
 | GET | `/api/usage/summary` | Codex 세션/메시지/역할 사용량 요약 |
 | GET | `/api/agents/summary?limit=N` | Codex agent 실행 요약 |
+
+### `/api/sessions/{id}/chain` 의미
+
+`GET /api/sessions/{id}/chain` 은 Codex-only conservative recursion 으로 동작한다.
+
+- 루트 노드는 요청한 세션이다.
+- 1단계 자식은 해당 세션에 저장된 `role='agent'` 메시지들이다.
+- 더 깊은 단계는 Codex 저장소 안에서 부모-자식 관계가 명시적으로 증명될 때만 확장한다.
+- legacy `sessions/messages`를 이용한 텍스트 매칭 복원이나 추론 연결은 수행하지 않는다.
+
+즉, 응답 shape는 유지하지만 트리를 과장하지 않고 “확실히 증명되는 연결만 표시”하는 것이 계약이다.
 
 ## Subagents
 
