@@ -4,7 +4,9 @@ Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간
 다중 서버의 Claude Code 데이터를 중앙 수집하고, claude.ai 웹 대화 export 도 통합 뷰어에서 검색할 수 있다.
 
 ```
-~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 69 routes  →  SPA 브라우저 · 공개 /landing/
+~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 70 routes
+                                                                    ├─ `/` 공개 랜딩 (마케팅 페이지)
+                                                                    └─ `/app` SPA 대시보드 (인증 필요)
                                                                   ↑
                                 [원격 서버] collector.py  →  POST /api/ingest
 ```
@@ -24,7 +26,8 @@ cp .env.example .env          # DASHBOARD_PASSWORD 설정
 ./start.sh                    # .env 로드 → npm build → uvicorn
 ```
 
-`http://localhost:8765` 에서 로그인 후 대시보드 접근.
+- 공개 랜딩: `http://localhost:8765/`
+- 로그인 후 대시보드: `http://localhost:8765/app`
 
 ### 환경변수 (.env)
 

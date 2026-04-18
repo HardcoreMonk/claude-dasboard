@@ -271,7 +271,7 @@ app.add_middleware(
 # track EVERY request (including 401s from auth), register auth FIRST and
 # metrics SECOND. At runtime the order is: metrics → auth → route.
 
-_AUTH_BYPASS = {'/api/health', '/metrics', '/api/ingest', '/api/collector.py',
+_AUTH_BYPASS = {'/', '/api/health', '/metrics', '/api/ingest', '/api/collector.py',
                 '/api/auth/login', '/api/auth/me', '/login', '/features',
                 '/landing', '/landing/'}
 _AUTH_BYPASS_PREFIX = ('/static/', '/landing/')
@@ -400,11 +400,23 @@ async def static_file(path: str):
 
 @app.get("/")
 async def index():
-    # SPA entry: never cache the HTML shell — it contains the ?v=N cache-bust
-    # query strings that point at the current static bundle. If the browser
-    # caches this file, it keeps loading stale asset versions forever.
-    # The referenced /static/* assets themselves stay cacheable under their
-    # own ETag/Last-Modified (immutable per version).
+    # Public home = landing page. Auth-bypassed via _AUTH_BYPASS.
+    # SPA dashboard moved to /app (was /) on 2026-04-18 to split
+    # marketing/front-door from the authenticated app.
+    return FileResponse(
+        LANDING_DIR / 'index.html',
+        headers={'Cache-Control': 'public, max-age=300'},
+    )
+
+
+@app.get("/app")
+@app.get("/app/")
+async def app_spa():
+    # SPA entry (authenticated dashboard). Never cache the HTML shell — it
+    # contains the ?v=N cache-bust query strings that point at the current
+    # static bundle. If the browser caches this file, it keeps loading stale
+    # asset versions forever. The referenced /static/* assets themselves stay
+    # cacheable under their own ETag/Last-Modified (immutable per version).
     return FileResponse(
         STATIC_DIR / 'index.html',
         headers={

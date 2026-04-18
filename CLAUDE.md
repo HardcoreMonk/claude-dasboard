@@ -10,7 +10,7 @@
 
 | 파일 | 역할 |
 |------|------|
-| `main.py` | FastAPI 69 routes + WS + 쿠키 세션 인증 + /api/ingest + /landing/ 공개 + 보존 스케줄러 |
+| `main.py` | FastAPI 70 routes + WS. `/` 공개 랜딩, `/app` SPA (인증), `/api/ingest`, 쿠키 세션 인증, 보존 스케줄러 |
 | `database.py` | SQLite WAL, write/read 분리, v0→v15 마이그레이션 |
 | `parser.py` | JSONL 파싱 (assistant/user/system), 비용 계산, source_node |
 | `watcher.py` | watchdog + safety poll, WatcherMetrics DI |
@@ -143,15 +143,18 @@ npm run dev      # watch 모드
 - 서버가 `.vN` strip하여 실제 파일 서빙
 - 빌드 산출물은 git tracked — 배포 시 Node 불필요
 
-### 공개 랜딩 페이지 (`landing-pages/` → `/landing/`)
+### 공개 랜딩 페이지 (`landing-pages/` → `/` + `/landing/`)
 
-- `/landing`, `/landing/`, `/landing/{path}` 라우트 — `LANDING_DIR` 파일 서빙
-- `_AUTH_BYPASS` + `_AUTH_BYPASS_PREFIX('/landing/')` 로 인증 우회 (공개 페이지)
+- `/` 루트 — `landing-pages/index.html` 서빙 (2026-04-18부터 공개 front door). 기존 `/` SPA는 `/app`으로 이동
+- `/landing`, `/landing/`, `/landing/{path}` — 동일 파일을 다른 경로로도 접근 가능 (레거시 호환 / 명시적 링크용)
+- `/app`, `/app/` — SPA 대시보드 HTML shell (인증 필요)
+- `_AUTH_BYPASS` 에 `/` 추가. `_AUTH_BYPASS_PREFIX('/landing/')` 유지
 - Path traversal guard: `STATIC_DIR` 라우트와 동일 패턴 (resolved path가 `LANDING_DIR` 하위인지 검증)
 - Standalone HTML — Tailwind/Pretendard/Iconify/Instrument Serif/Geist CDN만 의존, `bundle.js` 와 무관
-- SPA(`/`)와 생명주기 분리: 랜딩 변경 시 SPA 캐시버스팅(`.vN`) 불필요
+- SPA(`/app`)와 생명주기 분리: 랜딩 변경 시 SPA 캐시버스팅(`.vN`) 불필요
 - `index.html` 과 `combined.html` 은 동일 파일 (md5 매칭). 수정 시 두 파일 모두 반영 (대체로 `combined.html` 편집 후 `cp` 로 sync)
 - nav 로고(`claude-dashboard`/`cd` 축약)는 `/login` 으로 이동 — 방문자 인증 진입점
+- `/login` 성공 시 `/app` 로 리다이렉트 (기존 `/` 에서 변경)
 
 ## 프런트 수정 규칙
 

@@ -1,6 +1,6 @@
 # REST API
 
-69 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features`, `/landing/*` 는 인증 우회.
+70 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/` (공개 랜딩), `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features`, `/landing/*` 는 인증 우회. SPA 대시보드는 `/app` 에서 서빙 (인증 필요).
 
 ## 자동 생성 스펙 (FastAPI)
 
@@ -24,7 +24,9 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/login` | 로그인 페이지 HTML (인증 우회) |
+| GET | `/` | 공개 랜딩 (= `/landing/` 동일 파일, `landing-pages/index.html`, 인증 우회). 방문자 front door |
+| GET | `/app`, `/app/` | SPA 대시보드 HTML shell (인증 필요). 성공 로그인 후 이동 지점 |
+| GET | `/login` | 로그인 페이지 HTML (인증 우회). 성공 시 `/app` 으로 리다이렉트 |
 | POST | `/api/auth/login` | 로그인. Body: `{password}`. 성공 시 `dash_session` 쿠키 발급 (HMAC 서명, 만료 내장). Rate limit: 5회/분/IP |
 | POST | `/api/auth/logout` | 로그아웃 (`dash_session` 쿠키 삭제) |
 | GET | `/api/auth/me` | 현재 인증 상태 확인. 응답: `{authenticated, auth_required}` |

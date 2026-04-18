@@ -114,7 +114,8 @@ REQUIRED_IDS = [
 
 
 def test_html_shell_has_all_required_ids(e2e_client):
-    r = e2e_client.get('/')
+    # / serves the public landing since 2026-04-18. SPA shell is at /app.
+    r = e2e_client.get('/app')
     assert r.status_code == 200
     assert r.headers.get('cache-control', '').startswith('no-store')
     html = r.text
@@ -128,7 +129,7 @@ def test_html_shell_has_all_required_ids(e2e_client):
 def test_static_modules_load_with_correct_globals(e2e_client):
     """JS bundle (or individual modules) must be fetchable and contain
     expected symbols."""
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
     scripts = re.findall(r'src="(/static/[^"]+\.js)"', html)
     assert scripts, "no JS scripts found in HTML"
 

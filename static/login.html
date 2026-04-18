@@ -152,7 +152,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     });
     const data = await resp.json();
     if (data.ok) {
-      window.location.href = '/';
+      window.location.href = '/app';
       return;
     }
     err.textContent = data.error || 'Invalid password';
@@ -167,7 +167,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 });
 // If already authenticated, redirect to dashboard
 fetch('/api/auth/me').then(r => r.json()).then(d => {
-  if (d.authenticated) window.location.href = '/';
+  if (d.authenticated) window.location.href = '/app';
 });
 </script>
 </body>

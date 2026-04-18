@@ -152,10 +152,18 @@ def test_no_cookie_api_returns_401(auth_client):
 # ─── Middleware redirect vs 401 ──────────────────────────────────────
 
 def test_browser_redirect_to_login(auth_client):
-    r = auth_client.get('/', headers={'Accept': 'text/html'},
+    # / is the public landing (auth bypassed). /app is the SPA and requires auth.
+    r = auth_client.get('/app', headers={'Accept': 'text/html'},
                         follow_redirects=False)
     assert r.status_code == 302
     assert '/login' in r.headers['location']
+
+
+def test_root_public_access(auth_client):
+    # / serves the public landing page without auth (since 2026-04-18).
+    r = auth_client.get('/', follow_redirects=False)
+    assert r.status_code == 200
+    assert '세 가지 서사' in r.text  # landing-pages/index.html marker
 
 
 def test_api_returns_401_not_redirect(auth_client):
