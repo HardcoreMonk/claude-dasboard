@@ -84,11 +84,7 @@
             bg-white/[0.04] backdrop-blur-xl border border-white/10
             shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
   <div class="flex items-center gap-1 text-[12px]">
-    <a href="index.html" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors flex items-center gap-1.5 text-white/50 hover:text-white/80">
-      <iconify-icon icon="solar:arrow-left-linear" width="12"></iconify-icon>
-      <span class="hidden sm:inline">시안 목록</span>
-    </a>
-    <div class="flex items-center gap-1.5 px-3">
+    <div class="flex items-center gap-1.5 px-3 py-1">
       <div class="w-5 h-5 rounded-md bg-gradient-to-br from-accent to-accent/40 flex items-center justify-center">
         <iconify-icon icon="solar:graph-new-up-bold" width="11" class="text-ink"></iconify-icon>
       </div>
@@ -101,8 +97,24 @@
   </div>
 </nav>
 
+<!-- ─── TOP BANNER ─── -->
+<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-36 md:pt-40 pb-10 md:pb-14">
+  <div class="reveal inline-flex items-center gap-2 px-3 py-1 rounded-full border border-accent/30 bg-accent/5 text-accent text-[10px] uppercase tracking-[0.25em] font-semibold mb-6">
+    <iconify-icon icon="solar:palette-bold" width="12"></iconify-icon>
+    Landing Page — Combined
+  </div>
+  <h1 class="reveal reveal-1 font-display font-extrabold text-5xl md:text-6xl lg:text-[86px] tracking-[-0.04em] leading-[1.02]">
+    세 가지 서사,<br>
+    <span class="text-accent">하나의 대시보드.</span>
+  </h1>
+  <p class="reveal reveal-2 text-white/50 text-base md:text-lg max-w-2xl mt-7 leading-relaxed">
+    같은 제품(claude-dashboard)을 세 가지 톤으로 풀어낸 시안을 하나로 합친 통합 랜딩페이지.
+    Local → Team → Proof 서사로 이어집니다.
+  </p>
+</section>
+
 <!-- ─── HERO ─── -->
-<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-36 md:pt-44 pb-20 md:pb-28">
+<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-4 md:pt-8 pb-20 md:pb-28">
   <div class="grid lg:grid-cols-12 gap-10 items-center">
     <!-- Left: editorial statement (A-style) -->
     <div class="lg:col-span-6">
@@ -208,39 +220,6 @@
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ─── METRICS BAR (B) ─── -->
-<section class="border-y border-white/[0.06] bg-white/[0.012]">
-  <div class="max-w-7xl mx-auto px-6 lg:px-12 py-12 md:py-14">
-    <div class="text-[10px] uppercase tracking-[0.3em] text-white/30 font-semibold mb-8">Current Instance — Real Numbers</div>
-    <div class="grid grid-cols-2 md:grid-cols-6 gap-6 md:gap-4 ir">
-      <div>
-        <div class="font-display font-bold text-3xl md:text-4xl tracking-tighter tnum">242,652</div>
-        <div class="text-[10px] uppercase tracking-wider text-white/40 mt-1.5">Messages</div>
-      </div>
-      <div>
-        <div class="font-display font-bold text-3xl md:text-4xl tracking-tighter tnum">1,236</div>
-        <div class="text-[10px] uppercase tracking-wider text-white/40 mt-1.5">Sessions</div>
-      </div>
-      <div>
-        <div class="font-display font-bold text-3xl md:text-4xl tracking-tighter tnum">$61,928</div>
-        <div class="text-[10px] uppercase tracking-wider text-white/40 mt-1.5">누적 비용</div>
-      </div>
-      <div>
-        <div class="font-display font-bold text-3xl md:text-4xl tracking-tighter tnum">85.3<span class="text-lg">%</span></div>
-        <div class="text-[10px] uppercase tracking-wider text-white/40 mt-1.5">캐시 효율</div>
-      </div>
-      <div>
-        <div class="font-display font-bold text-3xl md:text-4xl tracking-tighter tnum text-accent">174<span class="text-lg text-white/40">/174</span></div>
-        <div class="text-[10px] uppercase tracking-wider text-white/40 mt-1.5">Tests Pass</div>
-      </div>
-      <div>
-        <div class="font-display font-bold text-3xl md:text-4xl tracking-tighter tnum">&lt;5<span class="text-lg">ms</span></div>
-        <div class="text-[10px] uppercase tracking-wider text-white/40 mt-1.5">API p50</div>
       </div>
     </div>
   </div>
@@ -614,11 +593,10 @@
       <div class="text-[10px] mt-1">FastAPI + SQLite WAL · stdlib collector · MIT · v87</div>
     </div>
     <div class="flex items-center gap-5 font-mono">
-      <a href="index.html" class="hover:text-white/80 link-underline">← 시안 목록</a>
+      <span class="text-white/30 uppercase tracking-wider text-[10px]">개별 시안</span>
       <a href="variant-a-editorial.html" class="hover:text-white/80">A</a>
       <a href="variant-b-dataviz.html" class="hover:text-white/80">B</a>
       <a href="variant-c-multinode.html" class="hover:text-white/80">C</a>
-      <span class="text-accent">★</span>
     </div>
   </div>
 </footer>

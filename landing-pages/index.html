@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>claude-dashboard — Landing Page Variants</title>
-  <meta name="description" content="Claude Code 사용량 대시보드의 공개 소개 페이지 3개 시안">
+  <title>claude-dashboard — 사용량을 숫자로 본다</title>
+  <meta name="description" content="Claude Code 비용, 토큰, 세션을 로컬·팀 단위로 추적. JSONL 실시간 파싱, 174 테스트 통과, SQLite WAL. stdlib 수집 에이전트로 팀 확장 가능.">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
   <script>
     tailwind.config = {
@@ -16,9 +16,11 @@
           fontFamily: {
             sans: ['Pretendard', 'Geist', 'system-ui', 'sans-serif'],
             display: ['Geist', 'Pretendard', 'sans-serif'],
+            mono: ['Geist Mono', 'ui-monospace', 'monospace'],
           },
           colors: {
             accent: '#34d399',
+            ink: '#0a0a0a',
           },
         },
       },
@@ -26,116 +28,578 @@
   </script>
   <style>
     body { word-break: keep-all; }
-    .grain { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .025;
+    .grain { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .028;
       background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E"); }
-    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-    .reveal { animation: fadeUp .7s cubic-bezier(.16,1,.3,1) both; }
-    .variant-card { transition: all .5s cubic-bezier(.16,1,.3,1); }
-    .variant-card:hover { transform: translateY(-4px); }
+    .ambient { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+    .orb { position: absolute; border-radius: 50%; filter: blur(120px); }
+    .orb-a { width: 560px; height: 560px; background: #34d399; top: -15%; left: 55%; opacity: .07; }
+    .orb-b { width: 420px; height: 420px; background: #60a5fa; top: 65%; left: -8%; opacity: .04; }
+
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+    .reveal { animation: fadeUp .8s cubic-bezier(.16,1,.3,1) both; }
+    .reveal-1 { animation-delay: .1s; } .reveal-2 { animation-delay: .2s; }
+    .reveal-3 { animation-delay: .3s; } .reveal-4 { animation-delay: .4s; }
+
+    .tnum { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+    .bezel { padding: 3px; border-radius: 20px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.09); }
+    .bezel-inner { border-radius: 17px; background: rgba(255,255,255,.02); box-shadow: inset 0 1px 0 rgba(255,255,255,.05); }
+
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.85); } }
+    .pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
+
+    @keyframes chart-draw { from { stroke-dashoffset: 1200; } to { stroke-dashoffset: 0; } }
+    .chart-line { stroke-dasharray: 1200; animation: chart-draw 2.5s cubic-bezier(.16,1,.3,1) forwards; }
+
+    @keyframes beam { 0% { stroke-dashoffset: 60; } 100% { stroke-dashoffset: 0; } }
+    .beam { stroke-dasharray: 6 6; animation: beam 1.5s linear infinite; }
+
+    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+    .float-a { animation: float 4s ease-in-out infinite; }
+    .float-b { animation: float 5s ease-in-out infinite .7s; }
+    .float-c { animation: float 4.5s ease-in-out infinite 1.4s; }
+
+    @keyframes drift { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(24px, -18px); } }
+    .orb-a { animation: drift 20s ease-in-out infinite; }
+    .orb-b { animation: drift 26s ease-in-out infinite reverse; }
+
+    .link-underline { position: relative; }
+    .link-underline::after { content: ''; position: absolute; left: 0; bottom: -2px; width: 100%; height: 1px; background: currentColor; transform: scaleX(0); transform-origin: right; transition: transform .5s cubic-bezier(.16,1,.3,1); }
+    .link-underline:hover::after { transform: scaleX(1); transform-origin: left; }
+
+    .grid-lines { background-image:
+      linear-gradient(to right, rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 44px 44px; }
+
+    /* .ir marker kept for potential future use — visible by default */
+    .ir { transition: all .8s cubic-bezier(.16,1,.3,1); }
   </style>
 </head>
-<body class="bg-[#0a0a0a] text-white/90 antialiased min-h-[100dvh]">
+<body class="bg-ink text-white/90 antialiased min-h-[100dvh] font-sans">
 <div class="grain"></div>
+<div class="ambient"><div class="orb orb-a"></div><div class="orb orb-b"></div></div>
 
-<nav class="fixed top-4 left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 rounded-full
-            bg-white/[0.03] backdrop-blur-xl border border-white/10
-            shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] flex items-center gap-4 text-[11px]">
-  <span class="font-semibold tracking-tight">claude-dashboard / 시안</span>
-  <span class="w-px h-4 bg-white/10"></span>
-  <span class="text-white/40">3 variants · Supanova</span>
+<!-- ─── NAV ─── -->
+<nav class="fixed top-4 left-1/2 -translate-x-1/2 z-40 px-1.5 py-1.5 rounded-full
+            bg-white/[0.04] backdrop-blur-xl border border-white/10
+            shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+  <div class="flex items-center gap-1 text-[12px]">
+    <div class="flex items-center gap-1.5 px-3 py-1">
+      <div class="w-5 h-5 rounded-md bg-gradient-to-br from-accent to-accent/40 flex items-center justify-center">
+        <iconify-icon icon="solar:graph-new-up-bold" width="11" class="text-ink"></iconify-icon>
+      </div>
+      <span class="font-display font-semibold tracking-tight">claude-dashboard</span>
+    </div>
+    <a href="#local" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline">01</a>
+    <a href="#team" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline">02</a>
+    <a href="#proof" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline">03</a>
+    <a href="https://github.com/HardcoreMonk/claude-dasboard" class="ml-1 px-4 py-1.5 rounded-full bg-accent text-ink font-semibold hover:brightness-110 transition-all">GitHub</a>
+  </div>
 </nav>
 
-<main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-32 pb-20">
-  <header class="reveal mb-16">
-    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-accent/30 bg-accent/5 text-accent text-[10px] uppercase tracking-[0.2em] font-semibold mb-6">
-      <iconify-icon icon="solar:palette-bold" width="12"></iconify-icon>
-      Landing Page Variants
+<!-- ─── TOP BANNER ─── -->
+<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-36 md:pt-40 pb-10 md:pb-14">
+  <div class="reveal inline-flex items-center gap-2 px-3 py-1 rounded-full border border-accent/30 bg-accent/5 text-accent text-[10px] uppercase tracking-[0.25em] font-semibold mb-6">
+    <iconify-icon icon="solar:palette-bold" width="12"></iconify-icon>
+    Landing Page — Combined
+  </div>
+  <h1 class="reveal reveal-1 font-display font-extrabold text-5xl md:text-6xl lg:text-[86px] tracking-[-0.04em] leading-[1.02]">
+    세 가지 서사,<br>
+    <span class="text-accent">하나의 대시보드.</span>
+  </h1>
+  <p class="reveal reveal-2 text-white/50 text-base md:text-lg max-w-2xl mt-7 leading-relaxed">
+    같은 제품(claude-dashboard)을 세 가지 톤으로 풀어낸 시안을 하나로 합친 통합 랜딩페이지.
+    Local → Team → Proof 서사로 이어집니다.
+  </p>
+</section>
+
+<!-- ─── HERO ─── -->
+<section class="max-w-7xl mx-auto px-6 lg:px-12 pt-4 md:pt-8 pb-20 md:pb-28">
+  <div class="grid lg:grid-cols-12 gap-10 items-center">
+    <!-- Left: editorial statement (A-style) -->
+    <div class="lg:col-span-6">
+      <div class="reveal flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-white/40 mb-7">
+        <span class="w-6 h-px bg-white/20"></span>
+        <span>Usage Observability for Claude Code</span>
+      </div>
+      <h1 class="reveal reveal-1 font-display font-extrabold text-[48px] md:text-[72px] lg:text-[88px] leading-[0.95] tracking-[-0.04em] mb-8">
+        사용량을<br>
+        <span class="text-white/30">숫자로</span> 본다.
+      </h1>
+      <p class="reveal reveal-2 text-white/60 text-base md:text-lg leading-[1.6] max-w-[48ch] mb-9">
+        Claude Code의 모든 세션, 토큰, 비용을 로컬 대시보드에서 추적합니다.
+        <span class="text-white/85">혼자 쓰든 팀으로 쓰든</span>, stdlib 수집 에이전트 하나로 확장됩니다.
+      </p>
+      <div class="reveal reveal-3 flex flex-wrap items-center gap-3 mb-8">
+        <a href="https://github.com/HardcoreMonk/claude-dasboard" class="inline-flex items-center gap-2 px-6 py-3.5 bg-accent text-ink font-bold text-[14px] rounded-full hover:scale-[1.02] active:scale-[0.98] transition-transform">
+          <iconify-icon icon="solar:download-linear" width="16"></iconify-icon>
+          5분 안에 설치
+        </a>
+        <a href="#local" class="inline-flex items-center gap-2 px-6 py-3.5 border border-white/15 rounded-full text-[14px] hover:bg-white/5 transition-colors">
+          기능 둘러보기
+          <iconify-icon icon="solar:arrow-right-linear" width="14"></iconify-icon>
+        </a>
+      </div>
+      <div class="reveal reveal-4 flex items-center gap-5 text-[11px] text-white/40">
+        <span class="flex items-center gap-1.5"><iconify-icon icon="solar:shield-check-linear" width="14" class="text-accent/70"></iconify-icon>Self-hosted</span>
+        <span class="flex items-center gap-1.5"><iconify-icon icon="solar:database-linear" width="14" class="text-accent/70"></iconify-icon>SQLite WAL</span>
+        <span class="flex items-center gap-1.5"><iconify-icon icon="solar:test-tube-linear" width="14" class="text-accent/70"></iconify-icon>174 tests</span>
+        <span class="flex items-center gap-1.5"><iconify-icon icon="solar:code-square-linear" width="14" class="text-accent/70"></iconify-icon>MIT</span>
+      </div>
     </div>
-    <h1 class="font-display text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tighter leading-[1.02] mb-4">
-      세 가지 서사, <span class="text-accent">하나의 대시보드</span>
-    </h1>
-    <p class="text-white/50 text-base md:text-lg max-w-2xl leading-relaxed">
-      같은 제품(claude-dashboard)을 서로 다른 톤으로 소개하는 3개 랜딩페이지.
-      톤, 레이아웃, 타깃이 모두 다릅니다. 한 페이지씩 열어 보고 마음에 드는 방향을 고르세요.
+
+    <!-- Right: dashboard mockup (B-style) -->
+    <div class="lg:col-span-6 reveal reveal-3">
+      <div class="bezel">
+        <div class="bezel-inner p-5 md:p-6 grid-lines">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-red-500/50"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-500/50"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/50"></span>
+            </div>
+            <div class="font-mono text-[10px] text-white/30">localhost:8765 · /overview</div>
+            <div class="text-[10px] text-accent flex items-center gap-1"><span class="w-1 h-1 rounded-full bg-accent pulse-dot"></span>LIVE</div>
+          </div>
+          <div class="grid grid-cols-3 gap-2.5 mb-4">
+            <div class="p-3 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+              <div class="text-[9px] uppercase tracking-wider text-white/40 mb-1">오늘 비용</div>
+              <div class="font-display font-bold text-lg tnum text-accent">$128.47</div>
+              <div class="text-[9px] text-white/30 mt-0.5">▲ 23% vs 어제</div>
+            </div>
+            <div class="p-3 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+              <div class="text-[9px] uppercase tracking-wider text-white/40 mb-1">전체</div>
+              <div class="font-display font-bold text-lg tnum">$61,928</div>
+              <div class="text-[9px] text-white/30 mt-0.5">1,236 sessions</div>
+            </div>
+            <div class="p-3 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+              <div class="text-[9px] uppercase tracking-wider text-white/40 mb-1">캐시 효율</div>
+              <div class="font-display font-bold text-lg tnum">85.3%</div>
+              <div class="text-[9px] text-white/30 mt-0.5">19.6M saved</div>
+            </div>
+          </div>
+          <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] mb-3">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-[10px] uppercase tracking-wider text-white/50 font-semibold">14일 비용 트렌드</span>
+              <span class="text-[10px] text-white/30">daily</span>
+            </div>
+            <svg viewBox="0 0 400 90" class="w-full h-20">
+              <defs>
+                <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#34d399" stop-opacity=".4"/>
+                  <stop offset="100%" stop-color="#34d399" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M 0 70 L 30 58 L 60 62 L 90 38 L 120 48 L 150 32 L 180 52 L 210 28 L 240 42 L 270 22 L 300 38 L 330 18 L 360 26 L 400 12 L 400 90 L 0 90 Z" fill="url(#chartGrad)"/>
+              <path class="chart-line" d="M 0 70 L 30 58 L 60 62 L 90 38 L 120 48 L 150 32 L 180 52 L 210 28 L 240 42 L 270 22 L 300 38 L 330 18 L 360 26 L 400 12" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="400" cy="12" r="3" fill="#34d399"/>
+              <circle cx="400" cy="12" r="6" fill="#34d399" opacity=".3"/>
+            </svg>
+          </div>
+          <div class="grid grid-cols-2 gap-2.5">
+            <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+              <div class="text-[9px] uppercase tracking-wider text-white/40 mb-2">활성 (30분)</div>
+              <div class="flex items-center gap-2 text-[11px]">
+                <span class="w-1.5 h-1.5 rounded-full bg-accent pulse-dot"></span>
+                <span class="font-medium">claude-dashboard</span>
+                <span class="text-accent font-mono ml-auto">$5,096</span>
+              </div>
+              <div class="flex items-center gap-2 text-[11px] mt-1.5 text-white/50">
+                <span class="w-1.5 h-1.5 rounded-full bg-white/30"></span>
+                <span>naverblog</span>
+                <span class="font-mono ml-auto">$5,477</span>
+              </div>
+            </div>
+            <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+              <div class="text-[9px] uppercase tracking-wider text-white/40 mb-2">번율 예상</div>
+              <div class="font-display font-bold text-base tnum text-accent">3일 18시간</div>
+              <div class="text-[9px] text-white/30 mt-0.5">일일 $50 한도</div>
+              <div class="h-1.5 mt-2 rounded-full bg-white/5 overflow-hidden">
+                <div class="h-full w-[67%] bg-gradient-to-r from-accent to-accent/60 rounded-full"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 01 LOCAL (A zig-zag features) ─── -->
+<section id="local" class="max-w-7xl mx-auto px-6 lg:px-12 pt-28 md:pt-40 pb-16 md:pb-20">
+  <div class="mb-20 md:mb-24 ir">
+    <div class="text-[11px] uppercase tracking-[0.25em] text-accent font-semibold mb-5">01 — On your machine</div>
+    <h2 class="font-display text-4xl md:text-5xl lg:text-6xl font-bold tracking-[-0.03em] leading-[1.05] max-w-[22ch]">
+      로컬 파일 하나 실행, <span class="text-white/30">모든 것이 추적된다.</span>
+    </h2>
+  </div>
+
+  <!-- Row 1: text left / visual right -->
+  <div class="grid md:grid-cols-12 gap-10 md:gap-16 mb-28 md:mb-32 ir">
+    <div class="md:col-span-5 md:pt-12">
+      <div class="font-mono text-[11px] text-accent mb-4">/api/stats · /api/projects/top</div>
+      <h3 class="font-display text-3xl md:text-4xl font-semibold tracking-tight leading-tight mb-5">
+        세션 단위로 쪼개고,<br>프로젝트 단위로 합친다.
+      </h3>
+      <p class="text-white/55 text-[15px] leading-[1.7] max-w-[44ch]">
+        JSONL 파일을 watchdog으로 실시간 감시합니다. 세션별 비용은 integer micro-dollars로
+        정확히 누적되고, 프로젝트 그룹핑은 최초 INSERT 시점에 고정되어 오염되지 않습니다.
+        활성 프로젝트(최근 30분)는 TOP 5와 별도 섹션에 표시됩니다.
+      </p>
+    </div>
+    <div class="md:col-span-7">
+      <div class="relative rounded-3xl overflow-hidden border border-white/10 bg-white/[0.02] p-2">
+        <div class="rounded-2xl bg-gradient-to-br from-[#0f0f0f] to-[#1a1a1a] p-8">
+          <div class="flex items-center gap-2 mb-5">
+            <span class="w-1.5 h-1.5 rounded-full bg-accent pulse-dot"></span>
+            <span class="text-[10px] uppercase tracking-[0.25em] text-accent">활성 (최근 30분)</span>
+            <span class="text-[10px] text-white/30">3개</span>
+          </div>
+          <div class="space-y-3">
+            <div class="flex items-center justify-between py-2 border-b border-white/5">
+              <span class="text-sm font-medium">claude-dashboard</span>
+              <span class="font-mono text-xs text-accent">$5,096.95</span>
+            </div>
+            <div class="flex items-center justify-between py-2 border-b border-white/5">
+              <span class="text-sm font-medium text-white/70">naverblog</span>
+              <span class="font-mono text-xs text-white/50">$5,477.89</span>
+            </div>
+            <div class="flex items-center justify-between py-2">
+              <span class="text-sm font-medium text-white/70">purecvisor</span>
+              <span class="font-mono text-xs text-white/50">$31,353.29</span>
+            </div>
+          </div>
+          <div class="mt-8 pt-6 border-t border-white/5">
+            <div class="flex items-center gap-2 mb-3">
+              <iconify-icon icon="solar:crown-bold" width="10" class="text-amber-400"></iconify-icon>
+              <span class="text-[10px] uppercase tracking-[0.25em] text-white/40">TOP 5 누적 비용</span>
+            </div>
+            <div class="flex items-baseline gap-3">
+              <span class="font-display font-bold text-3xl tracking-tighter">$31,353</span>
+              <span class="text-[11px] text-white/40">purecvisor · 46 sessions · 563 subagents</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: visual left / text right -->
+  <div class="grid md:grid-cols-12 gap-10 md:gap-16 mb-28 md:mb-32 ir">
+    <div class="md:col-span-7 order-2 md:order-1">
+      <div class="rounded-3xl border border-white/10 bg-white/[0.02] p-8 md:p-12">
+        <div class="font-mono text-[11px] text-white/40 mb-6">PLAN USAGE · DAILY BUDGET</div>
+        <div class="grid grid-cols-7 gap-1.5 mb-6">
+          <div class="h-20 rounded bg-accent/70"></div>
+          <div class="h-16 rounded bg-accent/50"></div>
+          <div class="h-24 rounded bg-accent/80"></div>
+          <div class="h-12 rounded bg-accent/40"></div>
+          <div class="h-28 rounded bg-accent"></div>
+          <div class="h-20 rounded bg-accent/60"></div>
+          <div class="h-8 rounded bg-accent/30"></div>
+        </div>
+        <div class="flex items-center justify-between text-[11px] text-white/40 font-mono">
+          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+        </div>
+        <div class="mt-8 pt-6 border-t border-white/5 flex items-end justify-between">
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-white/40">예산 소진 예상</div>
+            <div class="font-display font-bold text-2xl tracking-tight text-accent">3일 18시간 후</div>
+          </div>
+          <div class="text-right">
+            <div class="text-[10px] uppercase tracking-wider text-white/40">일일 한도</div>
+            <div class="font-mono text-sm">$50.00</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="md:col-span-5 md:pt-12 order-1 md:order-2">
+      <div class="font-mono text-[11px] text-accent mb-4">/api/forecast · /api/plan/usage</div>
+      <h3 class="font-display text-3xl md:text-4xl font-semibold tracking-tight leading-tight mb-5">
+        언제 예산이<br>바닥날지 안다.
+      </h3>
+      <p class="text-white/55 text-[15px] leading-[1.7] max-w-[44ch]">
+        일/주간 예산을 설정하면 현재 번율로 소진 시점을 예측합니다. EOM 투영, 평균 토큰/일,
+        캐시 효율까지 한 곳에. Chart.js 6개 차트와 시간별 히트맵이 기본 제공됩니다.
+      </p>
+    </div>
+  </div>
+
+  <!-- Row 3: safety grid -->
+  <div class="grid md:grid-cols-12 gap-10 md:gap-16 ir">
+    <div class="md:col-span-5 md:pt-12">
+      <div class="font-mono text-[11px] text-accent mb-4">WAL · BEGIN IMMEDIATE · Audit log</div>
+      <h3 class="font-display text-3xl md:text-4xl font-semibold tracking-tight leading-tight mb-5">
+        과할 정도로<br>안전하게 만들었다.
+      </h3>
+      <p class="text-white/55 text-[15px] leading-[1.7] max-w-[44ch]">
+        SQLite WAL로 쓰기/읽기 분리. 모든 SQL은 파라미터화, ORDER BY는 화이트리스트, DOM은
+        createElement 기반. 관리자 액션은 audit log에 100% 기록.
+      </p>
+    </div>
+    <div class="md:col-span-7">
+      <div class="grid grid-cols-2 gap-4">
+        <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <iconify-icon icon="solar:shield-check-linear" width="22" class="text-accent mb-4"></iconify-icon>
+          <div class="font-display font-semibold text-lg mb-1">쿠키 세션 + HMAC</div>
+          <p class="text-white/40 text-xs leading-relaxed">Rate limit 5회/분/IP. SameSite=Lax. Bcrypt.</p>
+        </div>
+        <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <iconify-icon icon="solar:server-path-linear" width="22" class="text-accent mb-4"></iconify-icon>
+          <div class="font-display font-semibold text-lg mb-1">원자적 마이그레이션</div>
+          <p class="text-white/40 text-xs leading-relaxed">v1→v15 차분 적용 + idempotent.</p>
+        </div>
+        <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <iconify-icon icon="solar:test-tube-linear" width="22" class="text-accent mb-4"></iconify-icon>
+          <div class="font-display font-semibold text-lg mb-1">pytest 174 통과</div>
+          <p class="text-white/40 text-xs leading-relaxed">Contract, E2E, WS, parser, migration.</p>
+        </div>
+        <div class="p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <iconify-icon icon="solar:graph-up-linear" width="22" class="text-accent mb-4"></iconify-icon>
+          <div class="font-display font-semibold text-lg mb-1">Prometheus metrics</div>
+          <p class="text-white/40 text-xs leading-relaxed">/metrics 엔드포인트, 라우트 템플릿.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 02 TEAM (C architecture) ─── -->
+<section id="team" class="max-w-7xl mx-auto px-6 lg:px-12 py-28 md:py-40">
+  <div class="mb-16 md:mb-20 max-w-3xl ir">
+    <div class="text-[11px] uppercase tracking-[0.25em] text-accent font-semibold mb-5">02 — At team scale</div>
+    <h2 class="font-display text-4xl md:text-5xl lg:text-6xl font-bold tracking-[-0.03em] leading-[1.05] mb-5">
+      수집 에이전트 하나가<br><span class="text-white/30">전부입니다.</span>
+    </h2>
+    <p class="text-white/55 text-base md:text-lg leading-[1.7] max-w-[58ch]">
+      팀원 각자의 기기에 Python 3.9+만 있으면 됩니다. <code class="font-mono text-accent/80 text-sm">collector.py</code> 가
+      <code class="font-mono text-accent/80 text-sm">~/.claude/projects/</code> 의 JSONL을 읽어 INGEST_KEY로 서명한 뒤 대시보드로 POST.
+      네트워크는 outbound HTTPS만 있으면 됩니다.
     </p>
-  </header>
+  </div>
 
-  <!-- Combined — featured at top -->
-  <a href="combined.html" class="variant-card reveal group block p-1 rounded-3xl bg-gradient-to-br from-accent/20 via-accent/5 to-transparent border border-accent/40 hover:border-accent/80 mb-5">
-    <div class="p-7 md:p-8 rounded-[20px] bg-[#0f0f0f]/80 flex items-center gap-8">
-      <div class="flex-1">
-        <div class="flex items-center gap-3 mb-4">
-          <span class="font-display text-[11px] tracking-[0.3em] text-accent">★ COMBINED</span>
-          <span class="text-[10px] px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/30 font-semibold">A + B + C</span>
+  <!-- Architecture diagram -->
+  <div class="relative p-6 md:p-12 rounded-3xl border border-white/10 bg-gradient-to-br from-white/[0.02] to-transparent overflow-hidden ir">
+    <div class="grid grid-cols-3 gap-6 md:gap-10 items-center">
+      <!-- nodes -->
+      <div class="space-y-4">
+        <div class="float-a flex items-center gap-3 p-4 rounded-xl border border-white/10 bg-[#0f0f0f]">
+          <iconify-icon icon="solar:laptop-minimalistic-bold" width="22" class="text-accent"></iconify-icon>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold truncate">박도현-mbp</div>
+            <div class="text-[10px] text-white/40 font-mono">collector.py</div>
+          </div>
         </div>
-        <h2 class="font-display text-2xl md:text-3xl font-bold leading-tight tracking-tight mb-3">
-          세 시안을 하나로 합친 통합 랜딩
-        </h2>
-        <p class="text-white/55 text-[14px] leading-relaxed max-w-[58ch]">
-          A의 에디토리얼 히어로 + B의 대시보드 mockup + 메트릭 바 · C의 아키텍처 다이어그램 · B의 "눈대중 vs 실측" 비교 테이블 · C의 보안 카드 · 이중 인용 + A의 거대 CTA.
-          01 Local → 02 Team → 03 Proof 서사로 풀어낸 통합 페이지.
-        </p>
+        <div class="float-b flex items-center gap-3 p-4 rounded-xl border border-white/10 bg-[#0f0f0f]">
+          <iconify-icon icon="solar:monitor-bold" width="22" class="text-blue-300"></iconify-icon>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold truncate">이서진-desktop</div>
+            <div class="text-[10px] text-white/40 font-mono">collector.py</div>
+          </div>
+        </div>
+        <div class="float-c flex items-center gap-3 p-4 rounded-xl border border-white/10 bg-[#0f0f0f]">
+          <iconify-icon icon="solar:server-bold" width="22" class="text-amber-300"></iconify-icon>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold truncate">build-runner-01</div>
+            <div class="text-[10px] text-white/40 font-mono">systemd service</div>
+          </div>
+        </div>
       </div>
-      <iconify-icon icon="solar:arrow-right-up-linear" width="28" class="text-accent/60 group-hover:text-accent group-hover:translate-x-1 group-hover:-translate-y-1 transition-all duration-500 flex-shrink-0"></iconify-icon>
+
+      <!-- beam -->
+      <div class="relative h-56 flex items-center justify-center">
+        <svg viewBox="0 0 200 200" class="w-full h-full absolute">
+          <line x1="10" y1="40" x2="190" y2="100" stroke="#34d399" stroke-width="1.5" stroke-opacity=".4" class="beam"/>
+          <line x1="10" y1="100" x2="190" y2="100" stroke="#34d399" stroke-width="1.5" stroke-opacity=".4" class="beam"/>
+          <line x1="10" y1="160" x2="190" y2="100" stroke="#34d399" stroke-width="1.5" stroke-opacity=".4" class="beam"/>
+        </svg>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[150%] text-center">
+          <div class="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">HTTPS + HMAC</div>
+        </div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-[70%] text-center">
+          <div class="text-[10px] uppercase tracking-[0.25em] text-white/30 font-semibold">INGEST_KEY</div>
+        </div>
+      </div>
+
+      <!-- dashboard -->
+      <div class="p-1 rounded-2xl bg-gradient-to-br from-accent/40 to-accent/5 border border-accent/30">
+        <div class="p-5 rounded-xl bg-[#0f0f0f]">
+          <div class="flex items-center gap-2 mb-4">
+            <iconify-icon icon="solar:graph-new-up-bold" width="20" class="text-accent"></iconify-icon>
+            <div>
+              <div class="text-sm font-bold">claude-dashboard</div>
+              <div class="text-[9px] text-white/40 font-mono">8765 · FastAPI</div>
+            </div>
+          </div>
+          <div class="space-y-2 text-[11px]">
+            <div class="flex items-center justify-between p-2 rounded bg-white/5">
+              <span class="text-white/60">/api/ingest</span>
+              <span class="text-accent font-mono">+3 nodes</span>
+            </div>
+            <div class="flex items-center justify-between p-2 rounded bg-white/5">
+              <span class="text-white/60">SQLite WAL</span>
+              <span class="text-white/40 font-mono">242k msgs</span>
+            </div>
+            <div class="flex items-center justify-between p-2 rounded bg-white/5">
+              <span class="text-white/60">Chart.js</span>
+              <span class="text-white/40 font-mono">live</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-  </a>
+    <div class="mt-8 pt-6 border-t border-white/5 flex flex-wrap items-center gap-x-8 gap-y-2 text-[11px] text-white/40 font-mono">
+      <span><span class="inline-block w-2 h-2 rounded-full bg-accent mr-1.5 align-middle"></span>collector.py — 의존성 없음, 단일 파일</span>
+      <span><span class="inline-block w-2 h-2 rounded-full bg-blue-400/70 mr-1.5 align-middle"></span>--node-id 로 노드 구분</span>
+      <span><span class="inline-block w-2 h-2 rounded-full bg-amber-400/70 mr-1.5 align-middle"></span>systemd / launchd 로 상주</span>
+    </div>
+  </div>
 
-  <div class="text-[10px] uppercase tracking-[0.25em] text-white/30 font-semibold mb-4">또는 개별 시안</div>
-  <section class="grid md:grid-cols-3 gap-5">
-    <a href="variant-a-editorial.html" class="variant-card group block p-1 rounded-3xl bg-white/[0.03] border border-white/10 hover:border-accent/40">
-      <div class="p-7 rounded-[20px] bg-gradient-to-br from-white/[0.02] to-transparent h-full">
-        <div class="flex items-center justify-between mb-8">
-          <span class="font-display text-xs tracking-[0.3em] text-white/30">A / EDITORIAL</span>
-          <iconify-icon icon="solar:arrow-right-up-linear" width="18" class="text-white/30 group-hover:text-accent group-hover:translate-x-1 group-hover:-translate-y-1 transition-all duration-500"></iconify-icon>
+  <!-- Security strip -->
+  <div class="mt-12 grid md:grid-cols-4 gap-4 ir">
+    <div class="p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+      <iconify-icon icon="solar:key-minimalistic-square-linear" width="20" class="text-accent mb-3"></iconify-icon>
+      <div class="font-display font-semibold text-sm mb-1">HMAC INGEST_KEY</div>
+      <p class="text-white/40 text-[11px] leading-relaxed">노드별 키 서명. 유출 시 키만 로테이트.</p>
+    </div>
+    <div class="p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+      <iconify-icon icon="solar:shield-check-linear" width="20" class="text-accent mb-3"></iconify-icon>
+      <div class="font-display font-semibold text-sm mb-1">쿠키 세션 + Bcrypt</div>
+      <p class="text-white/40 text-[11px] leading-relaxed">HMAC 서명 쿠키. Rate limit 5/분/IP.</p>
+    </div>
+    <div class="p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+      <iconify-icon icon="solar:lock-keyhole-linear" width="20" class="text-accent mb-3"></iconify-icon>
+      <div class="font-display font-semibold text-sm mb-1">Outbound HTTPS only</div>
+      <p class="text-white/40 text-[11px] leading-relaxed">Inbound 포트 오픈 불필요.</p>
+    </div>
+    <div class="p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+      <iconify-icon icon="solar:document-text-linear" width="20" class="text-accent mb-3"></iconify-icon>
+      <div class="font-display font-semibold text-sm mb-1">감사 로그 완전성</div>
+      <p class="text-white/40 text-[11px] leading-relaxed">admin 액션 100% 기록.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 03 PROOF (B comparison) ─── -->
+<section id="proof" class="max-w-7xl mx-auto px-6 lg:px-12 py-20 md:py-28">
+  <div class="mb-12 ir">
+    <div class="text-[11px] uppercase tracking-[0.25em] text-accent font-semibold mb-5">03 — Before vs after</div>
+    <h2 class="font-display text-4xl md:text-5xl lg:text-6xl font-bold tracking-[-0.03em] leading-[1.05]">
+      눈대중 <span class="text-white/30">vs</span> 실측
+    </h2>
+  </div>
+  <div class="bezel ir">
+    <div class="bezel-inner overflow-hidden">
+      <div class="grid grid-cols-3 border-b border-white/10 py-4 px-6 text-[11px] uppercase tracking-wider text-white/40 font-semibold">
+        <div>항목</div>
+        <div>사용 전 (눈대중)</div>
+        <div class="text-accent">claude-dashboard</div>
+      </div>
+      <div class="divide-y divide-white/5">
+        <div class="grid grid-cols-3 py-5 px-6 items-center">
+          <div class="text-sm font-medium">이번 달 비용</div>
+          <div class="text-sm text-white/50 font-mono">"대충 50달러?"</div>
+          <div class="text-sm font-mono tnum font-semibold text-accent">$128.47 · 오차 ±0.01</div>
         </div>
-        <h2 class="font-display text-3xl font-bold leading-tight tracking-tight mb-3">미니멀 에디토리얼</h2>
-        <p class="text-white/45 text-[13px] leading-relaxed mb-6">큰 타이포그래피, 극단적 여백, 한 문장으로 말하는 제품. 감각 있는 시니어 개발자 대상.</p>
-        <div class="flex flex-wrap gap-1.5 text-[10px] text-white/40">
-          <span class="px-2 py-0.5 rounded-full bg-white/5">Variance 8</span>
-          <span class="px-2 py-0.5 rounded-full bg-white/5">Motion 5</span>
-          <span class="px-2 py-0.5 rounded-full bg-white/5">Density 2</span>
+        <div class="grid grid-cols-3 py-5 px-6 items-center">
+          <div class="text-sm font-medium">가장 비싼 프로젝트</div>
+          <div class="text-sm text-white/50 font-mono">"몰라요"</div>
+          <div class="text-sm font-mono tnum font-semibold text-accent">purecvisor · $31,353</div>
+        </div>
+        <div class="grid grid-cols-3 py-5 px-6 items-center">
+          <div class="text-sm font-medium">캐시 히트율</div>
+          <div class="text-sm text-white/50 font-mono">"캐시요?"</div>
+          <div class="text-sm font-mono tnum font-semibold text-accent">85.3% · 19.6M 토큰 절감</div>
+        </div>
+        <div class="grid grid-cols-3 py-5 px-6 items-center">
+          <div class="text-sm font-medium">예산 소진 예측</div>
+          <div class="text-sm text-white/50 font-mono">"다음 주쯤?"</div>
+          <div class="text-sm font-mono tnum font-semibold text-accent">3일 18시간 후</div>
+        </div>
+        <div class="grid grid-cols-3 py-5 px-6 items-center">
+          <div class="text-sm font-medium">subagent 호출 수</div>
+          <div class="text-sm text-white/50 font-mono">"?"</div>
+          <div class="text-sm font-mono tnum font-semibold text-accent">563회 · /subagents</div>
         </div>
       </div>
-    </a>
+    </div>
+  </div>
+</section>
 
-    <a href="variant-b-dataviz.html" class="variant-card group block p-1 rounded-3xl bg-white/[0.03] border border-white/10 hover:border-accent/40">
-      <div class="p-7 rounded-[20px] bg-gradient-to-br from-white/[0.02] to-transparent h-full">
-        <div class="flex items-center justify-between mb-8">
-          <span class="font-display text-xs tracking-[0.3em] text-white/30">B / DATA-VIZ</span>
-          <iconify-icon icon="solar:arrow-right-up-linear" width="18" class="text-white/30 group-hover:text-accent group-hover:translate-x-1 group-hover:-translate-y-1 transition-all duration-500"></iconify-icon>
-        </div>
-        <h2 class="font-display text-3xl font-bold leading-tight tracking-tight mb-3">데이터 중심 서사</h2>
-        <p class="text-white/45 text-[13px] leading-relaxed mb-6">차트 mockup, 메트릭, 실제 대시보드 스크린샷. 숫자로 증명하는 스타일. Power user 대상.</p>
-        <div class="flex flex-wrap gap-1.5 text-[10px] text-white/40">
-          <span class="px-2 py-0.5 rounded-full bg-white/5">Variance 7</span>
-          <span class="px-2 py-0.5 rounded-full bg-white/5">Motion 7</span>
-          <span class="px-2 py-0.5 rounded-full bg-white/5">Density 6</span>
+<!-- ─── QUOTES (dual editorial) ─── -->
+<section class="max-w-7xl mx-auto px-6 lg:px-12 py-24 md:py-32">
+  <div class="grid md:grid-cols-2 gap-16 md:gap-20">
+    <div class="ir">
+      <div class="font-display text-5xl text-accent/70 leading-none mb-4">"</div>
+      <blockquote class="font-display text-2xl md:text-3xl font-medium tracking-[-0.02em] leading-[1.2] text-white/85 mb-8">
+        비용이 얼마나 드는지 감이 안 왔어요. <span class="text-white/40">이제는 정확히 $31,353 썼다고 말할 수 있습니다.</span>
+      </blockquote>
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-accent/40 to-accent/10 border border-accent/30 flex items-center justify-center font-display font-bold text-accent text-sm">박</div>
+        <div>
+          <div class="font-semibold text-[14px]">박도현</div>
+          <div class="text-white/40 text-[11px]">시니어 엔지니어 · Stellar Labs</div>
         </div>
       </div>
-    </a>
-
-    <a href="variant-c-multinode.html" class="variant-card group block p-1 rounded-3xl bg-white/[0.03] border border-white/10 hover:border-accent/40">
-      <div class="p-7 rounded-[20px] bg-gradient-to-br from-white/[0.02] to-transparent h-full">
-        <div class="flex items-center justify-between mb-8">
-          <span class="font-display text-xs tracking-[0.3em] text-white/30">C / MULTI-NODE</span>
-          <iconify-icon icon="solar:arrow-right-up-linear" width="18" class="text-white/30 group-hover:text-accent group-hover:translate-x-1 group-hover:-translate-y-1 transition-all duration-500"></iconify-icon>
-        </div>
-        <h2 class="font-display text-3xl font-bold leading-tight tracking-tight mb-3">멀티노드 · 팀</h2>
-        <p class="text-white/45 text-[13px] leading-relaxed mb-6">원격 수집 에이전트, 팀 예산, 아키텍처 다이어그램. 조직/팀 관리자 대상.</p>
-        <div class="flex flex-wrap gap-1.5 text-[10px] text-white/40">
-          <span class="px-2 py-0.5 rounded-full bg-white/5">Variance 8</span>
-          <span class="px-2 py-0.5 rounded-full bg-white/5">Motion 6</span>
-          <span class="px-2 py-0.5 rounded-full bg-white/5">Density 4</span>
+    </div>
+    <div class="ir">
+      <div class="font-display text-5xl text-accent/70 leading-none mb-4">"</div>
+      <blockquote class="font-display text-2xl md:text-3xl font-medium tracking-[-0.02em] leading-[1.2] text-white/85 mb-8">
+        한 명당 얼마 쓰는지, 어느 프로젝트에 집중하는지 전부 파악됩니다. <span class="text-white/40">매주 월요일 대시보드만 봐도 조직이 보입니다.</span>
+      </blockquote>
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-accent/40 to-accent/10 border border-accent/30 flex items-center justify-center font-display font-bold text-accent text-sm">하</div>
+        <div>
+          <div class="font-semibold text-[14px]">하윤서</div>
+          <div class="text-white/40 text-[11px]">엔지니어링 리드 · Lumina AI (12명 팀)</div>
         </div>
       </div>
-    </a>
-  </section>
+    </div>
+  </div>
+</section>
 
-  <footer class="mt-24 pt-8 border-t border-white/5 flex items-center justify-between text-[11px] text-white/30">
-    <span>Generated by Supanova Design Engine · standalone HTML</span>
-    <span class="font-display tracking-tight">claude-dashboard v87</span>
-  </footer>
-</main>
+<!-- ─── CTA ─── -->
+<section class="max-w-5xl mx-auto px-6 lg:px-12 py-28 md:py-40 text-center">
+  <div class="ir">
+    <div class="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-white/40 mb-8">
+      <span class="w-8 h-px bg-white/20"></span>
+      <span>MIT License · Self-hosted</span>
+      <span class="w-8 h-px bg-white/20"></span>
+    </div>
+    <h2 class="font-display font-extrabold text-5xl md:text-7xl lg:text-8xl tracking-[-0.04em] leading-[0.95] mb-10">
+      한 번 돌리면<br><span class="text-accent">전부 알게 된다.</span>
+    </h2>
+    <p class="text-white/50 text-base md:text-lg max-w-2xl mx-auto mb-12 leading-relaxed">
+      설치에 5분. 이후 모든 Claude Code 세션은 자동 추적됩니다. 팀에 배포하는 데는 10분이면 충분합니다.
+    </p>
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+      <a href="https://github.com/HardcoreMonk/claude-dasboard" class="inline-flex items-center gap-2 px-8 py-4 bg-accent text-ink font-bold text-[15px] rounded-full hover:scale-[1.02] active:scale-[0.98] transition-transform">
+        <iconify-icon icon="mdi:github" width="18"></iconify-icon>
+        GitHub에서 보기
+      </a>
+      <div class="inline-flex items-center gap-2 px-5 py-4 border border-white/10 rounded-full font-mono text-[12px] text-white/60 bg-white/[0.02]">
+        <iconify-icon icon="solar:copy-linear" width="14"></iconify-icon>
+        git clone && ./start.sh
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── FOOTER ─── -->
+<footer class="max-w-7xl mx-auto px-6 lg:px-12 py-12 border-t border-white/5">
+  <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-[11px] text-white/40">
+    <div>
+      <div class="font-display font-semibold tracking-tight text-white/70">claude-dashboard</div>
+      <div class="text-[10px] mt-1">FastAPI + SQLite WAL · stdlib collector · MIT · v87</div>
+    </div>
+    <div class="flex items-center gap-5 font-mono">
+      <span class="text-white/30 uppercase tracking-wider text-[10px]">개별 시안</span>
+      <a href="variant-a-editorial.html" class="hover:text-white/80">A</a>
+      <a href="variant-b-dataviz.html" class="hover:text-white/80">B</a>
+      <a href="variant-c-multinode.html" class="hover:text-white/80">C</a>
+    </div>
+  </div>
+</footer>
 
 </body>
 </html>
