@@ -150,7 +150,7 @@ static/
   sessions.js        세션 목록, 필터, 벌크, 노드 필터
   timeline.js        Gantt, 히트맵, 시간별 분석, 트렌드
   charts.js          Chart.js 6개 차트
-  overview.js        히어로 카드, TOP 5, 예측
+  overview.js        히어로 카드, 활성+TOP 5 (2그룹), 예측
   plan.js            예산 설정
   subagents.js       7개 섹션 시각화
   app.css            스타일 + 라이트모드 (WCAG AA)

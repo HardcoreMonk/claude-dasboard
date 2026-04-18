@@ -7,7 +7,7 @@
 <meta name="description" content="Claude Code 토큰 사용량 실시간 추적 대시보드">
 
 <!-- Tailwind CSS (built from app.css via build.js) -->
-<link rel="stylesheet" href="/static/tailwind.v86.css">
+<link rel="stylesheet" href="/static/tailwind.v87.css">
 
 <!-- Pretendard (Korean) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
@@ -123,16 +123,18 @@
 <main class="pt-20 pb-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
 <!-- ─── OVERVIEW ─── -->
-<!-- 기본 레이아웃: TOP 5 프로젝트 전체 폭. 각 행 오른쪽에 눈 아이콘 버튼이
-     있고, 해당 버튼 클릭 시에만 우측에서 drawer 형태의 preview 패널이
-     fixed 위치로 슬라이드 in. 행 본체 클릭은 기존 프로젝트 모달로 드릴. -->
+<!-- 카드 레이아웃: "활성" + "TOP 5" 두 그룹을 한 카드 안에 병렬 렌더.
+     활성은 최근 30분 내 활동한 모든 프로젝트 (비용 무관, 신규/소규모 포함).
+     TOP 5는 누적 비용 상위. 한 프로젝트가 양쪽에 동시 등장할 수 있음.
+     행 오른쪽 눈 아이콘 → 우측 drawer slide-in (마지막 대화 미리보기).
+     행 본체 클릭 → 프로젝트 상세 모달. -->
 <section class="view" id="view-overview">
   <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
     <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
       <div class="flex items-center gap-2 mb-3">
         <span class="eyebrow">
-          <iconify-icon icon="solar:crown-bold" style="font-size:.65rem;"></iconify-icon>
-          TOP 5 프로젝트
+          <iconify-icon icon="solar:widget-2-bold" style="font-size:.65rem;"></iconify-icon>
+          프로젝트 — 활성 &amp; TOP 5
         </span>
         <span class="text-white/20 font-normal text-[10px]">행 클릭 → 프로젝트 상세, 👁 버튼 → 마지막 대화 미리보기</span>
       </div>
@@ -1274,6 +1276,6 @@
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/bundle.v86.js" defer></script>
+<script src="/static/bundle.v87.js" defer></script>
 </body>
 </html>

@@ -50,7 +50,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 | 헬스 | `/api/health` | 서버 상태 + DB 메시지/세션 카운트 |
 | 메트릭 | `/metrics` | Prometheus text format (인증 우회) |
 | 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | 세션 CRUD, 메시지 조회, 검색 점프, subagent 체인 |
-| 프로젝트 | `/api/projects`, `/top`, `/{name}/stats`, `/{name}/messages` | 프로젝트 집계, TOP 5, 상세 |
+| 프로젝트 | `/api/projects`, `/top`, `/{name}/stats`, `/{name}/messages` | 프로젝트 집계, 활성+TOP 5 (`include_active`), 상세 |
 | 사용량 | `/api/usage/hourly`, `/daily`, `/periods` | 시계열 토큰/비용 집계 |
 | 타임라인 | `/api/timeline`, `/timeline/heatmap`, `/timeline/hourly` | Gantt 데이터, 요일x시간 히트맵, 시간별 프로젝트×세션 집계 |
 | 모델 | `/api/models` | 모델별 비용/토큰 집계 |
@@ -167,7 +167,7 @@ login.html          독립 로그인 페이지
   ├─ app.js         코어: state, bus, accessors, WS, routing, utils, h(), 4단계 상태 감지
   ├─ charts.js      Chart.js 6개 차트 (usage, models, dailyCost, cache, stopReason, modelCache)
   ├─ sessions.js    세션 목록, 필터, 프리셋, 벌크 작업, 페이지네이션
-  ├─ overview.js    히어로 카드, 기간별 비용, TOP 5, 예측, 미리보기 drawer
+  ├─ overview.js    히어로 카드, 기간별 비용, 활성+TOP 5 프로젝트(2그룹), 예측, 미리보기 drawer
   ├─ plan.js        플랜 사용량, 설정 모달
   ├─ subagents.js   7개 섹션 시각화 (유형별·종료사유·히트맵·매트릭스)
   ├─ timeline.js    Gantt 차트, 히트맵(드릴다운), 효율분석, 일간리포트(시간별 아코디언), 스택드 바 차트, 트렌드비교

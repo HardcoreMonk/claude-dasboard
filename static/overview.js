@@ -157,78 +157,225 @@ function drillToSessionsWeek() {
   if (g('advDateTo'))   g('advDateTo').value   = to;
 }
 
-// ─── TOP 5 projects ───────────────────────────────────────────────────
-// Preview cleanup is now done server-side (main.py:summarize_preview) and
-// delivered as last_message.summary_line. The frontend just renders it.
+// ─── Active + TOP 5 projects ──────────────────────────────────────────
+// Preview cleanup is now done server-side (main.py:summarize_preview).
+//
+// Renders TWO sections inside #topProjectsList:
+//   (1) 활성 — 최근 30분 내 활동. 비용 무관, 최신순. 서버에서 최대 10개.
+//   (2) TOP 5 — 누적 비용 상위. 두 섹션에 같은 프로젝트가 중복될 수 있음
+//       (의도된 동작: "지금 무엇이 움직이나" vs "누적 지출").
+// All DOM is constructed via createElement/textContent — no innerHTML.
+const _TOP_BAR_COLORS = ['#34d399', '#60a5fa', '#fbbf24', '#22d3ee', '#a78bfa', '#fb7185', '#34d399', '#60a5fa', '#fbbf24', '#22d3ee'];
+
+const _IDLE_STATUS_BADGE = {
+  'end_turn':        { label: '입력 대기',        icon: 'solar:hourglass-line-linear',        bg: 'bg-amber-500/15', text: 'text-amber-300/95', ring: 'ring-amber-500/40', pulse: true  },
+  'tool_use':        { label: '권한 승인 대기',   icon: 'solar:shield-check-linear',          bg: 'bg-amber-500/15', text: 'text-amber-300/95', ring: 'ring-amber-500/40', pulse: true  },
+  'active_subagent': { label: '에이전트 작업 중', icon: 'solar:cpu-bolt-linear',              bg: 'bg-blue-500/15',  text: 'text-blue-300/90',  ring: 'ring-blue-500/40',  pulse: true  },
+  'active_tool':     { label: '도구 실행 중',     icon: 'solar:settings-minimalistic-linear', bg: 'bg-cyan-500/15',  text: 'text-cyan-300/90',  ring: 'ring-cyan-500/30',  pulse: false },
+};
+
+function _makeBadge({ className, title, iconName, label, iconWidth }) {
+  const span = document.createElement('span');
+  span.className = className;
+  if (title) span.title = title;
+  if (iconName) {
+    const icon = document.createElement('iconify-icon');
+    icon.setAttribute('icon', iconName);
+    if (iconWidth) icon.setAttribute('width', String(iconWidth));
+    icon.className = 'inline';
+    span.appendChild(icon);
+  }
+  span.appendChild(document.createTextNode(label));
+  return span;
+}
+
+function _buildProjectRow(p, idx, mxCost, opts) {
+  const row = document.createElement('div');
+  row.setAttribute('data-project-row', '');
+  row.className = 'grid grid-cols-[28px_1fr_auto_auto_auto] items-start gap-2 py-4 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-2 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
+  row.title = '클릭하여 프로젝트 상세 보기';
+  row.setAttribute('tabindex', '0');
+  row.setAttribute('role', 'button');
+  row.dataset.projectName = p.project_name || '';
+  row.dataset.projectPath = p.project_path || '';
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
+
+  // ── Rank cell (first column) ─────────────────────────────────────
+  let rankCell;
+  if (opts.section === 'active') {
+    rankCell = document.createElement('span');
+    rankCell.className = 'flex items-center justify-center pt-1.5';
+    rankCell.setAttribute('aria-label', '활성');
+    const dot = document.createElement('span');
+    dot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+    dot.style.boxShadow = '0 0 8px rgba(52,211,153,0.6)';
+    rankCell.appendChild(dot);
+  } else {
+    const rc = idx < 3 ? ['text-amber-400', 'text-white/40', 'text-orange-400'][idx] : 'text-white/15';
+    rankCell = document.createElement('span');
+    rankCell.className = `text-sm font-extrabold text-center pt-0.5 ${rc}`;
+    rankCell.textContent = `#${idx + 1}`;
+  }
+  row.appendChild(rankCell);
+
+  // ── Middle cell: name row + cost bar + preview line ─────────────
+  const mid = document.createElement('div');
+  mid.className = 'min-w-0';
+
+  const nameRow = document.createElement('div');
+  nameRow.className = 'text-sm font-semibold text-white/60 truncate';
+
+  // Idle/status badge (prepended before the project name)
+  const idleKey = (p.project_name || '') + '|' + (p.project_path || '');
+  const idleEntry = (state.idleProjects && state.idleProjects[idleKey]) || null;
+  if (idleEntry) {
+    const cfg = _IDLE_STATUS_BADGE[idleEntry.reason] || _IDLE_STATUS_BADGE['end_turn'];
+    nameRow.appendChild(_makeBadge({
+      className: `mr-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full ${cfg.bg} ${cfg.text} ring-1 ${cfg.ring} text-[9px] font-bold uppercase tracking-wider align-middle${cfg.pulse ? ' animate-pulse' : ''}`,
+      title: idleEntry.preview || cfg.label,
+      iconName: cfg.icon,
+      iconWidth: 10,
+      label: cfg.label,
+    }));
+  }
+  nameRow.appendChild(document.createTextNode(p.project_name || '—'));
+  // LIVE badge is redundant inside the active section — only show in TOP.
+  if (p.is_active && opts.section !== 'active') {
+    const live = document.createElement('span');
+    live.className = 'ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300/90 ring-1 ring-emerald-500/40 text-[9px] font-bold uppercase tracking-wider align-middle';
+    live.title = '최근 30분 이내 활동';
+    const ldot = document.createElement('span');
+    ldot.className = 'w-1 h-1 rounded-full bg-emerald-400 animate-pulse';
+    live.appendChild(ldot);
+    live.appendChild(document.createTextNode('LIVE'));
+    nameRow.appendChild(live);
+  }
+  mid.appendChild(nameRow);
+
+  const pct = ((p.total_cost || 0) / Math.max(mxCost, 1) * 100).toFixed(1);
+  const barWrap = document.createElement('div');
+  barWrap.className = 'h-1.5 bg-white/5 rounded-full mt-2 overflow-hidden';
+  const bar = document.createElement('div');
+  bar.className = 'h-full rounded-full';
+  bar.style.width = `${pct}%`;
+  bar.style.background = _TOP_BAR_COLORS[idx % _TOP_BAR_COLORS.length];
+  barWrap.appendChild(bar);
+  mid.appendChild(barWrap);
+
+  const lm = p.last_message;
+  const cleaned = lm ? (lm.summary_line || lm.preview || '') : '';
+  if (cleaned) {
+    const prev = document.createElement('div');
+    prev.className = 'text-[11px] text-white/35 mt-2 leading-relaxed whitespace-normal';
+    prev.style.display = '-webkit-box';
+    prev.style.webkitLineClamp = '4';
+    prev.style.webkitBoxOrient = 'vertical';
+    prev.style.overflow = 'hidden';
+    prev.title = (lm && lm.preview) || '';
+    const pIcon = document.createElement('iconify-icon');
+    pIcon.setAttribute('icon', 'solar:chat-round-line-linear');
+    pIcon.setAttribute('width', '10');
+    pIcon.className = 'inline text-white/25 mr-0.5 align-[-1px]';
+    prev.appendChild(pIcon);
+    prev.appendChild(document.createTextNode(cleaned));
+    mid.appendChild(prev);
+  }
+  row.appendChild(mid);
+
+  // ── Peek button (drawer trigger) ─────────────────────────────────
+  const peek = document.createElement('button');
+  peek.setAttribute('data-peek-btn', '');
+  peek.type = 'button';
+  peek.title = '마지막 대화 미리보기';
+  peek.setAttribute('aria-label', '마지막 대화 미리보기');
+  peek.className = 'flex items-center gap-1 self-start mt-0.5 px-2 py-1 rounded-full bg-accent/10 hover:bg-accent/25 text-accent/80 hover:text-accent ring-1 ring-accent/30 hover:ring-accent/60 text-[10px] font-bold spring';
+  const peekIcon = document.createElement('iconify-icon');
+  peekIcon.setAttribute('icon', 'solar:eye-linear');
+  peekIcon.setAttribute('width', '13');
+  peekIcon.style.pointerEvents = 'none';
+  peek.appendChild(peekIcon);
+  const peekText = document.createElement('span');
+  peekText.style.pointerEvents = 'none';
+  peekText.textContent = '미리보기';
+  peek.appendChild(peekText);
+  peek.addEventListener('click', (ev) => { ev.stopPropagation(); topPreviewOpen(p); });
+  row.appendChild(peek);
+
+  // ── Cost + tokens (right columns) ───────────────────────────────
+  const cost = document.createElement('span');
+  cost.className = 'text-sm font-bold text-amber-400/70 whitespace-nowrap pt-0.5';
+  cost.textContent = fmt$(p.total_cost);
+  row.appendChild(cost);
+
+  const tok = document.createElement('span');
+  tok.className = 'text-[11px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5';
+  tok.textContent = fmtTok(p.total_tokens || 0);
+  row.appendChild(tok);
+
+  // Row body click → detail modal (peek button handled above via stopPropagation)
+  row.addEventListener('click', (ev) => {
+    if (ev.target.closest('[data-peek-btn]')) return;
+    showProjectDetail(p.project_name, p.project_path);
+  });
+  return row;
+}
+
+function _buildSectionHeader(label, iconName, count, accentClass) {
+  const h = document.createElement('div');
+  h.className = 'flex items-center gap-2 pt-3 pb-2 first:pt-1';
+  const eyebrow = document.createElement('span');
+  eyebrow.className = 'eyebrow' + (accentClass ? ' ' + accentClass : '');
+  eyebrow.style.fontSize = '.6rem';
+  const icon = document.createElement('iconify-icon');
+  icon.setAttribute('icon', iconName);
+  icon.style.fontSize = '.6rem';
+  eyebrow.appendChild(icon);
+  eyebrow.appendChild(document.createTextNode(label));
+  h.appendChild(eyebrow);
+  const countSpan = document.createElement('span');
+  countSpan.className = 'text-white/20 text-[10px] font-normal';
+  countSpan.textContent = count + '개';
+  h.appendChild(countSpan);
+  return h;
+}
+
 async function loadTopProjects() {
   try {
-    const data = await safeFetch('/api/projects/top?limit=5&with_last_message=true');
+    const data = await safeFetch('/api/projects/top?limit=5&with_last_message=true&include_active=true&active_limit=10');
     const projects = data.projects || [];
+    const active   = data.active   || [];
     const c = document.getElementById('topProjectsList');
-    if (!projects.length) {
-      c.innerHTML = '<div class="text-center text-white/10 text-xs py-8">데이터 없음</div>';
+    c.textContent = '';
+    if (!projects.length && !active.length) {
+      const empty = document.createElement('div');
+      empty.className = 'text-center text-white/10 text-xs py-8';
+      empty.textContent = '데이터 없음';
+      c.appendChild(empty);
       return;
     }
-    const mx = Math.max(...projects.map(p => p.total_cost || 0), 1);
-    const cols = ['#34d399', '#60a5fa', '#fbbf24', '#22d3ee', '#a78bfa', '#fb7185', '#34d399', '#60a5fa', '#fbbf24', '#22d3ee'];
-    c.textContent = '';
-    projects.forEach((p, i) => {
-      const pct = ((p.total_cost || 0) / mx * 100).toFixed(1);
-      const rc = i < 3 ? ['text-amber-400', 'text-white/40', 'text-orange-400'][i] : 'text-white/15';
-      const lm = p.last_message;
-      const cleaned = lm ? (lm.summary_line || lm.preview || '') : '';
-      const previewLine = cleaned
-        ? `<div class="text-[11px] text-white/35 mt-2 leading-relaxed whitespace-normal" style="display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden" title="${esc(lm.preview || '')}"><iconify-icon icon="solar:chat-round-line-linear" width="10" class="inline text-white/25 mr-0.5 align-[-1px]"></iconify-icon>${esc(cleaned)}</div>`
-        : '';
-      const liveBadge = p.is_active
-        ? `<span class="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300/90 ring-1 ring-emerald-500/40 text-[9px] font-bold uppercase tracking-wider align-middle" title="최근 30분 이내 활동"><span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>LIVE</span>`
-        : '';
-      // Status badge — shown to the LEFT of the project name. Different
-      // styles for different states: idle (amber), active tool (cyan),
-      // active subagent (blue).
-      const idleKey = (p.project_name || '') + '|' + (p.project_path || '');
-      const idleEntry = (state.idleProjects && state.idleProjects[idleKey]) || null;
-      let idleBadge = '';
-      if (idleEntry) {
-        const STATUS_BADGE = {
-          'end_turn':        { label: '입력 대기',       icon: 'solar:hourglass-line-linear',    bg: 'bg-amber-500/15', text: 'text-amber-300/95', ring: 'ring-amber-500/40',   pulse: true  },
-          'tool_use':        { label: '권한 승인 대기',  icon: 'solar:shield-check-linear',      bg: 'bg-amber-500/15', text: 'text-amber-300/95', ring: 'ring-amber-500/40',   pulse: true  },
-          'active_subagent': { label: '에이전트 작업 중', icon: 'solar:cpu-bolt-linear',          bg: 'bg-blue-500/15',  text: 'text-blue-300/90',  ring: 'ring-blue-500/40',    pulse: true  },
-          'active_tool':     { label: '도구 실행 중',    icon: 'solar:settings-minimalistic-linear', bg: 'bg-cyan-500/15',  text: 'text-cyan-300/90',  ring: 'ring-cyan-500/30',    pulse: false },
-        };
-        const cfg = STATUS_BADGE[idleEntry.reason] || STATUS_BADGE['end_turn'];
-        const title = esc(idleEntry.preview || cfg.label);
-        idleBadge = `<span class="mr-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full ${cfg.bg} ${cfg.text} ring-1 ${cfg.ring} text-[9px] font-bold uppercase tracking-wider align-middle${cfg.pulse ? ' animate-pulse' : ''}" title="${title}"><iconify-icon icon="${cfg.icon}" width="10" class="inline"></iconify-icon>${cfg.label}</span>`;
-      }
-      const row = document.createElement('div');
-      row.className = 'grid grid-cols-[28px_1fr_auto_auto_auto] items-start gap-2 py-4 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-2 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
-      row.title = '클릭하여 프로젝트 상세 보기';
-      row.setAttribute('tabindex', '0');
-      row.setAttribute('role', 'button');
-      row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
-      // NOTE: innerHTML here is safe — all dynamic values pass through esc() or
-// are numeric (pct, i, cols[i], fmt$, fmtTok). No raw user input.
-row.innerHTML = `<span class="text-sm font-extrabold text-center pt-0.5 ${rc}">#${i+1}</span><div class="min-w-0"><div class="text-sm font-semibold text-white/60 truncate">${idleBadge}${esc(p.project_name||'—')}${liveBadge}</div><div class="h-1.5 bg-white/5 rounded-full mt-2 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${cols[i%cols.length]}"></div></div>${previewLine}</div><button data-peek-btn type="button" title="마지막 대화 미리보기" aria-label="마지막 대화 미리보기" class="flex items-center gap-1 self-start mt-0.5 px-2 py-1 rounded-full bg-accent/10 hover:bg-accent/25 text-accent/80 hover:text-accent ring-1 ring-accent/30 hover:ring-accent/60 text-[10px] font-bold spring"><iconify-icon icon="solar:eye-linear" width="13" style="pointer-events:none"></iconify-icon><span style="pointer-events:none">미리보기</span></button><span class="text-sm font-bold text-amber-400/70 whitespace-nowrap pt-0.5">${fmt$(p.total_cost)}</span><span class="text-[11px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5">${fmtTok(p.total_tokens||0)}</span>`;
-      row.dataset.projectName = p.project_name || '';
-      row.dataset.projectPath = p.project_path || '';
-      // 행 본체: 기존 프로젝트 상세 모달로 드릴
-      row.addEventListener('click', (ev) => {
-        if (ev.target.closest('[data-peek-btn]')) return;  // peek 버튼은 패스
-        showProjectDetail(p.project_name, p.project_path);
-      });
-      // 눈 아이콘 버튼: 우측 drawer 슬라이드 in
-      const peekBtn = row.querySelector('[data-peek-btn]');
-      if (peekBtn) {
-        peekBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          topPreviewOpen(p);
-        });
-      }
-      c.appendChild(row);
-    });
-    // Real-time refresh: if the preview panel is currently showing one of
-    // these projects, rebuild it with the fresh last_message.
-    if (typeof topPreviewMaybeRefresh === 'function') topPreviewMaybeRefresh(projects);
+
+    // Shared bar normalization — scale both sections against the global max
+    // so cost bars are visually comparable across sections.
+    const mx = Math.max(
+      ...projects.map(p => p.total_cost || 0),
+      ...active.map(p => p.total_cost || 0),
+      1
+    );
+
+    if (active.length) {
+      c.appendChild(_buildSectionHeader('활성 (최근 30분)', 'solar:pulse-2-bold', active.length, 'text-emerald-300/90'));
+      active.forEach((p, i) => c.appendChild(_buildProjectRow(p, i, mx, { section: 'active' })));
+    }
+    if (projects.length) {
+      c.appendChild(_buildSectionHeader('TOP 5 누적 비용', 'solar:crown-bold', projects.length));
+      projects.forEach((p, i) => c.appendChild(_buildProjectRow(p, i, mx, { section: 'top' })));
+    }
+
+    // Preview drawer realtime refresh — pass the union so whichever list
+    // still holds the open project gets picked up.
+    if (typeof topPreviewMaybeRefresh === 'function') {
+      topPreviewMaybeRefresh([...projects, ...active]);
+    }
   } catch (e) { reportError('loadTopProjects', e); }
 }
 
@@ -303,7 +450,7 @@ function topPreviewOpen(project) {
   setTimeout(() => { panel.querySelector('button')?.focus(); }, 100);
 
   // Highlight active row
-  document.querySelectorAll('#topProjectsList > div').forEach(r => {
+  document.querySelectorAll('#topProjectsList [data-project-row]').forEach(r => {
     const match = r.dataset.projectName === topPreviewState.projectName
                && r.dataset.projectPath === topPreviewState.projectPath;
     r.classList.toggle('ring-1', match);
@@ -324,7 +471,7 @@ function topPreviewClose() {
     backdrop.style.opacity = '0';
     backdrop.style.pointerEvents = 'none';
   }
-  document.querySelectorAll('#topProjectsList > div').forEach(r => {
+  document.querySelectorAll('#topProjectsList [data-project-row]').forEach(r => {
     r.classList.remove('ring-1', 'ring-accent/30');
   });
 }

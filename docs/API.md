@@ -79,7 +79,7 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 |---|---|---|
 | GET | `/api/models` | 모델별 분석 (sort/order, page/per_page) |
 | GET | `/api/projects` | path 기반 그룹 + session/subagent 카운트 분리 (sort/order, page/per_page) |
-| GET | `/api/projects/top?limit=N` | 비용 상위 N개 |
+| GET | `/api/projects/top?limit=N` | 비용 상위 N개. `include_active=true` → `{projects, active}` 형태로 활성(최근 30분) 프로젝트 별도 반환. `active_window_minutes`, `active_limit`(1–200, 기본 10) |
 | GET | `/api/projects/{name}/stats` | `?path=` 모호성 해소, sessions 배열 포함 |
 | GET | `/api/projects/{name}/messages` | 프로젝트 전체 대화 취합 (limit/offset/order, `?path=`) |
 | DELETE | `/api/projects/{name}` | preview → confirm (`?path=` 필요 시) |

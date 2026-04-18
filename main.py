@@ -1263,55 +1263,62 @@ def api_projects_top(
     limit: int = Query(5, ge=1, le=50),
     with_last_message: bool = Query(False),
     active_window_minutes: int = Query(30, ge=1, le=1440),
+    include_active: bool = Query(False),
+    active_limit: int = Query(10, ge=1, le=200),
 ):
-    """Top N projects. Projects with activity in the last
-    ``active_window_minutes`` minutes are surfaced first (sorted by most
-    recent activity); the remaining slots are filled by cost-ranked
-    projects. Set ``with_last_message=true`` to attach the most recent
-    assistant message preview for the overview TOP 5 widget.
+    """Top N projects by cumulative cost.
+
+    When ``include_active=true``, also returns a separate ``active`` list
+    of all projects with activity in the last ``active_window_minutes``
+    minutes (cost-unfiltered, recency-sorted), capped at ``active_limit``.
+    The overview widget renders these as two groups: "활성 now" and
+    "TOP N by cost" — a project may appear in both lists.
+    Set ``with_last_message=true`` to attach the most recent assistant
+    message preview to every item in both lists.
     """
-    # Fetch a wider candidate pool so we can re-rank in Python: enough that
-    # actives + top-by-cost never loses a legitimate entry.
-    candidate_limit = max(limit * 3, 30)
+    active_cutoff = (datetime.now(_tz.utc) - timedelta(minutes=active_window_minutes)).strftime(
+        '%Y-%m-%dT%H:%M:%SZ')
+    _project_cols = f'''
+        project_name, project_path,
+        SUM(CASE WHEN is_subagent=0 THEN 1 ELSE 0 END) AS session_count,
+        SUM(CASE WHEN is_subagent=1 THEN 1 ELSE 0 END) AS subagent_count,
+        SUM(cost_micro)*1.0/1000000 AS total_cost,
+        SUM(total_input_tokens) AS input_tokens,
+        SUM(total_output_tokens) AS output_tokens,
+        SUM(total_cache_read_tokens) AS cache_read_tokens,
+        SUM(total_input_tokens + total_output_tokens) AS total_tokens,
+        MAX(updated_at) AS last_active
+    '''
     with read_db() as db:
-        rows = db.execute(f'''
-            SELECT project_name, project_path,
-                   SUM(CASE WHEN is_subagent=0 THEN 1 ELSE 0 END) AS session_count,
-                   SUM(CASE WHEN is_subagent=1 THEN 1 ELSE 0 END) AS subagent_count,
-                   SUM(cost_micro)*1.0/1000000 AS total_cost,
-                   SUM(total_input_tokens) AS input_tokens,
-                   SUM(total_output_tokens) AS output_tokens,
-                   SUM(total_cache_read_tokens) AS cache_read_tokens,
-                   SUM(total_input_tokens + total_output_tokens) AS total_tokens,
-                   MAX(updated_at) AS last_active
+        top_rows = db.execute(f'''
+            SELECT {_project_cols}
             FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
             ORDER BY total_cost DESC LIMIT ?
-        ''', (candidate_limit,)).fetchall()
-
-        # Compute is_active against a fresh "now" timestamp and re-rank.
-        active_cutoff = (datetime.now(_tz.utc) - timedelta(minutes=active_window_minutes)).strftime(
-            '%Y-%m-%dT%H:%M:%SZ')
+        ''', (limit,)).fetchall()
         projects = []
-        for r in rows:
+        for r in top_rows:
             d = dict(r)
             d['is_active'] = bool(d.get('last_active') and d['last_active'] >= active_cutoff)
             projects.append(d)
 
-        # Two-tier sort:
-        #   (a) active first, most recent activity at the very top
-        #   (b) remaining slots: highest cost first
-        # Sorting an already cost-sorted list by (is_active DESC, last_active
-        # DESC) is stable, so inactive ordering by cost is preserved.
-        projects.sort(key=lambda p: (
-            0 if p['is_active'] else 1,       # active group first
-            -(_iso_to_epoch(p.get('last_active')) if p['is_active'] else 0),
-        ))
-        projects = projects[:limit]
+        active_projects = []
+        if include_active:
+            active_rows = db.execute(f'''
+                SELECT {_project_cols}
+                FROM sessions GROUP BY {_PROJECT_GROUP_SQL}
+                HAVING MAX(updated_at) >= ?
+                ORDER BY MAX(updated_at) DESC LIMIT ?
+            ''', (active_cutoff, active_limit)).fetchall()
+            for r in active_rows:
+                d = dict(r)
+                d['is_active'] = True
+                active_projects.append(d)
 
-        if with_last_message and projects:
-            # Single query: fetch best preview per project using ROW_NUMBER.
-            paths = [p['project_path'] for p in projects]
-            ph = ','.join(['?'] * len(paths))
+        if with_last_message and (projects or active_projects):
+            # One preview fetch per unique project_path across both lists.
+            all_paths = list({p['project_path'] for p in projects}
+                             | {p['project_path'] for p in active_projects})
+            ph = ','.join(['?'] * len(all_paths))
             preview_rows = db.execute(f'''
                 WITH ranked AS (
                     SELECT m.content_preview, m.timestamp, m.model, m.session_id,
@@ -1334,9 +1341,10 @@ def api_projects_top(
                       AND m.content_preview != ''
                 )
                 SELECT * FROM ranked WHERE rn = 1
-            ''', paths).fetchall()
+            ''', all_paths).fetchall()
             preview_map = {r['project_path']: r for r in preview_rows}
-            for p in projects:
+
+            def _attach(p):
                 row = preview_map.get(p['project_path'])
                 if row:
                     preview = row['content_preview'] or ''
@@ -1352,8 +1360,15 @@ def api_projects_top(
                     }
                 else:
                     p['last_message'] = None
+            for p in projects:
+                _attach(p)
+            for p in active_projects:
+                _attach(p)
 
-    return {'projects': projects}
+    result = {'projects': projects}
+    if include_active:
+        result['active'] = active_projects
+    return result
 
 
 def _project_where(project_name: str, path: Optional[str]) -> tuple[str, str, list]:
