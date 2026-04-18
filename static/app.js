@@ -53,6 +53,7 @@ const state = {
   bulkSelected: new Set(),  // session IDs selected for bulk ops
   lastUpdated: {},
   convSource: 'codex',
+  activeSubview: null,
   nodes: [],  // [{node_id, label, session_count, message_count, last_seen}]
 };
 
@@ -169,14 +170,98 @@ function sortPillHtml(view, col, label, size = 'text-[10px]') {
 }
 
 // ─── Navigation + URL hash routing ─────────────────────────────────────
-const VALID_VIEWS = new Set(['search','overview','cost','sessions','conversations','models','projects','subagents','timeline','export']);
+const VALID_VIEWS = new Set(['overview', 'explore', 'analysis', 'admin']);
+const LEGACY_SUBVIEWS = new Set([
+  'search', 'cost', 'sessions', 'conversations',
+  'models', 'projects', 'subagents', 'timeline', 'export',
+]);
 
 function defaultView() {
-  return 'search';
+  return 'overview';
 }
 
-function showView(view, { updateHash = true } = {}) {
+function loadOverviewDashboard() {
+  loadStats();
+  loadPeriods();
+  loadPlanUsage();
+  loadTopProjects();
+  loadForecast();
+}
+
+function loadExploreDashboard() {
+  renderSearchView();
+}
+
+function loadAnalysisDashboard() {
+  loadCharts();
+}
+
+function loadAdminDashboard() {
+  loadDbSize();
+  renderNodeList();
+  loadAdminStatus();
+  loadSchedule();
+  loadAuditLog();
+}
+
+function legacySubviewGroup(view) {
+  if (['search', 'sessions', 'conversations'].includes(view)) return 'explore';
+  if (['cost', 'models', 'projects', 'subagents', 'timeline'].includes(view)) return 'analysis';
+  if (view === 'export') return 'admin';
+  return null;
+}
+
+function openLegacySubview(view) {
+  const group = legacySubviewGroup(view);
+  if (!group) {
+    state.activeSubview = null;
+    showView(view);
+    return;
+  }
+  state.activeSubview = view;
+  history.replaceState(null, '', `#/${group}/${view}`);
+  if (view === 'search') {
+    showView(group, { updateHash: false, runLoader: false });
+    renderSearchView();
+  } else if (view === 'sessions') {
+    showView(group, { updateHash: false, runLoader: false });
+    loadSessions();
+  } else if (view === 'conversations') {
+    showView(group, { updateHash: false, runLoader: false });
+    loadConvList();
+  } else if (view === 'cost') {
+    showView(group, { updateHash: false, runLoader: false });
+    loadCharts();
+  } else if (view === 'models') {
+    showView(group, { updateHash: false, runLoader: false });
+    loadModels();
+  } else if (view === 'projects') {
+    showView(group, { updateHash: false, runLoader: false });
+    loadProjects();
+  } else if (view === 'subagents') {
+    showView(group, { updateHash: false, runLoader: false });
+    loadSubagentHeatmap();
+    loadSubagentDetails();
+    loadSubagentSuccessMatrix();
+  } else if (view === 'timeline') {
+    showView(group, { updateHash: false, runLoader: false });
+    if (typeof loadTimeline === 'function') loadTimeline();
+  } else if (view === 'export') {
+    showView(group, { updateHash: false, runLoader: false });
+    loadAdminDashboard();
+  }
+}
+
+function showView(view, { updateHash = true, runLoader = true, preserveSubview = false } = {}) {
   if (!VALID_VIEWS.has(view)) view = defaultView();
+  if (runLoader && !preserveSubview) {
+    if (view === 'explore') state.activeSubview = 'search';
+    else if (view === 'analysis') state.activeSubview = 'cost';
+    else if (view === 'admin') state.activeSubview = 'export';
+    else state.activeSubview = null;
+  } else if (!['explore', 'analysis', 'admin'].includes(view)) {
+    state.activeSubview = null;
+  }
   document.querySelectorAll('.nav-pill[data-view]').forEach(b => {
     const active = b.dataset.view === view;
     b.classList.toggle('active', active);
@@ -196,36 +281,34 @@ function showView(view, { updateHash = true } = {}) {
     const want = '#/' + view;
     if (location.hash !== want) history.replaceState(null, '', want);
   }
-  onViewChange(view);
+  prepareViewChange(view);
+  if (runLoader) onViewChange(view);
 }
 
 document.querySelectorAll('.nav-pill[data-view]').forEach(btn => {
   btn.addEventListener('click', () => showView(btn.dataset.view));
 });
 
-function onViewChange(view) {
+function prepareViewChange(view) {
   // Clean up timers from previous view
   if (typeof clearPlanTimer === 'function') clearPlanTimer();
   // Destroy overview/cost chart instances when leaving a chart-bearing view
   // to avoid Chart.js re-init conflicts on return. Project modal chart
   // (projDaily) has its own lifecycle and is left alone.
-  if (view !== 'cost') {
+  if (view !== 'analysis') {
     ['usage','models','dailyCost','cache','stopReason','modelCache'].forEach(k => destroyChart(k));
-  } else {
-    loadCharts();
   }
-  if (view !== 'timeline') {
+  if (view !== 'analysis') {
     destroyChart('timeline');
     if (typeof cleanupTimelineCharts === 'function') cleanupTimelineCharts();
   }
-  if (view === 'sessions') loadSessions();
-  if (view === 'search') renderSearchView();
-  if (view === 'conversations') loadConvList();
-  if (view === 'models') loadModels();
-  if (view === 'projects') loadProjects();
-  if (view === 'subagents') { loadSubagentHeatmap(); loadSubagentDetails(); loadSubagentSuccessMatrix(); }
-  if (view === 'timeline' && typeof loadTimeline === 'function') loadTimeline();
-  if (view === 'export') { loadDbSize(); renderNodeList(); loadAdminStatus(); loadSchedule(); loadAuditLog(); }
+}
+
+function onViewChange(view) {
+  if (view === 'overview') loadOverviewDashboard();
+  else if (view === 'explore') loadExploreDashboard();
+  else if (view === 'analysis') loadAnalysisDashboard();
+  else if (view === 'admin') loadAdminDashboard();
 }
 
 function parseHash() {
@@ -236,15 +319,26 @@ function parseHash() {
 
 function applyHash() {
   const { view, rest } = parseHash();
-  showView(view, { updateHash: false });
   // Deep-link: #/project/<name>?path=<path>  opens a project modal
   if (view === 'project' && rest.length) {
     const q = location.hash.split('?')[1] || '';
     const params = new URLSearchParams(q);
     const name = decodeURIComponent(rest.join('/'));
-    showView('projects', { updateHash: false });
+    state.activeSubview = 'projects';
+    showView('analysis', { updateHash: false, preserveSubview: true });
+    loadProjects();
     showProjectDetail(name, params.get('path') || null);
+    return;
   }
+  if (VALID_VIEWS.has(view) && rest.length && LEGACY_SUBVIEWS.has(rest[0])) {
+    openLegacySubview(rest[0]);
+    return;
+  }
+  if (LEGACY_SUBVIEWS.has(view)) {
+    openLegacySubview(view);
+    return;
+  }
+  showView(view, { updateHash: false });
 }
 
 window.addEventListener('hashchange', applyHash);
@@ -714,16 +808,16 @@ const _CMDK_CACHE_TTL = 30000; // 30 seconds
 
 function _cmdkStaticItems() {
   return [
-    { label: '검색',      hint: '메시지 검색', icon: 'solar:magnifer-linear', action: () => showView('search') },
+    { label: '검색',      hint: '메시지 검색', icon: 'solar:magnifer-linear', action: () => openLegacySubview('search') },
     { label: '개요',      hint: '대시보드', icon: 'solar:chart-square-linear', action: () => showView('overview') },
-    { label: '비용',      hint: '토큰/비용 차트', icon: 'solar:graph-up-linear', action: () => showView('cost') },
-    { label: '세션',      hint: '전체 세션 목록', icon: 'solar:list-check-linear', action: () => showView('sessions') },
-    { label: '대화',      hint: '대화 뷰어', icon: 'solar:chat-round-line-linear', action: () => showView('conversations') },
-    { label: '모델',      hint: '모델 분석', icon: 'solar:cpu-bolt-linear', action: () => showView('models') },
-    { label: '프로젝트',   hint: '프로젝트 목록', icon: 'solar:folder-open-linear', action: () => showView('projects') },
-    { label: 'Subagent',  hint: '히트맵 + 종료 매트릭스', icon: 'solar:widget-2-linear', action: () => showView('subagents') },
-    { label: '타임라인',  hint: '작업 Gantt 차트', icon: 'solar:calendar-linear', action: () => showView('timeline') },
-    { label: '관리',      hint: 'CSV / 백업 / 보존', icon: 'solar:database-linear', action: () => showView('export') },
+    { label: '비용',      hint: '토큰/비용 차트', icon: 'solar:graph-up-linear', action: () => openLegacySubview('cost') },
+    { label: '세션',      hint: '전체 세션 목록', icon: 'solar:list-check-linear', action: () => openLegacySubview('sessions') },
+    { label: '대화',      hint: '대화 뷰어', icon: 'solar:chat-round-line-linear', action: () => openLegacySubview('conversations') },
+    { label: '모델',      hint: '모델 분석', icon: 'solar:cpu-bolt-linear', action: () => openLegacySubview('models') },
+    { label: '프로젝트',   hint: '프로젝트 목록', icon: 'solar:folder-open-linear', action: () => openLegacySubview('projects') },
+    { label: 'Subagent',  hint: '히트맵 + 종료 매트릭스', icon: 'solar:widget-2-linear', action: () => openLegacySubview('subagents') },
+    { label: '타임라인',  hint: '작업 Gantt 차트', icon: 'solar:calendar-linear', action: () => openLegacySubview('timeline') },
+    { label: '관리',      hint: 'CSV / 백업 / 보존', icon: 'solar:database-linear', action: () => openLegacySubview('export') },
     { label: '예산 설정',  hint: '플랜/예산 편집', icon: 'solar:settings-linear', action: () => openPlanSettings() },
     { label: '다크/라이트 전환', hint: '테마 토글', icon: 'solar:sun-linear', action: () => toggleTheme() },
     { label: '키보드 단축키', hint: '도움말 표시', icon: 'solar:keyboard-linear', action: () => showKbdHelp() },
@@ -1055,7 +1149,7 @@ function debouncedRefresh() {
 // Core module listens to its own event — other modules can also listen
 bus.on('refresh', () => {
   loadStats(); loadPeriods(); loadPlanUsage(); loadTopProjects();
-  if (location.hash.startsWith('#/cost')) loadCharts();
+  if (location.hash.startsWith('#/analysis') || location.hash.startsWith('#/cost')) loadCharts();
   if (typeof convRefreshTail === 'function') convRefreshTail();
 });
 
@@ -2821,7 +2915,7 @@ async function showProjectDetail(name, path) {
 function closeProjectModal() {
   document.getElementById('projectModal').style.display = 'none';
   if (location.hash.startsWith('#/project/')) {
-    history.replaceState(null, '', '#/projects');
+    history.replaceState(null, '', '#/analysis/projects');
   }
 }
 
@@ -3332,13 +3426,13 @@ document.addEventListener('keydown', (e) => {
   if (_gPending) {
     _gPending = false;
     const target = NAV_KEY_MAP[e.key.toLowerCase()];
-    if (target) { e.preventDefault(); showView(target); }
+    if (target) { e.preventDefault(); openLegacySubview(target); }
     return;
   }
   if (e.key === 'g') { _gPending = true; setTimeout(() => _gPending = false, 900); return; }
 
   // Conversation viewer: j/k message navigation, Ctrl+F inline search
-  if (location.hash.startsWith('#/conversations') && state.currentSession) {
+  if (state.activeSubview === 'conversations' && state.currentSession) {
     if (e.key === 'j' || e.key === 'ArrowDown') {
       e.preventDefault(); convFocusMessage(_convFocusIdx + 1); return;
     }
@@ -3346,7 +3440,7 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault(); convFocusMessage(_convFocusIdx - 1); return;
     }
   }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'f' && location.hash.startsWith('#/conversations')) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f' && state.activeSubview === 'conversations') {
     e.preventDefault();
     const inp = document.getElementById('convInlineSearch');
     if (inp) { inp.focus(); inp.select(); }

@@ -264,6 +264,36 @@ def test_overview_is_default_shell_view(e2e_client):
     assert 'hidden' in admin_view.group(1).split()
 
 
+def test_grouped_navigation_routing_is_backed_by_app_js():
+    all_js = Path('static/app.js').read_text()
+
+    default_view = re.search(
+        r'function\s+defaultView\(\)\s*\{\s*return\s+[\'"]overview[\'"];\s*\}',
+        all_js,
+        re.S,
+    )
+    valid_views = re.search(
+        r'const\s+VALID_VIEWS\s*=\s*new\s+Set\(\[\s*[\'"]overview[\'"]\s*,\s*[\'"]explore[\'"]\s*,\s*[\'"]analysis[\'"]\s*,\s*[\'"]admin[\'"]\s*\]\s*\);',
+        all_js,
+        re.S,
+    )
+    grouped_handlers = re.search(
+        r'function\s+onViewChange\(view\)\s*\{.*?view\s*===\s*[\'"]overview[\'"].*?loadOverviewDashboard\(\).*?view\s*===\s*[\'"]explore[\'"].*?loadExploreDashboard\(\).*?view\s*===\s*[\'"]analysis[\'"].*?loadAnalysisDashboard\(\).*?view\s*===\s*[\'"]admin[\'"].*?loadAdminDashboard\(\).*?\}',
+        all_js,
+        re.S,
+    )
+    legacy_persistence = re.search(
+        r'function\s+openLegacySubview\(view\)\s*\{.*?history\.replaceState\(null,\s*[\'"]\s*[\'"],\s*`\#/\$\{group\}/\$\{view\}`\);.*?\}',
+        all_js,
+        re.S,
+    )
+
+    assert default_view
+    assert valid_views
+    assert grouped_handlers
+    assert legacy_persistence
+
+
 def test_search_flow_round_trip_matches_frontend_contract(e2e_client):
     all_js = Path('static/app.js').read_text()
     hit = e2e_client.get('/api/search/messages?q=search&role=assistant')
@@ -287,7 +317,7 @@ def test_search_flow_round_trip_matches_frontend_contract(e2e_client):
     ]
 
     default_view = re.search(
-        r'function\s+defaultView\(\)\s*\{\s*return\s+[\'"]search[\'"];\s*\}',
+        r'function\s+defaultView\(\)\s*\{\s*return\s+[\'"]overview[\'"];\s*\}',
         all_js,
         re.S,
     )
@@ -311,8 +341,8 @@ def test_search_flow_round_trip_matches_frontend_contract(e2e_client):
         re.S,
     )
 
-    assert default_view, 'default search view function missing'
-    assert parse_hash_fallback, 'hash routing does not default to search'
+    assert default_view, 'default overview view function missing'
+    assert parse_hash_fallback, 'hash routing does not default to overview'
     assert perform_search, 'search UI no longer wires query -> results -> first-hit selection'
     assert search_enter_binding, 'search input no longer triggers performSearch on Enter'
     assert select_context, 'search UI no longer wires selected hit -> context fetch/render'
