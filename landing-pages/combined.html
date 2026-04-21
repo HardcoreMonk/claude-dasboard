@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>claude-dashboard — 사용량을 숫자로 본다</title>
-  <meta name="description" content="Claude Code 비용, 토큰, 세션을 로컬·팀 단위로 추적. JSONL 실시간 파싱, 174 테스트 통과, SQLite WAL. stdlib 수집 에이전트로 팀 확장 가능.">
+  <meta name="description" content="Claude Code 비용, 토큰, 세션을 로컬·팀 단위로 추적. JSONL 실시간 파싱, 177 테스트 통과, SQLite WAL. stdlib 수집 에이전트로 팀 확장 가능.">
 
   <!-- Open Graph / Twitter — link previews on social + Slack -->
   <meta property="og:type" content="website">
@@ -109,17 +109,17 @@
             bg-white/[0.04] backdrop-blur-xl border border-white/10
             shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
   <div class="flex items-center gap-1 text-[12px]">
-    <a href="/login" class="flex items-center gap-1.5 px-3 py-1 rounded-full hover:bg-white/5 transition-colors group" title="대시보드 로그인으로 이동">
+    <a href="/login" class="inline-flex items-center gap-1.5 px-3 py-1 min-h-[44px] rounded-full hover:bg-white/5 transition-colors group" title="대시보드 로그인으로 이동">
       <div class="w-5 h-5 rounded-md bg-gradient-to-br from-accent to-accent/40 flex items-center justify-center flex-shrink-0">
         <iconify-icon icon="solar:graph-new-up-bold" width="11" class="text-ink"></iconify-icon>
       </div>
       <span class="font-display font-semibold tracking-tight group-hover:text-accent transition-colors hidden sm:inline whitespace-nowrap">claude-dashboard</span>
       <span class="font-mono font-semibold tracking-tighter group-hover:text-accent transition-colors sm:hidden" aria-hidden="true">cd</span>
     </a>
-    <a href="#local" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline">01</a>
-    <a href="#team" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline">02</a>
-    <a href="#proof" class="px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline">03</a>
-    <a href="https://github.com/HardcoreMonk/claude-dasboard" class="ml-1 px-4 py-1.5 rounded-full bg-accent text-ink font-semibold hover:brightness-110 transition-all">GitHub</a>
+    <a href="#local" class="inline-flex items-center px-3 py-1.5 min-h-[44px] rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline-flex">01</a>
+    <a href="#team" class="inline-flex items-center px-3 py-1.5 min-h-[44px] rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline-flex">02</a>
+    <a href="#proof" class="inline-flex items-center px-3 py-1.5 min-h-[44px] rounded-full hover:bg-white/5 transition-colors text-white/50 hidden md:inline-flex">03</a>
+    <a href="https://github.com/HardcoreMonk/claude-dasboard" class="ml-1 inline-flex items-center px-4 py-1.5 min-h-[44px] rounded-full bg-accent text-ink font-semibold hover:brightness-110 transition-all">GitHub</a>
   </div>
 </nav>
 
