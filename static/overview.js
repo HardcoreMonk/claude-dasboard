@@ -192,10 +192,11 @@ function _makeBadge({ className, title, iconName, label, iconWidth }) {
 function _buildProjectRow(p, idx, mxCost, opts) {
   const row = document.createElement('div');
   row.setAttribute('data-project-row', '');
-  // Mobile (<640px): flex-wrap so name gets full first row, right-side cells wrap below.
-  // sm+: back to fixed 5-col grid. Without this, on 375px the 1fr name cell collapses
-  // to ~20px because the three auto cells eat the row (FINDING-002).
-  row.className = 'flex flex-wrap sm:grid sm:grid-cols-[28px_1fr_auto_auto_auto] items-start gap-x-2 gap-y-1 sm:gap-y-2 py-4 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-2 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
+  // Mobile (<640px): 2-col grid [dot, name]. Right-side cells wrap to a second
+  // row via col-start-2. sm+ reverts to original 5-col layout. Without this, on
+  // 375px the 1fr name cell collapses to 1-2 chars because the three auto cells
+  // eat the row (FINDING-002).
+  row.className = 'grid grid-cols-[28px_1fr] sm:grid-cols-[28px_1fr_auto_auto_auto] items-start gap-x-2 gap-y-1 sm:gap-y-2 py-4 border-b border-white/[0.03] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md px-2 spring' + (p.is_active ? ' bg-emerald-500/[0.02]' : '');
   row.title = '클릭하여 프로젝트 상세 보기';
   row.setAttribute('tabindex', '0');
   row.setAttribute('role', 'button');
@@ -223,8 +224,7 @@ function _buildProjectRow(p, idx, mxCost, opts) {
 
   // ── Middle cell: name row + cost bar + preview line ─────────────
   const mid = document.createElement('div');
-  // flex-1 takes remaining space on mobile flex-wrap row; sm+ falls back to grid cell.
-  mid.className = 'min-w-0 flex-1 sm:flex-initial basis-0 sm:basis-auto';
+  mid.className = 'min-w-0';
 
   const nameRow = document.createElement('div');
   nameRow.className = 'text-sm font-semibold text-white/60 truncate';
@@ -292,7 +292,8 @@ function _buildProjectRow(p, idx, mxCost, opts) {
   peek.type = 'button';
   peek.title = '마지막 대화 미리보기';
   peek.setAttribute('aria-label', '마지막 대화 미리보기');
-  peek.className = 'flex items-center gap-1 self-start mt-0.5 px-2 py-1 rounded-full bg-accent/10 hover:bg-accent/25 text-accent/80 hover:text-accent ring-1 ring-accent/30 hover:ring-accent/60 text-[10px] font-bold spring';
+  // col-start-2 on mobile forces the peek button onto row 2 (under mid cell).
+  peek.className = 'inline-flex items-center gap-1 self-start mt-1 sm:mt-0.5 col-start-2 sm:col-start-auto px-2 py-1 rounded-full bg-accent/10 hover:bg-accent/25 text-accent/80 hover:text-accent ring-1 ring-accent/30 hover:ring-accent/60 text-[10px] font-bold spring';
   const peekIcon = document.createElement('iconify-icon');
   peekIcon.setAttribute('icon', 'solar:eye-linear');
   peekIcon.setAttribute('width', '13');
@@ -307,12 +308,12 @@ function _buildProjectRow(p, idx, mxCost, opts) {
 
   // ── Cost + tokens (right columns) ───────────────────────────────
   const cost = document.createElement('span');
-  cost.className = 'text-sm font-bold text-amber-400/70 whitespace-nowrap pt-0.5';
+  cost.className = 'text-sm font-bold text-amber-400/70 whitespace-nowrap pt-0.5 col-start-2 sm:col-start-auto';
   cost.textContent = fmt$(p.total_cost);
   row.appendChild(cost);
 
   const tok = document.createElement('span');
-  tok.className = 'text-[11px] text-white/20 whitespace-nowrap w-16 text-right pt-0.5';
+  tok.className = 'text-[11px] text-white/20 whitespace-nowrap w-16 sm:text-right pt-0.5 col-start-2 sm:col-start-auto';
   tok.textContent = fmtTok(p.total_tokens || 0);
   row.appendChild(tok);
 
