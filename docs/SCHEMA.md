@@ -195,7 +195,7 @@ idx_sessions_parent_tool_use
 ```bash
 rm ~/.claude/dashboard.db
 sudo systemctl restart claude-dashboard
-# 시작 시 JSONL 재스캔 + v0→v14 마이그레이션 + integrity check
+# 시작 시 JSONL 재스캔 + v0→v15 마이그레이션 + integrity check
 ```
 
 ## 모델 가격표

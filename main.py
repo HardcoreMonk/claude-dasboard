@@ -2267,14 +2267,21 @@ def api_project_messages(
     offset: int = Query(0, ge=0),
     order: str = Query('asc'),
 ):
-    """Messages across all sessions in a project (chronological by default)."""
+    """Messages across all sessions in a project (chronological by default).
+
+    Subagent sessions author their records as ``is_sidechain=1`` in the original
+    parent JSONL, so the sidechain filter is only applied to parent sessions
+    (matches the per-session ``/api/sessions/{sid}/messages`` behavior). Without
+    this carve-out, projects whose sessions are all subagents return 0 messages.
+    """
     order_sql = 'DESC' if str(order).lower() == 'desc' else 'ASC'
     _where, where_join, params = _project_where(project_name, path)
+    side_filter = 'AND (s.is_subagent = 1 OR m.is_sidechain = 0)'
     with read_db() as db:
         total = db.execute(f'''
             SELECT COUNT(*) FROM messages m
             JOIN sessions s ON m.session_id = s.id
-            WHERE {where_join} AND m.is_sidechain = 0
+            WHERE {where_join} {side_filter}
         ''', params).fetchone()[0]
         rows = db.execute(f'''
             SELECT m.id, m.message_uuid, m.session_id, m.role,
@@ -2285,7 +2292,7 @@ def api_project_messages(
                    m.model, m.timestamp, m.git_branch
             FROM messages m
             JOIN sessions s ON m.session_id = s.id
-            WHERE {where_join} AND m.is_sidechain = 0
+            WHERE {where_join} {side_filter}
             ORDER BY m.timestamp {order_sql}, m.id {order_sql}
             LIMIT ? OFFSET ?
         ''', [*params, limit, offset]).fetchall()

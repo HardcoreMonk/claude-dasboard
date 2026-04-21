@@ -1,3 +1,5 @@
+@../CLAUDE.md
+
 # CLAUDE.md — 코드 수정 불변식
 
 에이전트가 이 코드베이스를 수정할 때 지켜야 할 규칙.
@@ -10,7 +12,7 @@
 
 | 파일 | 역할 |
 |------|------|
-| `main.py` | FastAPI 70 routes + WS. `/` 공개 랜딩, `/app` SPA (인증), `/api/ingest`, 쿠키 세션 인증, 보존 스케줄러 |
+| `main.py` | FastAPI 67 routes + WS. `/` 공개 랜딩, `/app` SPA (인증), `/api/ingest`, 쿠키 세션 인증, 보존 스케줄러 |
 | `database.py` | SQLite WAL, write/read 분리, v0→v15 마이그레이션 |
 | `parser.py` | JSONL 파싱 (assistant/user/system), 비용 계산, source_node |
 | `watcher.py` | watchdog + safety poll, WatcherMetrics DI |
@@ -24,14 +26,14 @@
 | `static/search.js` | 전문 검색 — 3섹션 컨텍스트 뷰어, 역할 필터, 세션 점프 |
 | `static/app.css` | 스타일 + 라이트모드 (WCAG AA 4.5:1) + color-scheme |
 | `landing-pages/` | 공개 소개 페이지. `index.html` = `combined.html` (md5 동일, 주 랜딩) + variant-a/b/c 보조 시안 3종. `/landing/` 로 서빙, 인증 우회 |
-| `tests/` | 175 pytest (11개 파일) |
+| `tests/` | 177 pytest (11개 파일) |
 
 ## 실행·빌드·테스트
 
 ```bash
 ./start.sh                                    # .env 로드 + npm build + uvicorn
 npm run build                                 # bundle.js + tailwind.css
-./.venv/bin/python -m pytest tests/ -v        # 175 tests
+./.venv/bin/python -m pytest tests/ -v        # 177 tests
 
 # 원격 수집
 curl -o collector.py http://dashboard:8765/api/collector.py

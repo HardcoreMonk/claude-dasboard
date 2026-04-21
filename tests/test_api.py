@@ -265,6 +265,61 @@ def test_subagent_messages_bypasses_sidechain_filter(api_client, tmp_path):
     assert r.json()['total'] >= 1
 
 
+def test_project_messages_includes_subagent_records(api_client, tmp_path):
+    """/api/projects/{name}/messages must return subagent records even when
+    they are flagged ``is_sidechain=1``. Regression: projects composed entirely
+    of subagent sessions used to return an empty list."""
+    import sqlite3
+    conn = sqlite3.connect(str(tmp_path / 'api.db'))
+    # Simulate real JSONL state: subagent messages are authored as sidechain
+    conn.execute(
+        "UPDATE messages SET is_sidechain=1 "
+        "WHERE session_id IN ('agent-1a','agent-1b')"
+    )
+    conn.commit()
+    conn.close()
+    r = api_client.get('/api/projects/demo/messages?path=/tmp/demo&limit=100')
+    assert r.status_code == 200
+    body = r.json()
+    sids = {m['session_id'] for m in body['messages']}
+    assert 'agent-1a' in sids, 'subagent messages were filtered out'
+    assert 'agent-1b' in sids
+    assert 'parent-A' in sids
+    # demo project has 2 parent-A + 1 agent-1a + 1 agent-1b = 4 messages
+    assert body['total'] == 4
+
+
+def test_project_messages_subagent_only_project(api_client, tmp_path):
+    """A project whose sessions are ALL subagents (no parent) must still
+    return messages. Mirrors the production project-dashboard case."""
+    import sqlite3
+    conn = sqlite3.connect(str(tmp_path / 'api.db'))
+    conn.execute('''INSERT INTO sessions
+        (id, project_name, project_path, cwd, model, created_at, updated_at,
+         total_input_tokens, total_output_tokens, cost_micro, message_count,
+         is_subagent, parent_session_id, agent_type, agent_description)
+        VALUES
+        ('agent-only-1', 'subonly', '/tmp/subonly', '/tmp/subonly',
+         'claude-haiku-4-5', '2026-04-05T00:00:00Z', '2026-04-05T00:10:00Z',
+         50, 25, 1000, 1, 1, 'parent-A', 'Explore', 'standalone agent')
+    ''')
+    conn.execute('''INSERT INTO messages
+        (session_id, message_uuid, role, content, content_preview,
+         input_tokens, output_tokens, cost_micro, model, timestamp, is_sidechain)
+        VALUES
+        ('agent-only-1', 'ms1', 'assistant', '{"type":"text","text":"x"}',
+         'x', 50, 25, 1000, 'claude-haiku-4-5', '2026-04-05T00:00:01Z', 1)
+    ''')
+    conn.commit()
+    conn.close()
+    r = api_client.get(
+        '/api/projects/subonly/messages?path=/tmp/subonly&limit=100')
+    assert r.status_code == 200
+    body = r.json()
+    assert body['total'] == 1
+    assert body['messages'][0]['session_id'] == 'agent-only-1'
+
+
 # ─── G1/G2/G3 — stop_reason + parent_tool_use_id ───────────────────────
 
 def test_v7_columns_present(api_client, tmp_path):

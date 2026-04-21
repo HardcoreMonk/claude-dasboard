@@ -1,6 +1,6 @@
 # REST API
 
-70 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/` (공개 랜딩), `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features`, `/landing/*` 는 인증 우회. SPA 대시보드는 `/app` 에서 서빙 (인증 필요).
+67 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/` (공개 랜딩), `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features`, `/landing/*` 는 인증 우회. SPA 대시보드는 `/app` 에서 서빙 (인증 필요).
 
 ## 자동 생성 스펙 (FastAPI)
 
@@ -84,7 +84,7 @@ curl -s http://localhost:8765/openapi.json | jq '.paths | keys' | head
 | GET | `/api/projects` | path 기반 그룹 + session/subagent 카운트 분리 (sort/order, page/per_page) |
 | GET | `/api/projects/top?limit=N` | 비용 상위 N개. `include_active=true` → `{projects, active}` 형태로 활성(최근 30분) 프로젝트 별도 반환. `active_window_minutes`, `active_limit`(1–200, 기본 10) |
 | GET | `/api/projects/{name}/stats` | `?path=` 모호성 해소, sessions 배열 포함 |
-| GET | `/api/projects/{name}/messages` | 프로젝트 전체 대화 취합 (limit/offset/order, `?path=`) |
+| GET | `/api/projects/{name}/messages` | 프로젝트 전체 대화 취합 (limit/offset/order, `?path=`). subagent 세션 메시지는 sidechain 필터 우회 (세션별 `/messages` 와 동일 규약) |
 | DELETE | `/api/projects/{name}` | preview → confirm (`?path=` 필요 시) |
 | GET | `/api/tags` | 전체 태그 + 사용 카운트 (page/per_page) |
 

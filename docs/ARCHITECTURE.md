@@ -16,7 +16,7 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
            |
      [SQLite WAL 쓰기]          database.py
            |
-     [FastAPI 70 routes]        main.py
+     [FastAPI 67 routes]        main.py
        /   |     |    \
       /   REST   WS    \
      /    |     |      \
@@ -43,7 +43,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 
 ### main.py — FastAPI 애플리케이션
 
-**70 HTTP routes + 1 WebSocket** 을 호스팅.
+**67 HTTP routes + 1 WebSocket** 을 호스팅.
 
 | 그룹 | 라우트 | 역할 |
 |---|---|---|
@@ -104,7 +104,7 @@ SCHEMA_VERSION = 14
 | `admin_audit` | 관리자 액션 감사 로그 (ts/action/actor_ip/status/detail) |
 | `app_config` | in-app 설정 키-값 스토어 (현재 `retention_schedule`) |
 
-**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v14). 각 단계는 idempotent.
+**마이그레이션:** `PRAGMA user_version` 기반 차분 적용 (v0→v15). 각 단계는 idempotent.
 
 ### parser.py — JSONL 파싱 엔진
 
@@ -374,7 +374,7 @@ claude-dashboard-retention.service → 오래된 데이터 정리
 ```yaml
 # .github/workflows/ci.yml
 - ruff (lint)
-- pytest 175 tests (~11s)
+- pytest 177 tests (~12s)
 - node --check (JS syntax)
 ```
 
@@ -431,12 +431,12 @@ collector.py                      POST /api/ingest
 
 ## 테스트 커버리지
 
-175 pytest across 11 test files:
+177 pytest across 11 test files:
 
 | 파일 | 테스트 수 | 영역 |
 |---|---|---|
 | `test_parser.py` | 37 | JSONL 파싱, 비용 계산, subagent 식별 |
-| `test_api.py` | 34 | REST 엔드포인트, 정렬, 필터, 페이지네이션 |
+| `test_api.py` | 36 | REST 엔드포인트, 정렬, 필터, 페이지네이션, subagent-only 프로젝트 대화 |
 | `test_contract.py` | 32 | API 응답 스키마 계약 |
 | `test_auth.py` | 18 | 쿠키 세션 인증, rate limit, 로그인/로그아웃 |
 | `test_ingest.py` | 12 | 원격 노드 수집, ingest key 검증 |
