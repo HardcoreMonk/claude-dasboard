@@ -8,6 +8,12 @@
 - 아키텍처 결정: `docs/adr/` (6건)
 - **품질 게이트**: `docs/QUALITY-GATES.md` — 머지 전 필수 통과 기준
 
+## 통합 컨텍스트 (zone-level)
+
+- project-dashboard(:8766) 가 이 서비스를 `/claude/*` 경로로 **reverse-proxy** 중이다 (ADR-011 Phase B, script-injection 아키텍처). 브라우저가 `/ws`, `/api/foo` 처럼 root-absolute 경로로 호출해도 인터셉터가 런타임에 `/claude/` prefix 를 붙인다.
+- 새 root-level 라우트를 추가할 때 주의: 프록시는 경로를 투명하게 통과하지만, HTML body 내 절대경로(`href="/x"`, `src="/x"`, CSS `url(/x)`)는 프록시가 서버-사이드에서 `/claude/x` 로 재작성한다. `<script type="module">` 의 import path 등은 런타임 인터셉터가 커버하므로 별도 조치 불필요.
+- claude-dashboard 의 `project_name` 은 project-dashboard 의 `projects.name` 과 매칭되는 1급 키다 (ADR-011). basename 기준 — 경로 변경 시 두 쪽 모두 주의.
+
 ## 파일 구조
 
 | 파일 | 역할 |
