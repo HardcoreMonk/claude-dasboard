@@ -22,7 +22,7 @@ _read_local = threading.local()   # per-thread cached read connection
 _READ_CONN_TTL = 300              # seconds before recycling a cached read connection
 
 MICRO = 1_000_000                 # 1 USD = 1M micro-dollars
-SCHEMA_VERSION = 15               # bump on every schema change
+SCHEMA_VERSION = 16               # bump on every schema change
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -270,6 +270,26 @@ CREATE TRIGGER IF NOT EXISTS cai_msg_fts_au AFTER UPDATE OF content_preview ON c
     INSERT INTO claude_ai_messages_fts(rowid, content_preview)
     VALUES (new.id, COALESCE(new.content_preview, ''));
 END;
+'''
+
+
+# v16: session_events — append-only log of typed events emitted by the JSONL
+# parser AND the Claude Code event hooks. Powers the session timeline view
+# (Spec A). Idempotency comes from UNIQUE(session_id, event_type, ts, source);
+# duplicate inserts use INSERT OR IGNORE.
+_MIGRATE_V16 = '''
+CREATE TABLE IF NOT EXISTS session_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    TEXT NOT NULL,
+    event_type    TEXT NOT NULL,
+    ts            TEXT NOT NULL,
+    payload       TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    schema_ver    INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (session_id, event_type, ts, source)
+);
+CREATE INDEX IF NOT EXISTS idx_session_events_sid_ts ON session_events(session_id, ts);
+CREATE INDEX IF NOT EXISTS idx_session_events_ts     ON session_events(ts);
 '''
 
 
@@ -808,6 +828,10 @@ def init_db() -> None:
                 _ensure_column(conn, 'sessions', 'ai_tags', "TEXT")
                 _ensure_column(conn, 'sessions', 'ai_tags_status', "TEXT")
                 current = _commit_migration(conn, 15)
+            if current < 16:
+                logger.info("Migrating schema v%d → 16 (session_events)", current)
+                conn.executescript(_MIGRATE_V16)
+                current = _commit_migration(conn, 16)
             # One-time VACUUM to activate auto_vacuum=INCREMENTAL on legacy databases
             av = conn.execute('PRAGMA auto_vacuum').fetchone()[0]
             if av != 2:  # 2 = INCREMENTAL
@@ -841,3 +865,64 @@ def wal_checkpoint() -> None:
                 conn.close()
     except Exception as e:
         logger.warning("WAL checkpoint failed: %s", e)
+
+
+# ─── session_events (Spec A timeline) ───────────────────────────────────────
+
+
+def insert_session_event(*, session_id: str, event_type: str, ts: str,
+                         payload: str, source: str, schema_ver: int = 1) -> None:
+    """Append a typed event to ``session_events``. Duplicate keys are ignored.
+
+    The unique key is ``(session_id, event_type, ts, source)`` — re-ingesting
+    the same JSONL line or replaying the same hook is a no-op.
+    """
+    with write_db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO session_events"
+            " (session_id, event_type, ts, payload, source, schema_ver)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, event_type, ts, payload, source, schema_ver),
+        )
+
+
+def list_session_events(session_id: str, *, since: str | None = None,
+                        limit: int = 200) -> list[sqlite3.Row]:
+    """Return events for a session, ts-ascending, optionally truncated by ``since``."""
+    with read_db() as conn:
+        if since:
+            cur = conn.execute(
+                "SELECT * FROM session_events"
+                " WHERE session_id = ? AND ts >= ?"
+                " ORDER BY ts ASC LIMIT ?",
+                (session_id, since, limit),
+            )
+        else:
+            cur = conn.execute(
+                "SELECT * FROM session_events"
+                " WHERE session_id = ?"
+                " ORDER BY ts ASC LIMIT ?",
+                (session_id, limit),
+            )
+        return list(cur)
+
+
+def update_subagent_child_link(parent_sid: str, parent_tool_use_id: str,
+                               child_sid: str) -> int:
+    """Back-fill ``child_session_id`` into a parent's ``subagent_dispatch`` event.
+
+    Uses SQLite JSON1 (``json_set`` / ``json_extract``); requires SQLite >= 3.38.
+    The ``IS NULL`` guard makes this safe to call repeatedly — only the first
+    successful match wins; subsequent calls return rowcount 0.
+    """
+    with write_db() as conn:
+        cur = conn.execute(
+            "UPDATE session_events"
+            "   SET payload = json_set(payload, '$.child_session_id', ?)"
+            " WHERE session_id = ?"
+            "   AND event_type = 'subagent_dispatch'"
+            "   AND json_extract(payload, '$.tool_use_id') = ?"
+            "   AND json_extract(payload, '$.child_session_id') IS NULL",
+            (child_sid, parent_sid, parent_tool_use_id),
+        )
+        return cur.rowcount

@@ -223,3 +223,75 @@ def test_check_integrity_ok_after_init(temp_db):
     import database
     database.init_db()
     assert database.check_integrity() is True
+
+
+# ─── v16: session_events ────────────────────────────────────────────────
+
+def test_session_events_table_exists(temp_db):
+    """v16 migration creates session_events table + required indexes."""
+    import database
+    database.init_db()
+    with database.read_db() as conn:
+        cols = {r['name'] for r in conn.execute("PRAGMA table_info(session_events)")}
+        assert cols == {'id', 'session_id', 'event_type', 'ts', 'payload', 'source', 'schema_ver'}
+        idx = {r['name'] for r in conn.execute("PRAGMA index_list(session_events)")}
+        assert 'idx_session_events_sid_ts' in idx
+        assert 'idx_session_events_ts' in idx
+        ver = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert ver == 16
+
+
+def test_session_events_unique_constraint(temp_db):
+    """Inserting an identical (sid, type, ts, source) row is silently IGNOREd."""
+    import database
+    database.init_db()
+    database.insert_session_event(
+        session_id='s1', event_type='tool_use', ts='2026-04-27T12:00:00Z',
+        payload='{}', source='jsonl')
+    # Same key — should be ignored, not raise.
+    database.insert_session_event(
+        session_id='s1', event_type='tool_use', ts='2026-04-27T12:00:00Z',
+        payload='{}', source='jsonl')
+    rows = list(database.list_session_events('s1'))
+    assert len(rows) == 1
+
+
+def test_session_events_list_filters_and_orders(temp_db):
+    """list_session_events returns ts-ascending and respects ``since``."""
+    import database
+    database.init_db()
+    for ts in ('2026-04-27T12:02:00Z', '2026-04-27T12:00:00Z', '2026-04-27T12:01:00Z'):
+        database.insert_session_event(
+            session_id='s2', event_type='tool_use', ts=ts,
+            payload='{}', source='jsonl')
+    rows = list(database.list_session_events('s2'))
+    assert [r['ts'] for r in rows] == [
+        '2026-04-27T12:00:00Z', '2026-04-27T12:01:00Z', '2026-04-27T12:02:00Z']
+    rows = list(database.list_session_events('s2', since='2026-04-27T12:01:00Z'))
+    assert [r['ts'] for r in rows] == [
+        '2026-04-27T12:01:00Z', '2026-04-27T12:02:00Z']
+
+
+def test_update_subagent_child_link_fills_payload(temp_db):
+    """Back-fills child_session_id into a subagent_dispatch event's payload."""
+    import database
+    import json as _json
+    database.init_db()
+    payload = _json.dumps({'tool_use_id': 'tu_42', 'description': 'demo'})
+    database.insert_session_event(
+        session_id='parent-sid', event_type='subagent_dispatch',
+        ts='2026-04-27T12:00:00Z', payload=payload, source='jsonl')
+
+    n = database.update_subagent_child_link('parent-sid', 'tu_42', 'agent-child')
+    assert n == 1
+    rows = list(database.list_session_events('parent-sid'))
+    p = _json.loads(rows[0]['payload'])
+    assert p['child_session_id'] == 'agent-child'
+    assert p['tool_use_id'] == 'tu_42'
+
+    # Idempotent: child_session_id IS NOT NULL guard prevents a second write.
+    n2 = database.update_subagent_child_link('parent-sid', 'tu_42', 'agent-other')
+    assert n2 == 0
+    rows = list(database.list_session_events('parent-sid'))
+    p = _json.loads(rows[0]['payload'])
+    assert p['child_session_id'] == 'agent-child'  # unchanged
