@@ -42,12 +42,14 @@ except ImportError:
     _anthropic_sdk = None  # type: ignore
     _ANTHROPIC_OK = False
 
+import database
 from database import (
     read_db, write_db, init_db, check_integrity, DB_PATH, _write_lock,
     close_thread_connections, wal_checkpoint,
 )
 from parser import process_record
 from watcher import ClaudeFileWatcher, WatcherMetrics
+import hooks
 
 logging.basicConfig(
     level=logging.INFO,
@@ -220,15 +222,34 @@ def _make_watcher_metrics() -> "WatcherMetrics":
     )
 
 
+# ─── Hook receiver plumbing (Spec A Task 3) ──────────────────────────────────
+
+# Resolved at lifespan start; routes read via the module-level closure in hooks.py.
+HOOK_TOKEN: str = ""
+
+
+def _broadcast_timeline_event(session_id: str, event: dict) -> None:
+    """Placeholder — Task 7 replaces this with a real WS broadcast.
+
+    Kept as a sync callable so the hook routes (which are sync def) can call
+    it without scheduling. Task 7 will adapt to async via ``asyncio.create_task``
+    or convert the routes to async.
+    """
+    return None
+
+
 # ─── Lifespan ────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global watcher, _sched_task
+    global watcher, _sched_task, HOOK_TOKEN
     init_db()
     if DB_PATH.exists() and not check_integrity():
         logger.error("DATABASE INTEGRITY CHECK FAILED — consider restoring from backup")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    # Load (or create) the hook bearer token and wire the receiver router.
+    HOOK_TOKEN = hooks.load_or_create_hook_token()
+    hooks._wire(database, _broadcast_timeline_event, HOOK_TOKEN)
     async def _broadcast_with_analyze(update: dict) -> None:
         await manager.broadcast(update)
         if update.get('type') == 'batch_update':
@@ -253,6 +274,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Claude Usage Dashboard", lifespan=lifespan)
 
+# Hook receiver router — auth via Bearer token (see hooks._check_auth), so the
+# dashboard session middleware skips this prefix (added to _AUTH_BYPASS_PREFIX).
+app.include_router(hooks.router)
+
 # CORS — restricted by default; set DASHBOARD_CORS_ORIGINS to allow specific origins.
 # Example: DASHBOARD_CORS_ORIGINS=https://dash.example.com,http://localhost:3000
 _cors_raw = os.environ.get('DASHBOARD_CORS_ORIGINS', '')
@@ -274,7 +299,7 @@ app.add_middleware(
 _AUTH_BYPASS = {'/', '/api/health', '/metrics', '/api/ingest', '/api/collector.py',
                 '/api/auth/login', '/api/auth/me', '/login', '/features',
                 '/landing', '/landing/'}
-_AUTH_BYPASS_PREFIX = ('/static/', '/landing/')
+_AUTH_BYPASS_PREFIX = ('/static/', '/landing/', '/api/hooks/')
 
 if _AUTH_PW:
     @app.middleware("http")
