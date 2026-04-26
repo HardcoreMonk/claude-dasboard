@@ -21,6 +21,9 @@ env/
 # Local Claude Code project state
 .claude/
 
+# Worktrees
+.worktrees/
+
 # Environment / secrets
 .env
 *.local
