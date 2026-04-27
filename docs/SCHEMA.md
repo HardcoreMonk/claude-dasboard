@@ -1,7 +1,7 @@
 # 데이터베이스 스키마
 
 SQLite 파일: `~/.claude/dashboard.db`
-모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA auto_vacuum=INCREMENTAL`, `PRAGMA user_version=14`
+모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA auto_vacuum=INCREMENTAL`, `PRAGMA user_version=16`
 
 ## 비용은 INTEGER micro-dollars
 
@@ -150,6 +150,36 @@ CREATE VIRTUAL TABLE claude_ai_messages_fts USING fts5(
 }
 ```
 
+## session_events (v16)
+
+JSONL 파서와 Claude Code hook 양쪽이 동일한 append-only 로그에 기록. Spec A timeline 뷰의 단일 진실 소스. ADR-0007 참조.
+
+| 컬럼 | 타입 | 도입 | 설명 |
+|---|---|---|---|
+| `id` | INTEGER PK | v16 | autoincrement |
+| `session_id` | TEXT | v16 | `sessions.id` 와 일치 |
+| `event_type` | TEXT | v16 | `session_start` / `session_stop` / `message_user` / `message_assistant` / `end_turn` / `tool_use` / `permission_prompt` / `subagent_dispatch` |
+| `ts` | TEXT | v16 | ISO 8601 UTC |
+| `payload` | TEXT | v16 | JSON, type-specific |
+| `source` | TEXT | v16 | `hook` \| `jsonl` |
+| `schema_ver` | INTEGER | v16 | hook payload 스키마 버전 (default 1) |
+
+`UNIQUE (session_id, event_type, ts, source)` — 같은 source 내부 중복은 `INSERT OR IGNORE`. 다른 source 의 동일 이벤트는 양쪽 row 보존 후 UI 에서 hook 우선 그룹화.
+
+인덱스: `idx_session_events_sid_ts (session_id, ts)`, `idx_session_events_ts (ts)`.
+
+### Hook payloads (reverse-engineered)
+
+Claude Code hook signature 는 비공식 — 변경 시 `schema_ver` bump + WARN 으로 격리. 첫 캡처 후 본 섹션에 type 별 키를 채워 넣을 것.
+
+| event_type | 알려진 키 | 비고 |
+|---|---|---|
+| `session_start` | `sessionId`, `cwd`, `ts` | SessionStart hook |
+| `session_stop` | `sessionId`, `ts` | Stop hook |
+| `permission_prompt` | `sessionId`, `tool`, `ts` | Notification hook |
+
+JSONL 파생 이벤트 (source=`jsonl`) 의 payload 구조는 `parser.py` 에서 직접 결정하므로 stable.
+
 ## plan_config
 
 | 컬럼 | 설명 |
@@ -189,13 +219,14 @@ idx_sessions_parent_tool_use
 | v12 | `sessions.turn_duration_ms` — user→assistant 턴 실행 시간 (ms) |
 | v13 | `sessions.source_node` + `remote_nodes` 테이블 — 다중 서버 수집 식별 (`idx_sessions_source_node`) |
 | v14 | `admin_audit` + `app_config` — 관리자 액션 감사 로그 + in-app 설정 스토어 (`idx_admin_audit_ts`) |
+| v16 | `session_events` 테이블 — Claude Code hook + JSONL 파생 이벤트 통합 로그 (timeline 뷰, ADR-0007). `idx_session_events_sid_ts`, `idx_session_events_ts` |
 
 ### DB 재구축 (드물게)
 
 ```bash
 rm ~/.claude/dashboard.db
 sudo systemctl restart claude-dashboard
-# 시작 시 JSONL 재스캔 + v0→v15 마이그레이션 + integrity check
+# 시작 시 JSONL 재스캔 + v0→v16 마이그레이션 + integrity check
 ```
 
 ## 모델 가격표
