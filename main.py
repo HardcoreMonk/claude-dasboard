@@ -223,7 +223,7 @@ def _make_watcher_metrics() -> "WatcherMetrics":
     )
 
 
-# ─── Hook receiver plumbing (Spec A Task 3) ──────────────────────────────────
+# ─── Hook receiver plumbing ──────────────────────────────────────────────────
 
 # Resolved at lifespan start; routes read via the module-level closure in hooks.py.
 HOOK_TOKEN: str = ""
@@ -661,7 +661,7 @@ async def websocket_endpoint(ws: WebSocket):
                     async with lock:
                         await ws.send_text('pong')
                     continue
-                # Spec A Task 7: JSON control messages.
+                # JSON control messages.
                 # Anything that isn't 'ping' is parsed as JSON; non-JSON
                 # frames are silently dropped (forward-compat — clients
                 # may send heartbeats we don't understand yet).
@@ -1111,10 +1111,10 @@ def api_session_timeline(
 ):
     """Return ordered ``session_events`` rows for a session.
 
-    Spec A Task 6 — append-only event log emitted by the JSONL parser
-    (``source='jsonl'``) and the Claude Code event hooks (``source='hook'``).
-    Auth is gated by the dashboard session middleware; ``/api/sessions/`` is
-    NOT in ``_AUTH_BYPASS_PREFIX`` so cookie-or-Basic auth applies.
+    Append-only event log emitted by the JSONL parser (``source='jsonl'``)
+    and the Claude Code event hooks (``source='hook'``). Auth is gated by
+    the dashboard session middleware; ``/api/sessions/`` is NOT in
+    ``_AUTH_BYPASS_PREFIX`` so cookie-or-Basic auth applies.
 
     Parameters
     ----------
@@ -2825,7 +2825,7 @@ def _run_retention(older_than_days: int) -> dict:
             sess_del = db.execute(
                 f'DELETE FROM sessions WHERE id IN ({ph})', sids
             ).rowcount
-    # Also age-out session_events on the same cadence (Spec A Task 10).
+    # Also age-out session_events on the same cadence.
     events_del = database.cleanup_old_session_events(retention_days=older_than_days)
     logger.info(
         "Retention: deleted %d sessions, %d messages, %d events (cutoff=%s)",

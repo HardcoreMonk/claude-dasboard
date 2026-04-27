@@ -116,7 +116,7 @@ class ClaudeFileWatcher:
                  metrics: Optional[WatcherMetrics] = None,
                  timeline_broadcast: Optional[Callable[[str, dict], None]] = None):
         self._broadcast = broadcast
-        # Spec A Task 7: optional sync callable for per-event WS fan-out.
+        # Optional sync callable for per-event WS fan-out.
         # ``None`` (default) keeps the watcher silent on the timeline channel,
         # which is what every existing test expects. Production wires
         # ``main._broadcast_timeline_event``.
@@ -130,7 +130,7 @@ class ClaudeFileWatcher:
         self._observer: Optional["Observer"] = None  # type: ignore[name-defined]
         self._event_queue: Optional[asyncio.Queue] = None
 
-    # ── Spec A Task 5: subagent child-link back-fill ──────────────────────
+    # ── Subagent child-link back-fill ─────────────────────────────────────
 
     def link_subagent_child(self, parent_sid: str, parent_tool_use_id: str,
                             child_sid: str) -> int:
@@ -438,7 +438,7 @@ class ClaudeFileWatcher:
             with self._state_lock:
                 self._retry_queue.pop(file_path, None)
 
-            # Spec A Task 5: bidirectional subagent-link race recovery.
+            # Bidirectional subagent-link race recovery.
             # We dispatch back-fill calls AFTER write_db() exits so
             # update_subagent_child_link can safely re-acquire _write_lock
             # without deadlock.

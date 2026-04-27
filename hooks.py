@@ -25,7 +25,7 @@ import os
 import secrets
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Type
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ValidationError
@@ -91,8 +91,8 @@ def _log_validation_error(route: str, e: ValidationError) -> None:
 
     ``ValidationError.__str__`` includes ``input_value=...`` which would leak
     raw payload bytes (tokens, paths, message excerpts) into journalctl.
-    Spec section 13 + project CLAUDE.md forbid that. We log just the error
-    count and locator path.
+    Project CLAUDE.md forbids that. We log just the error count and locator
+    path.
     """
     locs = [err["loc"] for err in e.errors(include_input=False)]
     log.warning("%s payload invalid (%d errors at %s)",
@@ -126,8 +126,8 @@ def _wire(db: Any, broadcast_fn: Callable[[str, dict], None],
 
     ``db`` must expose ``insert_session_event(*, session_id, event_type, ts,
     payload, source)`` — normally the ``database`` module. ``broadcast_fn``
-    receives ``(session_id, event_dict)``; Task 3 ships a no-op placeholder,
-    Task 7 will replace it with the real WS broadcast.
+    receives ``(session_id, event_dict)``; the WS broadcast bridge plugs in
+    here.
 
     Idempotent: calling repeatedly only updates the captured references.
     """
@@ -155,69 +155,63 @@ def _safe_broadcast(session_id: str, event: dict) -> None:
                     session_id, event.get("event_type", "?"))
 
 
-@router.post("/session-start")
-def session_start(payload: dict, authorization: str | None = Header(default=None)):
+def _emit(
+    *,
+    payload: dict,
+    authorization: str | None,
+    model_cls: Type[BaseModel],
+    event_type: str,
+    decode_fn: Callable[[BaseModel], dict],
+) -> dict:
+    """Shared receive→validate→insert→broadcast pipeline for the 3 routes.
+
+    All hook routes follow the same skeleton; only the payload model, the
+    persisted ``event_type``, and the decoded payload shape vary. Keeping
+    the orchestration in one place means auth, validation logging, the
+    insert call signature, and the broadcast envelope shape stay in sync.
+    """
     _check_auth(authorization, _token)
     try:
-        data = SessionStartPayload(**payload)
+        data = model_cls(**payload)
     except ValidationError as e:
-        _log_validation_error("session-start", e)
+        _log_validation_error(event_type, e)
         return {"ok": False, "warn": "invalid payload"}
     ts = _now_iso()
-    decoded = {"cwd": data.cwd, "version": data.version}
+    decoded = decode_fn(data)
     row_id = _db.insert_session_event(
-        session_id=data.sessionId, event_type="session_start", ts=ts,
-        payload=json.dumps(decoded),
-        source="hook",
-    )
-    if row_id is not None:
-        _safe_broadcast(data.sessionId, {
-            "id": row_id, "event_type": "session_start", "ts": ts,
-            "payload": decoded, "source": "hook",
-        })
-    return {"ok": True}
-
-
-@router.post("/session-stop")
-def session_stop(payload: dict, authorization: str | None = Header(default=None)):
-    _check_auth(authorization, _token)
-    try:
-        data = SessionStopPayload(**payload)
-    except ValidationError as e:
-        _log_validation_error("session-stop", e)
-        return {"ok": False, "warn": "invalid payload"}
-    ts = _now_iso()
-    decoded = {"reason": data.reason}
-    row_id = _db.insert_session_event(
-        session_id=data.sessionId, event_type="session_stop", ts=ts,
+        session_id=data.sessionId, event_type=event_type, ts=ts,
         payload=json.dumps(decoded), source="hook",
     )
     if row_id is not None:
         _safe_broadcast(data.sessionId, {
-            "id": row_id, "event_type": "session_stop", "ts": ts,
+            "id": row_id, "event_type": event_type, "ts": ts,
             "payload": decoded, "source": "hook",
         })
     return {"ok": True}
+
+
+@router.post("/session-start")
+def session_start(payload: dict, authorization: str | None = Header(default=None)):
+    return _emit(
+        payload=payload, authorization=authorization,
+        model_cls=SessionStartPayload, event_type="session_start",
+        decode_fn=lambda d: {"cwd": d.cwd, "version": d.version},
+    )
+
+
+@router.post("/session-stop")
+def session_stop(payload: dict, authorization: str | None = Header(default=None)):
+    return _emit(
+        payload=payload, authorization=authorization,
+        model_cls=SessionStopPayload, event_type="session_stop",
+        decode_fn=lambda d: {"reason": d.reason},
+    )
 
 
 @router.post("/notification")
 def notification(payload: dict, authorization: str | None = Header(default=None)):
-    _check_auth(authorization, _token)
-    try:
-        data = NotificationPayload(**payload)
-    except ValidationError as e:
-        _log_validation_error("notification", e)
-        return {"ok": False, "warn": "invalid payload"}
-    ts = _now_iso()
-    decoded = {"message": data.message, "tool": data.tool}
-    row_id = _db.insert_session_event(
-        session_id=data.sessionId, event_type="permission_prompt", ts=ts,
-        payload=json.dumps(decoded),
-        source="hook",
+    return _emit(
+        payload=payload, authorization=authorization,
+        model_cls=NotificationPayload, event_type="permission_prompt",
+        decode_fn=lambda d: {"message": d.message, "tool": d.tool},
     )
-    if row_id is not None:
-        _safe_broadcast(data.sessionId, {
-            "id": row_id, "event_type": "permission_prompt", "ts": ts,
-            "payload": decoded, "source": "hook",
-        })
-    return {"ok": True}

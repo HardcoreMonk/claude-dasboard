@@ -1178,7 +1178,7 @@ function renderConvSortBar(){
     return `<button onclick="toggleSort('conversations','${k}')" class="px-2 py-0.5 rounded-full border spring text-[9px] font-bold ${active?'bg-accent/15 text-accent border-accent/30':'text-white/40 border-white/[0.06] hover:text-white/70'}">${l}${arr}</button>`;
   }).join('');
 }
-// ─── Spec A Task 8 — [Conversation | Timeline] toggle pill ──────────────
+// ─── [Conversation | Timeline] toggle pill ──────────────────────────────
 // Injected after the session header is rendered. Reads ?view= from the URL,
 // builds two pills, and on click flips the param via history.pushState then
 // re-runs openConversation to swap the body. DOM-safe: createElement only.
@@ -1910,7 +1910,7 @@ async function openConversation(sid,session,listItem){
     btn.onclick = () => loadSessionChain(sid);
     slot.appendChild(btn);
   }, 60);
-  // Spec A Task 8 — render [Conversation | Timeline] toggle pill
+  // Render [Conversation | Timeline] toggle pill
   renderConvViewToggle(sid, session);
   // If ?view=timeline, take over the message pane with TimelineCard and skip
   // the conventional message-rendering path.
@@ -1936,12 +1936,20 @@ async function openConversation(sid,session,listItem){
     window._activeTimeline = null;
   }
   const c=document.getElementById('convMessages');
-  c.innerHTML=`<div class="text-center text-white/25 text-xs py-10 dots">로딩 중</div>`;
+  c.textContent='';
+  c.appendChild(h('div', {class:'text-center text-white/25 text-xs py-10 dots'}, '로딩 중'));
   let data,msgs;
   try{data=await safeFetch(`/api/sessions/${sid}/messages?limit=200`);msgs=data.messages||[];}
-  catch(err){c.innerHTML=`<div class="text-center text-white/25 text-xs py-10">로딩 실패</div>`;return;}
-  c.innerHTML='';
-  if(!msgs.length){c.innerHTML=`<div class="text-center text-white/25 text-xs py-10">메시지 없음</div>`;return;}
+  catch(err){
+    c.textContent='';
+    c.appendChild(h('div', {class:'text-center text-white/25 text-xs py-10'}, '로딩 실패'));
+    return;
+  }
+  c.textContent='';
+  if(!msgs.length){
+    c.appendChild(h('div', {class:'text-center text-white/25 text-xs py-10'}, '메시지 없음'));
+    return;
+  }
   // Pre-pass: build _errIds set for ◇ error branch markers
   const _errIds = new Set();
   msgs.forEach(m => {

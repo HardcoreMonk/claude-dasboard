@@ -9,15 +9,13 @@ Usage:
     ./.venv/bin/python install_hooks.py rotate-token [--yes]
 """
 import argparse
+import importlib
 import json
-import os
-import secrets
 import sys
 from pathlib import Path
 
 # Module-level mutable bindings — tests monkeypatch these.
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
-TOKEN_PATH = Path.home() / ".claude" / ".hook-token"
 ENDPOINT_BASE = "http://localhost:8765/api/hooks"
 
 # Map Claude Code event name → server route under /api/hooks/.
@@ -53,14 +51,27 @@ def _desired_hooks() -> dict:
     }
 
 
+def _hooks_mod():
+    """Resolve ``hooks`` lazily via importlib.
+
+    test_hooks.py's fixture pops ``hooks`` from ``sys.modules`` between
+    tests. A top-level ``import hooks`` in this module would therefore
+    bind to a stale module across the test boundary, so monkeypatching
+    ``hooks.HOOK_TOKEN_PATH`` in later tests would miss the version we
+    actually call into. Looking it up at call time always returns the
+    live module.
+    """
+    return importlib.import_module("hooks")
+
+
 def _ensure_token() -> str:
-    if TOKEN_PATH.exists():
-        return TOKEN_PATH.read_text().strip()
-    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    token = secrets.token_hex(32)
-    TOKEN_PATH.write_text(token)
-    os.chmod(TOKEN_PATH, 0o600)
-    return token
+    """Delegate to hooks.load_or_create_hook_token to avoid duplicate I/O logic.
+
+    Single source of truth for the token-on-disk format (chmod 600,
+    32-byte hex). hooks.HOOK_TOKEN_PATH is the path; tests monkeypatch
+    it there.
+    """
+    return _hooks_mod().load_or_create_hook_token()
 
 
 def _load_settings() -> dict:
@@ -124,8 +135,9 @@ def rotate_token(yes: bool = False) -> None:
     ):
         print("중단.")
         return
-    if TOKEN_PATH.exists():
-        TOKEN_PATH.unlink()
+    h = _hooks_mod()
+    if h.HOOK_TOKEN_PATH.exists():
+        h.HOOK_TOKEN_PATH.unlink()
     _ensure_token()
     print("토큰 회전 완료. claude-dashboard 재시작 + claude 재시작 필요.")
 

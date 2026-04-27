@@ -1,4 +1,4 @@
-"""Tests for install_hooks.py CLI (Spec A Task 9)."""
+"""Tests for install_hooks.py CLI."""
 import json
 import stat
 
@@ -10,7 +10,7 @@ def test_install_idempotent(tmp_path, monkeypatch):
     settings.write_text(json.dumps({"permissions": {"allow": []}}))
     token_path = tmp_path / ".hook-token"
     monkeypatch.setattr("install_hooks.SETTINGS_PATH", settings)
-    monkeypatch.setattr("install_hooks.TOKEN_PATH", token_path)
+    monkeypatch.setattr("hooks.HOOK_TOKEN_PATH", token_path)
 
     install(yes=True)
     after_first = json.loads(settings.read_text())
@@ -25,7 +25,7 @@ def test_install_idempotent(tmp_path, monkeypatch):
 def test_uninstall_removes_hook_entries(tmp_path, monkeypatch):
     settings = tmp_path / "settings.json"
     monkeypatch.setattr("install_hooks.SETTINGS_PATH", settings)
-    monkeypatch.setattr("install_hooks.TOKEN_PATH", tmp_path / ".hook-token")
+    monkeypatch.setattr("hooks.HOOK_TOKEN_PATH", tmp_path / ".hook-token")
     install(yes=True)
     uninstall(yes=True)
     after = json.loads(settings.read_text())
@@ -34,7 +34,7 @@ def test_uninstall_removes_hook_entries(tmp_path, monkeypatch):
 
 def test_rotate_token_changes_token(tmp_path, monkeypatch):
     monkeypatch.setattr("install_hooks.SETTINGS_PATH", tmp_path / "settings.json")
-    monkeypatch.setattr("install_hooks.TOKEN_PATH", tmp_path / ".hook-token")
+    monkeypatch.setattr("hooks.HOOK_TOKEN_PATH", tmp_path / ".hook-token")
     install(yes=True)
     t1 = (tmp_path / ".hook-token").read_text()
     rotate_token(yes=True)
@@ -50,7 +50,7 @@ def test_install_creates_token_with_perms(tmp_path, monkeypatch):
     settings = tmp_path / "settings.json"
     token_path = tmp_path / ".hook-token"
     monkeypatch.setattr("install_hooks.SETTINGS_PATH", settings)
-    monkeypatch.setattr("install_hooks.TOKEN_PATH", token_path)
+    monkeypatch.setattr("hooks.HOOK_TOKEN_PATH", token_path)
 
     install(yes=True)
     assert token_path.exists()
@@ -65,7 +65,7 @@ def test_uninstall_when_no_hooks_present(tmp_path, monkeypatch):
     settings = tmp_path / "settings.json"
     settings.write_text(json.dumps({"permissions": {"allow": []}}))
     monkeypatch.setattr("install_hooks.SETTINGS_PATH", settings)
-    monkeypatch.setattr("install_hooks.TOKEN_PATH", tmp_path / ".hook-token")
+    monkeypatch.setattr("hooks.HOOK_TOKEN_PATH", tmp_path / ".hook-token")
 
     uninstall(yes=True)
     after = json.loads(settings.read_text())
@@ -79,7 +79,7 @@ def test_install_preserves_existing_user_hooks(tmp_path, monkeypatch):
     user_hook = {"PreToolUse": [{"command": "echo user"}]}
     settings.write_text(json.dumps({"hooks": user_hook}))
     monkeypatch.setattr("install_hooks.SETTINGS_PATH", settings)
-    monkeypatch.setattr("install_hooks.TOKEN_PATH", tmp_path / ".hook-token")
+    monkeypatch.setattr("hooks.HOOK_TOKEN_PATH", tmp_path / ".hook-token")
 
     install(yes=True)
     after = json.loads(settings.read_text())

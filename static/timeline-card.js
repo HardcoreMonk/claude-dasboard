@@ -1,4 +1,4 @@
-// ─── timeline-card.js — per-session timeline card list (Spec A Task 8) ──
+// ─── timeline-card.js — per-session timeline card list ─────────────────
 // Renders /api/sessions/{sid}/timeline events as DOM cards in ts ASC order
 // and live-appends new events via /ws { type: 'timeline_event' }.
 // DOM-safe: createElement + textContent only. No innerHTML, no template
@@ -6,6 +6,54 @@
 //
 // Concatenated by build.js, so `class TimelineCard` is exposed as a global.
 // Activated by app.js when ?view=timeline is in the URL.
+
+// Per-event-type body renderers. Adding a new event_type = one-line append.
+// Each renderer receives (body, payload) and mutates `body` in place.
+// `card` is also passed for handlers that need to attach extra children
+// (e.g. subagent_dispatch's child-session link).
+const _TC_RENDERERS = {
+  tool_use: (body, p) => {
+    const tool = p.tool || p.name || '?';
+    const preview = p.input_preview || p.preview || '';
+    body.textContent = `${tool}  ${preview}`;
+  },
+  permission_prompt: (body, p) => {
+    const tool = p.tool || '?';
+    const message = p.message || p.reason || '';
+    body.textContent = `${tool} 권한 — ${message}`;
+  },
+  subagent_dispatch: (body, p) => {
+    const agent = p.agent_type || '?';
+    const desc = p.description || '';
+    const arrowLine = document.createElement('div');
+    arrowLine.textContent = `→ ${agent}  ${desc}`;
+    body.appendChild(arrowLine);
+    if (p.child_session_id) {
+      const linkWrap = document.createElement('div');
+      linkWrap.className = 'mt-1 text-[10px]';
+      const link = document.createElement('a');
+      const childId = p.child_session_id;
+      link.href = `/app/session/${encodeURIComponent(childId)}?view=timeline`;
+      link.className = 'text-accent/85 hover:text-accent underline font-mono';
+      link.textContent = `child: ${String(childId).slice(0, 8)}`;
+      linkWrap.appendChild(link);
+      body.appendChild(linkWrap);
+    }
+  },
+  message_user: (body, p) => { body.textContent = p.preview || ''; },
+  message_assistant: (body, p) => { body.textContent = p.preview || ''; },
+  end_turn: (body, p) => { body.textContent = `(입력 대기) ${p.preview || ''}`; },
+  session_start: (body, p) => { body.textContent = `시작  ${p.cwd || ''}`; },
+  session_stop: (body, p) => { body.textContent = `종료  ${p.reason || ''}`; },
+};
+
+function _tcDefaultRender(body, payload) {
+  try {
+    body.textContent = JSON.stringify(payload).slice(0, 120);
+  } catch {
+    body.textContent = '';
+  }
+}
 
 class TimelineCard {
   constructor(container) {
@@ -97,48 +145,8 @@ class TimelineCard {
     body.className = 'tl-body text-white/75 whitespace-pre-wrap break-words';
 
     const payload = (ev.payload && typeof ev.payload === 'object') ? ev.payload : {};
-    const t = ev.event_type;
-
-    if (t === 'tool_use') {
-      const tool = payload.tool || payload.name || '?';
-      const preview = payload.input_preview || payload.preview || '';
-      body.textContent = `${tool}  ${preview}`;
-    } else if (t === 'permission_prompt') {
-      const tool = payload.tool || '?';
-      const message = payload.message || payload.reason || '';
-      body.textContent = `${tool} 권한 — ${message}`;
-    } else if (t === 'subagent_dispatch') {
-      const agent = payload.agent_type || '?';
-      const desc = payload.description || '';
-      const arrowLine = document.createElement('div');
-      arrowLine.textContent = `→ ${agent}  ${desc}`;
-      body.appendChild(arrowLine);
-      if (payload.child_session_id) {
-        const linkWrap = document.createElement('div');
-        linkWrap.className = 'mt-1 text-[10px]';
-        const link = document.createElement('a');
-        const childId = payload.child_session_id;
-        link.href = `/app/session/${encodeURIComponent(childId)}?view=timeline`;
-        link.className = 'text-accent/85 hover:text-accent underline font-mono';
-        link.textContent = `child: ${String(childId).slice(0, 8)}`;
-        linkWrap.appendChild(link);
-        body.appendChild(linkWrap);
-      }
-    } else if (t === 'message_user' || t === 'message_assistant') {
-      body.textContent = payload.preview || '';
-    } else if (t === 'end_turn') {
-      body.textContent = `(입력 대기) ${payload.preview || ''}`;
-    } else if (t === 'session_start') {
-      body.textContent = `시작  ${payload.cwd || ''}`;
-    } else if (t === 'session_stop') {
-      body.textContent = `종료  ${payload.reason || ''}`;
-    } else {
-      try {
-        body.textContent = JSON.stringify(payload).slice(0, 120);
-      } catch {
-        body.textContent = '';
-      }
-    }
+    const renderer = _TC_RENDERERS[ev.event_type] || _tcDefaultRender;
+    renderer(body, payload);
 
     card.appendChild(header);
     card.appendChild(body);

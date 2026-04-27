@@ -297,7 +297,7 @@ def parse_jsonl_file(file_path: str, start_line: int = 0) -> Generator[dict, Non
         logger.error("Error reading %s: %s", file_path, e)
 
 
-# ─── Derived session events (Spec A timeline) ────────────────────────────────
+# ─── Derived session events (timeline) ───────────────────────────────────────
 
 def _insert_event(db: sqlite3.Connection, *, session_id: str, event_type: str,
                   ts: str, payload: str) -> Optional[int]:
@@ -422,8 +422,8 @@ def _emit_assistant_events(record: dict, sid: str, ts: str,
                 'payload': tu_payload, 'source': 'jsonl',
             })
         # Both ``Agent`` (legacy) and ``Task`` (current) trigger subagent
-        # dispatch. Task 5 will wire the watcher to back-fill child_session_id
-        # via ``database.update_subagent_child_link`` once the subagent file
+        # dispatch. The watcher back-fills child_session_id via
+        # ``database.update_subagent_child_link`` once the subagent file
         # appears on disk.
         if tool in ('Agent', 'Task'):
             sd_payload = {
@@ -491,9 +491,9 @@ def process_record(record: dict, file_path: str, db: sqlite3.Connection,
     re-raised because that indicates corruption that needs the outer
     transaction to roll back.
 
-    ``broadcast`` is an optional sync callable forwarded to event emission
-    (Spec A Task 7). The watcher passes ``main._broadcast_timeline_event``;
-    tests pass None to disable WS fan-out.
+    ``broadcast`` is an optional sync callable forwarded to event emission.
+    The watcher passes ``main._broadcast_timeline_event``; tests pass None
+    to disable WS fan-out.
     """
     if not isinstance(record, dict):
         _inc_stat('process_errors')
@@ -637,7 +637,7 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection,
     if cur.rowcount <= 0:
         return None
 
-    # Spec A: derive timeline events from this assistant turn.
+    # Derive timeline events from this assistant turn.
     # Gated by rowcount > 0 above so re-ingesting an existing message_uuid
     # is a no-op for events as well as messages.
     _emit_assistant_events(record, sid, record.get('timestamp', ''), db, broadcast)
@@ -741,7 +741,7 @@ def _process_user(record: dict, file_path: str, db: sqlite3.Connection,
             UPDATE sessions SET updated_at = ?, user_message_count = user_message_count + 1
             WHERE id = ?
         ''', (record.get('timestamp', ''), sid))
-        # Spec A: derived timeline event for the user turn.
+        # Derived timeline event for the user turn.
         _emit_user_event(record, sid, record.get('timestamp', ''), db, broadcast)
         return {
             'type': 'new_message',
