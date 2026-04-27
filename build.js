@@ -28,6 +28,7 @@ const SOURCE_FILES = [
   'plan.js',
   'subagents.js',
   'timeline.js',
+  'timeline-card.js',
   'search.js',
 ];
 
