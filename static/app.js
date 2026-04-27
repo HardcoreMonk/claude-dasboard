@@ -225,15 +225,50 @@ function parseHash() {
 
 function applyHash() {
   const { view, rest } = parseHash();
+  // Hash query support — `#/<view>/<arg>?key=value` is parsed alongside location.search.
+  const hashQuery = (location.hash.split('?')[1] || '');
+  const hashParams = new URLSearchParams(hashQuery);
+  // Promote `view=` from hash query to location.search so renderConvViewToggle
+  // (which reads URLSearchParams(location.search)) sees it. Idempotent.
+  if (hashParams.has('view') && !new URLSearchParams(location.search).has('view')) {
+    const search = new URLSearchParams(location.search);
+    search.set('view', hashParams.get('view'));
+    const cleanHash = '#' + location.hash.split('?')[0].replace(/^#/, '');
+    history.replaceState(null, '', location.pathname + '?' + search.toString() + cleanHash);
+  }
+
   showView(view, { updateHash: false });
+
+  // Deep-link: #/conversations/<sid>  opens that session detail
+  if (view === 'conversations' && rest.length) {
+    const sid = decodeURIComponent(rest.join('/'));
+    deepLinkConversation(sid).catch(e => console.warn('deep-link failed', e));
+    return;
+  }
+
   // Deep-link: #/project/<name>?path=<path>  opens a project modal
   if (view === 'project' && rest.length) {
-    const q = location.hash.split('?')[1] || '';
-    const params = new URLSearchParams(q);
     const name = decodeURIComponent(rest.join('/'));
     showView('projects', { updateHash: false });
-    showProjectDetail(name, params.get('path') || null);
+    showProjectDetail(name, hashParams.get('path') || null);
   }
+}
+
+// Fetch session metadata then open via existing openConversation.
+// Used by deep-link `#/conversations/<sid>` (URL bookmarks, child-session links).
+async function deepLinkConversation(sid) {
+  if (!sid) return;
+  // Avoid double-load if already open for this sid (state.currentSession is sid string).
+  if (state.currentSession === sid) return;
+  let session;
+  try {
+    session = await safeFetch('/api/sessions/' + encodeURIComponent(sid));
+  } catch (e) {
+    showToast('세션을 찾지 못했습니다: ' + sid.slice(0, 8) + '...', { type: 'error' });
+    return;
+  }
+  if (!session || !session.id) return;
+  await openConversation(sid, session, null);
 }
 
 window.addEventListener('hashchange', applyHash);

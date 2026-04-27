@@ -33,7 +33,7 @@ const _TC_RENDERERS = {
       linkWrap.className = 'mt-1 text-[10px]';
       const link = document.createElement('a');
       const childId = p.child_session_id;
-      link.href = `/app/session/${encodeURIComponent(childId)}?view=timeline`;
+      link.href = `/app#/conversations/${encodeURIComponent(childId)}?view=timeline`;
       link.className = 'text-accent/85 hover:text-accent underline font-mono';
       link.textContent = `child: ${String(childId).slice(0, 8)}`;
       linkWrap.appendChild(link);
