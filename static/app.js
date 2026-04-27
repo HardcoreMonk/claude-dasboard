@@ -254,21 +254,36 @@ function applyHash() {
   }
 }
 
-// Fetch session metadata then open via existing openConversation.
-// Used by deep-link `#/conversations/<sid>` (URL bookmarks, child-session links).
-async function deepLinkConversation(sid) {
+// Fetch /api/sessions/<sid> then call openConversation. Centralises the
+// "I have a sid, open its viewer" pattern shared by deep-links, popstate,
+// child-session links, parent-session links, and search-result clicks.
+// `opts.dedupOpen`: if true and `state.currentSession === sid`, no-op
+// (used by hash deep-link to avoid re-fetching when same view is open).
+// `opts.onError`: optional handler for fetch failure (toast vs console).
+async function _fetchAndOpenSession(sid, opts = {}) {
   if (!sid) return;
-  // Avoid double-load if already open for this sid (state.currentSession is sid string).
-  if (state.currentSession === sid) return;
+  if (opts.dedupOpen && state.currentSession === sid) return;
   let session;
   try {
     session = await safeFetch('/api/sessions/' + encodeURIComponent(sid));
   } catch (e) {
-    showToast('세션을 찾지 못했습니다: ' + sid.slice(0, 8) + '...', { type: 'error' });
+    if (opts.onError) opts.onError(e);
+    else console.warn('fetchAndOpenSession failed', sid, e);
     return;
   }
   if (!session || !session.id) return;
-  await openConversation(sid, session, null);
+  await openConversation(sid, session, opts.listItem || null);
+}
+
+// Deep-link entry — used by `#/conversations/<sid>` hash router.
+async function deepLinkConversation(sid) {
+  return _fetchAndOpenSession(sid, {
+    dedupOpen: true,
+    onError: () => showToast(
+      '세션을 찾지 못했습니다: ' + sid.slice(0, 8) + '...',
+      { type: 'error' },
+    ),
+  });
 }
 
 window.addEventListener('hashchange', applyHash);
@@ -280,12 +295,9 @@ window.addEventListener('popstate', () => {
   if (!location.hash.startsWith('#/conversations')) return;
   const sid = state.currentSession;
   if (!sid) return;
-  // deepLinkConversation no-ops if same sid is already open without a view
-  // change, but openConversation re-runs cleanly to honor ?view= flips.
-  // Fetch metadata to re-call openConversation.
-  safeFetch('/api/sessions/' + encodeURIComponent(sid))
-    .then(session => session && session.id && openConversation(sid, session, null))
-    .catch(() => { /* swallow; user can refresh */ });
+  // No dedupOpen — openConversation re-runs cleanly to honor ?view= flips
+  // even when the sid hasn't changed.
+  _fetchAndOpenSession(sid);
 });
 
 // ─── Safe Fetch (retry + timeout + deduplication) ───────────────────────
@@ -2399,17 +2411,15 @@ function renderBlock(block){if(!block||typeof block!=='object')return esc(String
 async function openSubagentFromDescription(description) {
   const sub = state.subagentsByDescription[description];
   if (!sub) return;
-  try {
-    const detail = await safeFetch(`/api/sessions/${encodeURIComponent(sub.id)}`);
-    openConversation(sub.id, detail);
-  } catch (e) { console.error('openSubagentFromDescription:', e); }
+  await _fetchAndOpenSession(sub.id, {
+    onError: (e) => console.error('openSubagentFromDescription:', e),
+  });
 }
 
 async function openParentFromSubagent(parentId) {
-  try {
-    const detail = await safeFetch(`/api/sessions/${encodeURIComponent(parentId)}`);
-    openConversation(parentId, detail);
-  } catch (e) { console.error('openParentFromSubagent:', e); }
+  await _fetchAndOpenSession(parentId, {
+    onError: (e) => console.error('openParentFromSubagent:', e),
+  });
 }
 function toggleTool(id){const b=document.getElementById(id);const h=b.previousElementSibling;b.classList.toggle('open');h.classList.toggle('open');}
 
@@ -3436,10 +3446,9 @@ async function openConvFromProject(sid) {
   document.getElementById('projectModal').style.display = 'none';
   const cn = document.querySelector('[data-view="conversations"]');
   if (cn && !cn.classList.contains('active')) cn.click();
-  try {
-    const s = await safeFetch(`/api/sessions/${sid}`);
-    openConversation(sid, s);
-  } catch (e) { console.error('openConvFromProject:', e); }
+  await _fetchAndOpenSession(sid, {
+    onError: (e) => console.error('openConvFromProject:', e),
+  });
 }
 
 const PROJ_MSG_PAGE = 300;
