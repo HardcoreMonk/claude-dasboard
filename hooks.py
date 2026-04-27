@@ -141,6 +141,20 @@ def _wire(db: Any, broadcast_fn: Callable[[str, dict], None],
 # ─── Routes (registered at import time so include_router picks them up) ─────
 
 
+def _safe_broadcast(session_id: str, event: dict) -> None:
+    """Forward to the wired broadcast callback, swallowing errors.
+
+    Broadcast is best-effort: a fan-out failure must NEVER bubble up to
+    the hook receiver and turn a successful insert into a 5xx. Hooks must
+    always reply 200 once auth + payload validation pass.
+    """
+    try:
+        _broadcast(session_id, event)
+    except Exception:
+        log.warning("broadcast failed for sid=%s event=%s",
+                    session_id, event.get("event_type", "?"))
+
+
 @router.post("/session-start")
 def session_start(payload: dict, authorization: str | None = Header(default=None)):
     _check_auth(authorization, _token)
@@ -150,12 +164,17 @@ def session_start(payload: dict, authorization: str | None = Header(default=None
         _log_validation_error("session-start", e)
         return {"ok": False, "warn": "invalid payload"}
     ts = _now_iso()
-    _db.insert_session_event(
+    decoded = {"cwd": data.cwd, "version": data.version}
+    row_id = _db.insert_session_event(
         session_id=data.sessionId, event_type="session_start", ts=ts,
-        payload=json.dumps({"cwd": data.cwd, "version": data.version}),
+        payload=json.dumps(decoded),
         source="hook",
     )
-    _broadcast(data.sessionId, {"event_type": "session_start", "ts": ts})
+    if row_id is not None:
+        _safe_broadcast(data.sessionId, {
+            "id": row_id, "event_type": "session_start", "ts": ts,
+            "payload": decoded, "source": "hook",
+        })
     return {"ok": True}
 
 
@@ -168,11 +187,16 @@ def session_stop(payload: dict, authorization: str | None = Header(default=None)
         _log_validation_error("session-stop", e)
         return {"ok": False, "warn": "invalid payload"}
     ts = _now_iso()
-    _db.insert_session_event(
+    decoded = {"reason": data.reason}
+    row_id = _db.insert_session_event(
         session_id=data.sessionId, event_type="session_stop", ts=ts,
-        payload=json.dumps({"reason": data.reason}), source="hook",
+        payload=json.dumps(decoded), source="hook",
     )
-    _broadcast(data.sessionId, {"event_type": "session_stop", "ts": ts})
+    if row_id is not None:
+        _safe_broadcast(data.sessionId, {
+            "id": row_id, "event_type": "session_stop", "ts": ts,
+            "payload": decoded, "source": "hook",
+        })
     return {"ok": True}
 
 
@@ -185,10 +209,15 @@ def notification(payload: dict, authorization: str | None = Header(default=None)
         _log_validation_error("notification", e)
         return {"ok": False, "warn": "invalid payload"}
     ts = _now_iso()
-    _db.insert_session_event(
+    decoded = {"message": data.message, "tool": data.tool}
+    row_id = _db.insert_session_event(
         session_id=data.sessionId, event_type="permission_prompt", ts=ts,
-        payload=json.dumps({"message": data.message, "tool": data.tool}),
+        payload=json.dumps(decoded),
         source="hook",
     )
-    _broadcast(data.sessionId, {"event_type": "permission_prompt", "ts": ts})
+    if row_id is not None:
+        _safe_broadcast(data.sessionId, {
+            "id": row_id, "event_type": "permission_prompt", "ts": ts,
+            "payload": decoded, "source": "hook",
+        })
     return {"ok": True}

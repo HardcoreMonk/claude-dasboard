@@ -671,6 +671,42 @@ def test_get_timeline_empty_for_unknown_session(api_client):
     assert body['events'] == []
 
 
+def test_get_timeline_event_shape_contract(api_client):
+    """REST contract: each event MUST carry id (int), event_type (str),
+    ts (ISO string), payload (decoded dict), source (str).
+
+    timeline-card.js renders ``ev.payload.tool``, ``ev.payload.preview`` etc.
+    directly — if the serializer ever ships ``payload`` as a JSON STRING the
+    frontend renders ``"{...}".tool === undefined`` and the body line breaks.
+    Lock that down here so a future "let's just dump the row" refactor
+    can't silently regress the timeline UI.
+    """
+    import database
+    database.insert_session_event(
+        session_id='s-shape', event_type='tool_use',
+        ts='2026-04-27T12:00:00Z',
+        payload='{"tool": "Edit", "input_preview": "{}", "tool_use_id": "x"}',
+        source='jsonl',
+    )
+    r = api_client.get('/api/sessions/s-shape/timeline')
+    assert r.status_code == 200
+    events = r.json()['events']
+    assert len(events) == 1
+    ev = events[0]
+    # All five fields MUST be present.
+    for field in ('id', 'event_type', 'ts', 'payload', 'source'):
+        assert field in ev, f"missing {field}"
+    # Type contract — dedup needs id-as-int, renderer needs payload-as-dict.
+    assert isinstance(ev['id'], int)
+    assert isinstance(ev['event_type'], str)
+    assert isinstance(ev['ts'], str)
+    # ts is ISO 8601 string, NOT epoch number (frontend's _fmtTime depends on this)
+    assert 'T' in ev['ts'] and ev['ts'].endswith('Z')
+    assert isinstance(ev['payload'], dict)
+    assert ev['payload']['tool'] == 'Edit'
+    assert isinstance(ev['source'], str)
+
+
 def test_get_timeline_requires_auth(tmp_path, monkeypatch):
     """When DASHBOARD_PASSWORD is set, an unauthenticated GET must be rejected."""
     db_file = tmp_path / 'authtl.db'

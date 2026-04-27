@@ -51,7 +51,7 @@ CREATE INDEX idx_session_events_ts     ON session_events(ts);
 
 - `POST /api/hooks/session-start` · `/session-stop` · `/notification`
 - 인증: `Authorization: Bearer <token>`. 토큰은 `~/.claude/.hook-token` (chmod 600, `install_hooks.py` 가 생성·로테이트).
-- **fail-soft**: 토큰 불일치·DB 에러여도 200 반환. hook 실패가 Claude Code 동작을 막지 않도록.
+- **fail-soft**: 페이로드 파싱 실패·DB 에러여도 200 반환. 인증 실패는 의도적으로 401 (silent fail 금지). hook 본체 실패가 Claude Code 동작을 막지 않도록.
 
 ### 4. 중복 차단 + UI 그룹화
 

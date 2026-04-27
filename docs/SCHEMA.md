@@ -219,6 +219,7 @@ idx_sessions_parent_tool_use
 | v12 | `sessions.turn_duration_ms` — user→assistant 턴 실행 시간 (ms) |
 | v13 | `sessions.source_node` + `remote_nodes` 테이블 — 다중 서버 수집 식별 (`idx_sessions_source_node`) |
 | v14 | `admin_audit` + `app_config` — 관리자 액션 감사 로그 + in-app 설정 스토어 (`idx_admin_audit_ts`) |
+| v15 | `sessions.ai_tags` (TEXT, JSON 배열) + `sessions.ai_tags_status` (TEXT, `pending`/`done`/`error`) — `/api/sessions/{id}/analyze` 비동기 LLM 분류 결과 + 진행 상태 추적 |
 | v16 | `session_events` 테이블 — Claude Code hook + JSONL 파생 이벤트 통합 로그 (timeline 뷰, ADR-0007). `idx_session_events_sid_ts`, `idx_session_events_ts` |
 
 ### DB 재구축 (드물게)

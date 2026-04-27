@@ -872,19 +872,28 @@ def wal_checkpoint() -> None:
 
 
 def insert_session_event(*, session_id: str, event_type: str, ts: str,
-                         payload: str, source: str, schema_ver: int = 1) -> None:
+                         payload: str, source: str, schema_ver: int = 1
+                         ) -> int | None:
     """Append a typed event to ``session_events``. Duplicate keys are ignored.
 
     The unique key is ``(session_id, event_type, ts, source)`` — re-ingesting
     the same JSONL line or replaying the same hook is a no-op.
+
+    Returns the inserted ``rowid`` (i.e. ``session_events.id``) on a fresh
+    insert, or ``None`` when ``INSERT OR IGNORE`` skipped due to UNIQUE
+    collision. Callers that broadcast to the WS need this id so the frontend
+    can dedup REST-loaded vs WS-pushed events by ``ev.id``.
     """
     with write_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO session_events"
             " (session_id, event_type, ts, payload, source, schema_ver)"
             " VALUES (?, ?, ?, ?, ?, ?)",
             (session_id, event_type, ts, payload, source, schema_ver),
         )
+        if cur.rowcount > 0:
+            return cur.lastrowid
+        return None
 
 
 def list_session_events(session_id: str, *, since: str | None = None,

@@ -48,8 +48,9 @@ class TimelineCard {
     list.textContent = '';
     const events = (data.events || []).slice();
     // API returns ASC by id which mirrors ts. Sort defensively by ts then id.
+    // ts is an ISO 8601 string — lexicographic compare matches chronological.
     events.sort((a, b) => {
-      if (a.ts !== b.ts) return a.ts - b.ts;
+      if (a.ts !== b.ts) return (a.ts < b.ts) ? -1 : 1;
       return (a.id || 0) - (b.id || 0);
     });
     if (!events.length) {
@@ -146,10 +147,17 @@ class TimelineCard {
 
   static _fmtTime(ts) {
     if (!ts && ts !== 0) return '--:--:--';
-    const ms = ts > 1e12 ? ts : ts * 1000;
-    const iso = new Date(ms).toISOString();
+    // Accept ISO 8601 strings ("2026-04-27T12:00:00Z") or numerics
+    // (epoch seconds or ms). String × 1000 = NaN — must branch on type.
+    let d;
+    if (typeof ts === 'number') {
+      d = new Date(ts > 1e12 ? ts : ts * 1000);
+    } else {
+      d = new Date(ts);
+    }
+    if (isNaN(d.getTime())) return '--:--:--';
     // Slice HH:MM:SS out of "YYYY-MM-DDTHH:MM:SS.sssZ"
-    return iso.slice(11, 19);
+    return d.toISOString().slice(11, 19);
   }
 
   _subscribeWs(sid) {

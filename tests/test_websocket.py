@@ -253,3 +253,66 @@ def test_ws_disconnect_cleans_subscription(noauth_client):
     # After context exit (disconnect), cleanup should have run.
     with main._subs_lock:
         assert not main._timeline_subs.get('s-cleanup')
+
+
+def test_ws_broadcast_full_row_contract(noauth_client):
+    """Contract: parser/hook broadcasts MUST carry full event rows so the
+    frontend's ``ev.id``-based dedup and ``ev.payload.<field>`` renderer
+    work end-to-end. Drives the broadcast through the real parser path
+    so a future regression to ``{event_type, ts}``-only fan-out is caught
+    immediately.
+    """
+    import main
+    import parser as app_parser
+    import database
+
+    with noauth_client.websocket_connect('/ws') as ws:
+        # Drain init
+        init = ws.receive_text()
+        assert json.loads(init)['type'] == 'init'
+
+        ws.send_json({'type': 'subscribe_timeline', 'session_id': 's-contract'})
+        # Sync barrier: the subscribe is processed before broadcast.
+        ws.send_text('ping')
+        assert ws.receive_text() == 'pong'
+
+        # Drive the real parser → _safe_broadcast path. The parser writes
+        # via its own connection but the broadcast callback is the shared
+        # ``main._broadcast_timeline_event``.
+        record = {
+            'type': 'assistant',
+            'uuid': 'broadcast-contract-uuid',
+            'sessionId': 's-contract',
+            'timestamp': '2026-04-27T12:00:00Z',
+            'cwd': '/tmp/proj',
+            'message': {
+                'model': 'claude-opus-4-6',
+                'usage': {'input_tokens': 1, 'output_tokens': 1},
+                'stop_reason': 'tool_use',
+                'content': [{
+                    'type': 'tool_use',
+                    'id': 'toolu_xyz',
+                    'name': 'Edit',
+                    'input': {'file_path': '/x'},
+                }],
+            },
+        }
+        with database.write_db() as conn:
+            app_parser.process_record(
+                record, '/tmp/fake.jsonl', conn,
+                broadcast=main._broadcast_timeline_event,
+            )
+
+        # First broadcast = message_assistant; we want to see at least one
+        # frame that carries the full row contract.
+        msg = _drain_until_timeline(ws)
+        assert msg is not None, "no timeline_event received"
+        ev = msg['event']
+        for field in ('id', 'event_type', 'ts', 'payload', 'source'):
+            assert field in ev, f"broadcast event missing {field}: {ev!r}"
+        # Type contract.
+        assert isinstance(ev['id'], int)
+        assert isinstance(ev['event_type'], str)
+        assert isinstance(ev['ts'], str) and 'T' in ev['ts']
+        assert isinstance(ev['payload'], dict)
+        assert ev['source'] == 'jsonl'
