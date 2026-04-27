@@ -1,4 +1,5 @@
 """Unit tests for watcher.py — state lock, metric injection, retry accounting."""
+import json
 import threading
 
 import pytest
@@ -126,3 +127,99 @@ def test_constructor_defaults_to_noop_metrics():
     assert w._metrics.scan_files is None
     assert w._metrics.new_messages is None
     assert w._metrics.retries is None
+
+
+# ─── Spec A Task 5: subagent child link back-fill ────────────────────────
+
+@pytest.fixture()
+def temp_db(tmp_path, monkeypatch):
+    """Fresh DB + isolated CLAUDE_PROJECTS for watcher.link_subagent_child tests.
+
+    Mirrors the fixture used by test_database.py so we don't accidentally
+    scan the developer's real ~/.claude/projects during init_db().
+
+    NOTE: ``test_e2e_smoke.py`` evicts ``database`` and ``watcher`` from
+    ``sys.modules`` and reimports them, which can leave stale references
+    when subsequent tests do ``import watcher``. We re-evict the same
+    modules here so ``watcher`` picks up our monkeypatched ``database.DB_PATH``.
+    """
+    import sys as _sys
+    for name in ('database', 'watcher'):
+        _sys.modules.pop(name, None)
+    db_file = tmp_path / 'test.db'
+    fake_claude_projects = tmp_path / 'claude-projects'
+    fake_claude_projects.mkdir()
+    import database
+    monkeypatch.setattr(database, 'DB_PATH', db_file)
+    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_claude_projects)
+    if hasattr(database._read_local, 'conn'):
+        try:
+            database._read_local.conn.close()
+        except Exception:
+            pass
+        database._read_local.conn = None
+    database.init_db()
+    # Reimport watcher so it binds to the freshly-configured database module.
+    import importlib
+    import watcher as _w
+    importlib.reload(_w)
+    # Update the module-level alias used by tests in this file.
+    globals()['watcher'] = _w
+    yield db_file
+    if hasattr(database._read_local, 'conn') and database._read_local.conn is not None:
+        try:
+            database._read_local.conn.close()
+        except Exception:
+            pass
+        database._read_local.conn = None
+
+
+def test_subagent_child_link_updates_parent_payload(temp_db):
+    """ClaudeFileWatcher.link_subagent_child back-fills child_session_id
+    into the parent's subagent_dispatch event payload."""
+    import database
+    # Parent emits a subagent_dispatch with child_session_id=None.
+    payload = json.dumps({
+        'agent_type': 'Explore',
+        'child_session_id': None,
+        'tool_use_id': 'toolu_abc',
+    })
+    database.insert_session_event(
+        session_id='parent-1', event_type='subagent_dispatch',
+        ts='2026-04-27T12:00:00Z', payload=payload, source='jsonl')
+
+    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w.link_subagent_child(
+        parent_sid='parent-1',
+        parent_tool_use_id='toolu_abc',
+        child_sid='child-9',
+    )
+
+    rows = list(database.list_session_events('parent-1'))
+    assert len(rows) == 1
+    p = json.loads(rows[0]['payload'])
+    assert p['child_session_id'] == 'child-9'
+    assert p['tool_use_id'] == 'toolu_abc'
+
+
+def test_subagent_child_link_idempotent(temp_db):
+    """A second link call is a no-op: the IS NULL guard in
+    database.update_subagent_child_link prevents overwrite."""
+    import database
+    payload = json.dumps({
+        'agent_type': 'Explore',
+        'child_session_id': None,
+        'tool_use_id': 'toolu_xyz',
+    })
+    database.insert_session_event(
+        session_id='parent-2', event_type='subagent_dispatch',
+        ts='2026-04-27T12:30:00Z', payload=payload, source='jsonl')
+
+    w = watcher.ClaudeFileWatcher(broadcast=lambda _: None)
+    w.link_subagent_child('parent-2', 'toolu_xyz', 'child-first')
+    # Second call must not overwrite (IS NULL guard in update_subagent_child_link).
+    w.link_subagent_child('parent-2', 'toolu_xyz', 'child-second')
+
+    rows = list(database.list_session_events('parent-2'))
+    p = json.loads(rows[0]['payload'])
+    assert p['child_session_id'] == 'child-first'

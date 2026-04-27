@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
+import database
 from database import read_db, write_db
 from parser import CLAUDE_PROJECTS, parse_jsonl_file, process_record
 
@@ -122,6 +123,65 @@ class ClaudeFileWatcher:
         self._task: Optional[asyncio.Task] = None
         self._observer: Optional["Observer"] = None  # type: ignore[name-defined]
         self._event_queue: Optional[asyncio.Queue] = None
+
+    # ── Spec A Task 5: subagent child-link back-fill ──────────────────────
+
+    def link_subagent_child(self, parent_sid: str, parent_tool_use_id: str,
+                            child_sid: str) -> int:
+        """Back-fill ``child_session_id`` into the parent's ``subagent_dispatch``
+        event payload. Thin wrapper over ``database.update_subagent_child_link``.
+
+        Safe to call from OUTSIDE a held write lock — opens its own
+        ``write_db()``. Inside ``_process_file`` (which already holds the
+        lock), use :meth:`_link_subagent_child_inline` instead.
+        """
+        return database.update_subagent_child_link(
+            parent_sid, parent_tool_use_id, child_sid)
+
+    def _maybe_link_subagent_child(self, child_sid: str) -> None:
+        """Look up a child session's (parent_session_id, parent_tool_use_id)
+        and back-fill the parent's subagent_dispatch event. No-op if either
+        column is empty (link will be re-attempted on the next re-scan)."""
+        try:
+            with read_db() as rdb:
+                row = rdb.execute(
+                    "SELECT parent_session_id, parent_tool_use_id"
+                    "  FROM sessions WHERE id = ?",
+                    (child_sid,),
+                ).fetchone()
+            if not row:
+                return
+            parent_sid = row['parent_session_id'] or ''
+            parent_tool_use_id = row['parent_tool_use_id'] or ''
+            if parent_sid and parent_tool_use_id:
+                self.link_subagent_child(
+                    parent_sid=parent_sid,
+                    parent_tool_use_id=parent_tool_use_id,
+                    child_sid=child_sid,
+                )
+        except Exception:
+            # Linking is best-effort; never break the watcher loop over it.
+            logger.exception("subagent child-link failed for sid=%s", child_sid)
+
+    @staticmethod
+    def _link_subagent_child_inline(db, parent_sid: str,
+                                    parent_tool_use_id: str,
+                                    child_sid: str) -> int:
+        """Same UPDATE as ``database.update_subagent_child_link`` but on the
+        caller's already-open write connection — avoids re-acquiring
+        ``_write_lock`` (would deadlock since the watcher's batch path
+        already holds it). Mirrors the Task 4 inline-event pattern.
+        """
+        cur = db.execute(
+            "UPDATE session_events"
+            "   SET payload = json_set(payload, '$.child_session_id', ?)"
+            " WHERE session_id = ?"
+            "   AND event_type = 'subagent_dispatch'"
+            "   AND json_extract(payload, '$.tool_use_id') = ?"
+            "   AND json_extract(payload, '$.child_session_id') IS NULL",
+            (child_sid, parent_sid, parent_tool_use_id),
+        )
+        return cur.rowcount
 
     async def start_async(self):
         self._event_queue = asyncio.Queue(maxsize=10_000)
@@ -353,6 +413,24 @@ class ClaudeFileWatcher:
 
             with self._state_lock:
                 self._retry_queue.pop(file_path, None)
+
+            # Spec A Task 5: if any of the new records came from a subagent
+            # transcript, try to back-fill the parent's subagent_dispatch
+            # event with this child's session_id. We do this AFTER the
+            # write_db() block exits so update_subagent_child_link can
+            # safely re-acquire _write_lock without deadlock.
+            #
+            # Best-effort: the child's parent_tool_use_id is populated by the
+            # v7 migration's startup scan of parent JSONL files. If it's not
+            # set yet (race with a brand-new subagent file), the link will
+            # happen on a subsequent re-scan of the parent file, or via
+            # the v7 migration on the next restart.
+            if new_records:
+                child_sids = {r['session_id'] for r in new_records
+                              if r.get('is_subagent') and r.get('session_id')}
+                for child_sid in child_sids:
+                    self._maybe_link_subagent_child(child_sid)
+
             return {'type': 'batch_update', 'records': new_records} if new_records else None
 
         except Exception:
