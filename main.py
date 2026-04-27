@@ -1026,6 +1026,48 @@ def api_session_messages(
     return {'messages': [dict(r) for r in rows], 'total': total, 'limit': limit, 'offset': offset}
 
 
+@app.get("/api/sessions/{sid}/timeline")
+def api_session_timeline(
+    sid: str,
+    since: Optional[str] = None,
+    limit: int = Query(200, ge=1),
+):
+    """Return ordered ``session_events`` rows for a session.
+
+    Spec A Task 6 — append-only event log emitted by the JSONL parser
+    (``source='jsonl'``) and the Claude Code event hooks (``source='hook'``).
+    Auth is gated by the dashboard session middleware; ``/api/sessions/`` is
+    NOT in ``_AUTH_BYPASS_PREFIX`` so cookie-or-Basic auth applies.
+
+    Parameters
+    ----------
+    sid    : session id (no row in ``sessions`` is required — events may exist
+             ahead of the session row; unknown sids simply return [].)
+    since  : optional ISO-8601 timestamp; rows with ``ts >= since`` are kept.
+    limit  : default 200, hard-capped at 1000.
+    """
+    if limit > 1000:
+        limit = 1000
+    rows = database.list_session_events(sid, since=since, limit=limit)
+    events = []
+    for r in rows:
+        try:
+            payload = json.loads(r['payload'])
+        except (TypeError, ValueError):
+            # Defensive: every writer (parser, hooks) emits json.dumps(...) so
+            # this branch should be unreachable. Surface raw text rather than
+            # 500-ing the whole timeline if a single row is corrupt.
+            payload = None
+        events.append({
+            'id': r['id'],
+            'event_type': r['event_type'],
+            'ts': r['ts'],
+            'payload': payload,
+            'source': r['source'],
+        })
+    return {'session_id': sid, 'events': events}
+
+
 # ─── Usage time-series (timezone-aware) ───────────────────────────────────────
 
 @app.get("/api/usage/hourly")
