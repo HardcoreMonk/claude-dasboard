@@ -113,8 +113,14 @@ class _JsonlEventHandler(FileSystemEventHandler if _WATCHDOG_OK else object):
 class ClaudeFileWatcher:
     def __init__(self,
                  broadcast: Callable[[dict], Awaitable[None]],
-                 metrics: Optional[WatcherMetrics] = None):
+                 metrics: Optional[WatcherMetrics] = None,
+                 timeline_broadcast: Optional[Callable[[str, dict], None]] = None):
         self._broadcast = broadcast
+        # Spec A Task 7: optional sync callable for per-event WS fan-out.
+        # ``None`` (default) keeps the watcher silent on the timeline channel,
+        # which is what every existing test expects. Production wires
+        # ``main._broadcast_timeline_event``.
+        self._timeline_broadcast = timeline_broadcast
         self._metrics = metrics or WatcherMetrics()
         self._file_mtimes: dict[str, float] = {}
         self._retry_queue: dict[str, int] = {}
@@ -413,7 +419,8 @@ class ClaudeFileWatcher:
                     if record['_line_number'] < actual_start:
                         continue
                     last_line = record['_line_number'] + 1
-                    result = process_record(record, file_path, db)
+                    result = process_record(record, file_path, db,
+                                              broadcast=self._timeline_broadcast)
                     if result:
                         new_records.append(result)
 

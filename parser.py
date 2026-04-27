@@ -10,7 +10,7 @@ import re
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Callable, Generator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -317,13 +317,35 @@ def _insert_event(db: sqlite3.Connection, *, session_id: str, event_type: str,
     )
 
 
+def _safe_broadcast(broadcast: Optional[Callable[[str, dict], None]],
+                    sid: str, event: dict) -> None:
+    """Invoke broadcast (if provided) and swallow exceptions.
+
+    Broadcast is best-effort signalling — a failure in fan-out must NEVER
+    abort the watcher's write transaction or the parser's record loop.
+    """
+    if broadcast is None:
+        return
+    try:
+        broadcast(sid, event)
+    except Exception:
+        logger.warning("broadcast failed for sid=%s event=%s",
+                       sid, event.get('event_type', '?'))
+
+
 def _emit_assistant_events(record: dict, sid: str, ts: str,
-                           db: sqlite3.Connection) -> None:
+                           db: sqlite3.Connection,
+                           broadcast: Optional[Callable[[str, dict], None]] = None
+                           ) -> None:
     """Emit message_assistant + (optional) end_turn + tool_use + subagent_dispatch.
 
     Called only after the underlying message INSERT actually landed a fresh
     row (the caller checks ``cur.rowcount > 0``). That gating is what makes
     re-ingest idempotent end-to-end — no row, no events.
+
+    ``broadcast`` is an optional sync callable ``(session_id, event_dict)``
+    invoked once per inserted event. Wired by ``main._broadcast_timeline_event``
+    in production; tests pass None (default) to skip broadcasting.
     """
     msg = record.get('message') or {}
     if not isinstance(msg, dict):
@@ -341,6 +363,8 @@ def _emit_assistant_events(record: dict, sid: str, ts: str,
             'message_uuid': msg_uuid,
         }),
     )
+    _safe_broadcast(broadcast, sid,
+                    {'event_type': 'message_assistant', 'ts': ts})
 
     if stop_reason == 'end_turn':
         _insert_event(
@@ -350,6 +374,8 @@ def _emit_assistant_events(record: dict, sid: str, ts: str,
                 'message_uuid': msg_uuid,
             }),
         )
+        _safe_broadcast(broadcast, sid,
+                        {'event_type': 'end_turn', 'ts': ts})
 
     if not isinstance(content_raw, list):
         return
@@ -373,6 +399,8 @@ def _emit_assistant_events(record: dict, sid: str, ts: str,
                 'tool_use_id': tool_use_id,
             }),
         )
+        _safe_broadcast(broadcast, sid,
+                        {'event_type': 'tool_use', 'ts': ts})
         # Both ``Agent`` (legacy) and ``Task`` (current) trigger subagent
         # dispatch. Task 5 will wire the watcher to back-fill child_session_id
         # via ``database.update_subagent_child_link`` once the subagent file
@@ -387,10 +415,14 @@ def _emit_assistant_events(record: dict, sid: str, ts: str,
                     'tool_use_id': tool_use_id,
                 }),
             )
+            _safe_broadcast(broadcast, sid,
+                            {'event_type': 'subagent_dispatch', 'ts': ts})
 
 
 def _emit_user_event(record: dict, sid: str, ts: str,
-                     db: sqlite3.Connection) -> None:
+                     db: sqlite3.Connection,
+                     broadcast: Optional[Callable[[str, dict], None]] = None
+                     ) -> None:
     msg = record.get('message') or {}
     if isinstance(msg, dict):
         raw = msg.get('content', '')
@@ -404,6 +436,8 @@ def _emit_user_event(record: dict, sid: str, ts: str,
             'message_uuid': record.get('uuid', ''),
         }),
     )
+    _safe_broadcast(broadcast, sid,
+                    {'event_type': 'message_user', 'ts': ts})
 
 
 # ─── Record processing (caller owns the transaction) ─────────────────────────
@@ -419,13 +453,19 @@ def effective_session_id(record_session_id: str, file_path: str) -> str:
 
 
 def process_record(record: dict, file_path: str, db: sqlite3.Connection,
-                   source_node: str = 'local') -> Optional[dict]:
+                   source_node: str = 'local',
+                   broadcast: Optional[Callable[[str, dict], None]] = None
+                   ) -> Optional[dict]:
     """Insert/update DB rows for one JSONL record.  No commit — caller does that.
 
     All exceptions inside a record are contained: a single malformed record
     must not abort processing of the rest of the file. sqlite3.Error is
     re-raised because that indicates corruption that needs the outer
     transaction to roll back.
+
+    ``broadcast`` is an optional sync callable forwarded to event emission
+    (Spec A Task 7). The watcher passes ``main._broadcast_timeline_event``;
+    tests pass None to disable WS fan-out.
     """
     if not isinstance(record, dict):
         _inc_stat('process_errors')
@@ -433,9 +473,9 @@ def process_record(record: dict, file_path: str, db: sqlite3.Connection,
     rtype = record.get('type')
     try:
         if rtype == 'assistant':
-            return _process_assistant(record, file_path, db, source_node)
+            return _process_assistant(record, file_path, db, source_node, broadcast)
         if rtype == 'user':
-            return _process_user(record, file_path, db, source_node)
+            return _process_user(record, file_path, db, source_node, broadcast)
         if rtype == 'system':
             return _process_system(record, file_path, db, source_node)
     except sqlite3.Error:
@@ -513,7 +553,9 @@ def _ensure_session(sid: str, file_path: str, record: dict,
 
 
 def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection,
-                       source_node: str = 'local') -> Optional[dict]:
+                       source_node: str = 'local',
+                       broadcast: Optional[Callable[[str, dict], None]] = None
+                       ) -> Optional[dict]:
     raw_sid = record.get('sessionId', '')
     if not raw_sid:
         _inc_stat('skipped_no_sid')
@@ -570,7 +612,7 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection,
     # Spec A: derive timeline events from this assistant turn.
     # Gated by rowcount > 0 above so re-ingesting an existing message_uuid
     # is a no-op for events as well as messages.
-    _emit_assistant_events(record, sid, record.get('timestamp', ''), db)
+    _emit_assistant_events(record, sid, record.get('timestamp', ''), db, broadcast)
 
     # Only overwrite session.model with a REAL model (not synthetic/meta).
     # This is the fix for C1 — prevents `<synthetic>` from hijacking a session's
@@ -632,7 +674,9 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection,
 
 
 def _process_user(record: dict, file_path: str, db: sqlite3.Connection,
-                   source_node: str = 'local') -> Optional[dict]:
+                   source_node: str = 'local',
+                   broadcast: Optional[Callable[[str, dict], None]] = None
+                   ) -> Optional[dict]:
     raw_sid = record.get('sessionId', '')
     if not raw_sid:
         _inc_stat('skipped_no_sid')
@@ -670,7 +714,7 @@ def _process_user(record: dict, file_path: str, db: sqlite3.Connection,
             WHERE id = ?
         ''', (record.get('timestamp', ''), sid))
         # Spec A: derived timeline event for the user turn.
-        _emit_user_event(record, sid, record.get('timestamp', ''), db)
+        _emit_user_event(record, sid, record.get('timestamp', ''), db, broadcast)
         return {
             'type': 'new_message',
             'session_id': sid,

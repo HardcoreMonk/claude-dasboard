@@ -11,6 +11,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone as _tz
@@ -228,14 +229,43 @@ def _make_watcher_metrics() -> "WatcherMetrics":
 HOOK_TOKEN: str = ""
 
 
-def _broadcast_timeline_event(session_id: str, event: dict) -> None:
-    """Placeholder — Task 7 replaces this with a real WS broadcast.
+# Per-session WS subscriber registry. Keyed by session_id; values are
+# the set of WebSocket connections subscribed to that session's timeline.
+# Mutations require ``_subs_lock``; the lock is NEVER held across an
+# ``await`` or a network send so a slow client cannot block other
+# subscribers' broadcasts.
+_timeline_subs: dict[str, set["WebSocket"]] = {}
+_subs_lock = threading.Lock()
 
-    Kept as a sync callable so the hook routes (which are sync def) can call
-    it without scheduling. Task 7 will adapt to async via ``asyncio.create_task``
-    or convert the routes to async.
+
+def _broadcast_timeline_event(session_id: str, event: dict) -> None:
+    """Fan-out a timeline event to every WS subscribed to ``session_id``.
+
+    Called from sync contexts (hook receivers, parser inside watcher's
+    ``write_db()``). FastAPI's ``WebSocket.send_json`` is async, so we
+    schedule it on the FastAPI event loop via ``run_coroutine_threadsafe``
+    — fire-and-forget; we don't block on the future.
+
+    No-op if there are no subscribers OR the event loop hasn't been
+    captured yet (e.g. a hook arrives during early lifespan startup).
     """
-    return None
+    with _subs_lock:
+        targets = list(_timeline_subs.get(session_id, ()))
+    if not targets:
+        return
+    loop = getattr(app.state, 'loop', None)
+    if loop is None:
+        return
+    msg = {'type': 'timeline_event',
+           'session_id': session_id, 'event': event}
+    for ws in targets:
+        try:
+            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+        except Exception:
+            # Scheduling failure (e.g. loop closing) — drop silently;
+            # the WS handler's finally clause will clean up the dead
+            # subscription on disconnect.
+            pass
 
 
 # ─── Lifespan ────────────────────────────────────────────────────────────────
@@ -247,6 +277,10 @@ async def lifespan(app: FastAPI):
     if DB_PATH.exists() and not check_integrity():
         logger.error("DATABASE INTEGRITY CHECK FAILED — consider restoring from backup")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    # Capture the FastAPI event loop so ``_broadcast_timeline_event`` (a sync
+    # callable invoked from hook routes / watcher threads) can schedule
+    # ``ws.send_json(...)`` coroutines onto it via ``run_coroutine_threadsafe``.
+    app.state.loop = asyncio.get_running_loop()
     # Load (or create) the hook bearer token and wire the receiver router.
     HOOK_TOKEN = hooks.load_or_create_hook_token()
     hooks._wire(database, _broadcast_timeline_event, HOOK_TOKEN)
@@ -257,7 +291,11 @@ async def lifespan(app: FastAPI):
                 if rec.get('stop_reason') == 'end_turn' and not rec.get('is_subagent'):
                     asyncio.create_task(_analyze_session(rec['session_id']))
 
-    watcher = ClaudeFileWatcher(_broadcast_with_analyze, metrics=_make_watcher_metrics())
+    watcher = ClaudeFileWatcher(
+        _broadcast_with_analyze,
+        metrics=_make_watcher_metrics(),
+        timeline_broadcast=_broadcast_timeline_event,
+    )
     await watcher.start_async()
     _sched_task = asyncio.create_task(_retention_scheduler_loop())
     yield
@@ -608,6 +646,10 @@ async def websocket_endpoint(ws: WebSocket):
         return
     await manager.connect(ws)
     lock = manager.get_lock(ws)
+    # Track this connection's timeline subscriptions so we can clean them
+    # up in the finally clause if the client disconnects without explicit
+    # unsubscribe.
+    subscribed: set[str] = set()
     try:
         stats = _get_stats()
         async with lock:
@@ -618,6 +660,32 @@ async def websocket_endpoint(ws: WebSocket):
                 if msg == 'ping':
                     async with lock:
                         await ws.send_text('pong')
+                    continue
+                # Spec A Task 7: JSON control messages.
+                # Anything that isn't 'ping' is parsed as JSON; non-JSON
+                # frames are silently dropped (forward-compat — clients
+                # may send heartbeats we don't understand yet).
+                try:
+                    obj = json.loads(msg)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                mtype = obj.get('type')
+                sid = obj.get('session_id')
+                if mtype == 'subscribe_timeline' and isinstance(sid, str) and sid:
+                    with _subs_lock:
+                        _timeline_subs.setdefault(sid, set()).add(ws)
+                    subscribed.add(sid)
+                elif mtype == 'unsubscribe_timeline' and isinstance(sid, str) and sid:
+                    with _subs_lock:
+                        peers = _timeline_subs.get(sid)
+                        if peers is not None:
+                            peers.discard(ws)
+                            if not peers:
+                                _timeline_subs.pop(sid, None)
+                    subscribed.discard(sid)
+                # Unknown types are ignored (forward-compat).
             except asyncio.TimeoutError:
                 try:
                     async with lock:
@@ -629,6 +697,15 @@ async def websocket_endpoint(ws: WebSocket):
     except Exception as exc:
         logger.warning("WS error: %s", exc)
     finally:
+        # Clean up any timeline subscriptions this connection registered.
+        if subscribed:
+            with _subs_lock:
+                for sid in subscribed:
+                    peers = _timeline_subs.get(sid)
+                    if peers is not None:
+                        peers.discard(ws)
+                        if not peers:
+                            _timeline_subs.pop(sid, None)
         manager.disconnect(ws)
 
 

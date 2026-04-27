@@ -154,3 +154,102 @@ def test_ws_ping_pong(noauth_client):
         ws.send_text('ping')
         pong = ws.receive_text()
         assert pong == 'pong'
+
+
+# ─── Timeline subscribe / broadcast (Spec A Task 7) ──────────────────
+
+def _drain_until_timeline(ws, max_msgs: int = 5):
+    """Read up to ``max_msgs`` messages and return the first timeline_event.
+
+    Skips ``init`` and any other non-timeline frames so the test focus
+    stays on the broadcast path. Returns None if no timeline frame
+    appears within the budget.
+    """
+    for _ in range(max_msgs):
+        text = ws.receive_text()
+        try:
+            obj = json.loads(text)
+        except (TypeError, ValueError):
+            continue
+        if obj.get('type') == 'timeline_event':
+            return obj
+    return None
+
+
+def test_ws_subscribe_timeline_receives_broadcast(noauth_client):
+    """Subscribing to a session_id makes the WS receive timeline broadcasts."""
+    import main
+    with noauth_client.websocket_connect('/ws') as ws:
+        # Drain init
+        init = ws.receive_text()
+        assert json.loads(init)['type'] == 'init'
+
+        ws.send_json({'type': 'subscribe_timeline', 'session_id': 's-1'})
+        # Round-trip a ping/pong to ensure the server has processed the
+        # subscribe before we fire the broadcast (TestClient handles
+        # frames in-order, so by the time pong returns the subscribe
+        # branch has run).
+        ws.send_text('ping')
+        assert ws.receive_text() == 'pong'
+
+        # Server-side broadcast simulation.
+        main._broadcast_timeline_event(
+            's-1', {'event_type': 'tool_use', 'ts': '2026-04-27T12:00:00Z'})
+
+        msg = _drain_until_timeline(ws)
+        assert msg is not None, "no timeline_event received"
+        assert msg['session_id'] == 's-1'
+        assert msg['event']['event_type'] == 'tool_use'
+        assert msg['event']['ts'] == '2026-04-27T12:00:00Z'
+
+
+def test_ws_unsubscribe_stops_broadcast(noauth_client):
+    """After unsubscribe, broadcasts to that session_id are NOT delivered."""
+    import main
+    with noauth_client.websocket_connect('/ws') as ws:
+        init = ws.receive_text()
+        assert json.loads(init)['type'] == 'init'
+
+        ws.send_json({'type': 'subscribe_timeline', 'session_id': 's-2'})
+        ws.send_json({'type': 'unsubscribe_timeline', 'session_id': 's-2'})
+        # Sync barrier — pong returns only after the unsubscribe was processed.
+        ws.send_text('ping')
+        assert ws.receive_text() == 'pong'
+
+        # Broadcast AFTER unsubscribe — should be filtered out.
+        main._broadcast_timeline_event(
+            's-2', {'event_type': 'tool_use', 'ts': '...'})
+
+        # Send another ping; the very next frame must be 'pong', NOT the
+        # broadcast event. If unsubscribe failed, the broadcast frame would
+        # arrive before the new pong (FIFO ordering on a single WS).
+        ws.send_text('ping')
+        next_frame = ws.receive_text()
+        assert next_frame == 'pong', (
+            f"expected pong, got broadcast leak: {next_frame!r}")
+
+
+def test_ws_subscribe_unknown_type_ignored(noauth_client):
+    """An unrecognised JSON message type must not crash the handler."""
+    with noauth_client.websocket_connect('/ws') as ws:
+        ws.receive_text()  # init
+        ws.send_json({'type': 'no_such_type', 'session_id': 's-x'})
+        ws.send_text('ping')
+        assert ws.receive_text() == 'pong'
+
+
+def test_ws_disconnect_cleans_subscription(noauth_client):
+    """Closing the WS must remove its entries from _timeline_subs."""
+    import main
+    with noauth_client.websocket_connect('/ws') as ws:
+        ws.receive_text()  # init
+        ws.send_json({'type': 'subscribe_timeline', 'session_id': 's-cleanup'})
+        ws.send_text('ping')
+        assert ws.receive_text() == 'pong'
+        # While inside the context, subscription should exist.
+        with main._subs_lock:
+            assert 's-cleanup' in main._timeline_subs
+            assert len(main._timeline_subs['s-cleanup']) == 1
+    # After context exit (disconnect), cleanup should have run.
+    with main._subs_lock:
+        assert not main._timeline_subs.get('s-cleanup')
