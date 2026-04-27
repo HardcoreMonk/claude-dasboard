@@ -8,6 +8,7 @@
 | [0004](0004-esbuild-bundle.md) | Tailwind CDN → esbuild 번들 + Tailwind CLI | 확정 | 2026-04 |
 | [0005](0005-remote-collector.md) | 다중 서버 수집 — Push 방식 (collector agent) | 확정 | 2026-04 |
 | [0006](0006-event-bus-state-accessors.md) | 프론트엔드 이벤트 버스 + 상태 접근자 | 확정 | 2026-04 |
+| [0007](0007-session-events-hooks.md) | Session events — Claude Code 훅 + JSONL 파생 이벤트 | 확정 | 2026-04 |
 
 ## 새 ADR 작성 시
 

@@ -191,6 +191,14 @@ def mem_db():
         timestamp TEXT, cwd TEXT, git_branch TEXT, is_sidechain INTEGER DEFAULT 0,
         stop_reason TEXT
     )''')
+    # v16: session_events — derived timeline events. Parser writes here on
+    # successful message INSERTs (Spec A Task 4).
+    conn.execute('''CREATE TABLE session_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL, event_type TEXT NOT NULL, ts TEXT NOT NULL,
+        payload TEXT NOT NULL, source TEXT NOT NULL, schema_ver INTEGER NOT NULL DEFAULT 1,
+        UNIQUE (session_id, event_type, ts, source)
+    )''')
     yield conn
     conn.close()
 
@@ -412,3 +420,231 @@ def test_calculate_cost_micro_defensive_against_bad_usage_values():
     # Should not raise; uses only the valid numeric field
     cost = p.calculate_cost_micro(bad, 'claude-opus-4-6')
     assert cost > 0  # cache_creation=100 * opus price > 0
+
+
+# ─── Spec A Task 4: derived session_events ─────────────────────────────────
+#
+# These tests exercise the real database module (not an in-memory throwaway)
+# because ``database.list_session_events`` opens its own ``read_db()`` and
+# expects the v16 schema. ``temp_db`` mirrors the fixture in test_database.py:
+# point ``DB_PATH`` at a fresh tmp file, run ``init_db()``, then drive the
+# parser through ``write_db()`` so session_events ride the same connection.
+
+@pytest.fixture()
+def temp_db(tmp_path, monkeypatch):
+    db_file = tmp_path / 'parser-events.db'
+    fake_claude_projects = tmp_path / 'claude-projects'
+    fake_claude_projects.mkdir()
+    import database
+    monkeypatch.setattr(database, 'DB_PATH', db_file)
+    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_claude_projects)
+    if hasattr(database._read_local, 'conn'):
+        try:
+            database._read_local.conn.close()
+        except Exception:
+            pass
+        database._read_local.conn = None
+    database.init_db()
+    yield database
+    if hasattr(database._read_local, 'conn') and database._read_local.conn is not None:
+        try:
+            database._read_local.conn.close()
+        except Exception:
+            pass
+        database._read_local.conn = None
+
+
+@pytest.fixture()
+def sample_user_line():
+    return {
+        'type': 'user',
+        'uuid': 'u-1',
+        'sessionId': 's-1',
+        'timestamp': '2026-04-27T12:00:00Z',
+        'cwd': '/tmp/proj',
+        'message': {'content': [{'type': 'text', 'text': 'hello there'}]},
+    }
+
+
+@pytest.fixture()
+def sample_end_turn_line():
+    return {
+        'type': 'assistant',
+        'uuid': 'a-1',
+        'sessionId': 's-1',
+        'timestamp': '2026-04-27T12:01:00Z',
+        'cwd': '/tmp/proj',
+        'message': {
+            'model': 'claude-opus-4-6',
+            'usage': {'input_tokens': 10, 'output_tokens': 5},
+            'stop_reason': 'end_turn',
+            'content': [{'type': 'text', 'text': 'done'}],
+        },
+    }
+
+
+@pytest.fixture()
+def sample_tool_use_line():
+    return {
+        'type': 'assistant',
+        'uuid': 'a-2',
+        'sessionId': 's-1',
+        'timestamp': '2026-04-27T12:02:00Z',
+        'cwd': '/tmp/proj',
+        'message': {
+            'model': 'claude-opus-4-6',
+            'usage': {'input_tokens': 10, 'output_tokens': 5},
+            'stop_reason': 'tool_use',
+            'content': [{
+                'type': 'tool_use',
+                'id': 'toolu_abc',
+                'name': 'Edit',
+                'input': {'file_path': '/x', 'old_string': 'a', 'new_string': 'b'},
+            }],
+        },
+    }
+
+
+@pytest.fixture()
+def sample_agent_dispatch_line():
+    return {
+        'type': 'assistant',
+        'uuid': 'a-3',
+        'sessionId': 's-1',
+        'timestamp': '2026-04-27T12:03:00Z',
+        'cwd': '/tmp/proj',
+        'message': {
+            'model': 'claude-opus-4-6',
+            'usage': {'input_tokens': 10, 'output_tokens': 5},
+            'stop_reason': 'tool_use',
+            'content': [{
+                'type': 'tool_use',
+                'id': 'toolu_def',
+                'name': 'Agent',
+                'input': {'subagent_type': 'Explore', 'description': 'find files'},
+            }],
+        },
+    }
+
+
+def _ingest(record, db_module):
+    """Run the parser against the real (v16) DB connection."""
+    with db_module.write_db() as conn:
+        p.process_record(record, '/tmp/fake.jsonl', conn)
+
+
+def test_user_message_emits_message_user_event(temp_db, sample_user_line):
+    _ingest(sample_user_line, temp_db)
+    events = [
+        e for e in temp_db.list_session_events('s-1')
+        if e['event_type'] == 'message_user'
+    ]
+    assert len(events) == 1
+    payload = json.loads(events[0]['payload'])
+    assert payload['message_uuid'] == 'u-1'
+    assert 'hello' in payload['preview']
+    assert events[0]['source'] == 'jsonl'
+
+
+def test_assistant_end_turn_emits_two_events(temp_db, sample_end_turn_line):
+    _ingest(sample_end_turn_line, temp_db)
+    types = {e['event_type'] for e in temp_db.list_session_events('s-1')}
+    assert 'message_assistant' in types
+    assert 'end_turn' in types
+
+
+def test_assistant_without_end_turn_emits_only_message_assistant(temp_db, sample_tool_use_line):
+    _ingest(sample_tool_use_line, temp_db)
+    types = [e['event_type'] for e in temp_db.list_session_events('s-1')]
+    # tool_use record does NOT carry stop_reason='end_turn' → no end_turn event
+    assert 'end_turn' not in types
+    assert 'message_assistant' in types
+
+
+def test_tool_use_emits_event(temp_db, sample_tool_use_line):
+    _ingest(sample_tool_use_line, temp_db)
+    events = [
+        e for e in temp_db.list_session_events('s-1')
+        if e['event_type'] == 'tool_use'
+    ]
+    assert len(events) == 1
+    payload = json.loads(events[0]['payload'])
+    assert payload['tool'] == 'Edit'
+    assert payload['tool_use_id'] == 'toolu_abc'
+    # input_preview is JSON-string-truncated, must contain a key
+    assert 'file_path' in payload['input_preview']
+
+
+def test_agent_tool_emits_subagent_dispatch(temp_db, sample_agent_dispatch_line):
+    _ingest(sample_agent_dispatch_line, temp_db)
+    events = [
+        e for e in temp_db.list_session_events('s-1')
+        if e['event_type'] == 'subagent_dispatch'
+    ]
+    assert len(events) == 1
+    payload = json.loads(events[0]['payload'])
+    assert payload['agent_type'] == 'Explore'
+    assert payload['description'] == 'find files'
+    assert payload['child_session_id'] is None  # watcher fills later
+    assert payload['tool_use_id'] == 'toolu_def'
+
+
+def test_task_tool_also_emits_subagent_dispatch(temp_db):
+    """``Task`` is the canonical sub-agent dispatch tool name in current Claude Code;
+    older transcripts use ``Agent``. Both must trigger the dispatch event."""
+    rec = {
+        'type': 'assistant',
+        'uuid': 'a-task',
+        'sessionId': 's-1',
+        'timestamp': '2026-04-27T12:04:00Z',
+        'cwd': '/tmp/proj',
+        'message': {
+            'model': 'claude-opus-4-6',
+            'usage': {'input_tokens': 1, 'output_tokens': 1},
+            'stop_reason': 'tool_use',
+            'content': [{
+                'type': 'tool_use',
+                'id': 'toolu_task',
+                'name': 'Task',
+                'input': {'subagent_type': 'Plan', 'description': 'plan it'},
+            }],
+        },
+    }
+    _ingest(rec, temp_db)
+    events = [
+        e for e in temp_db.list_session_events('s-1')
+        if e['event_type'] == 'subagent_dispatch'
+    ]
+    assert len(events) == 1
+
+
+def test_session_events_idempotent_on_duplicate_record(temp_db, sample_tool_use_line):
+    """Re-ingesting the same JSONL line must not double-emit session_events.
+    The message INSERT is gated by a UNIQUE message_uuid and we only emit
+    events when that insert actually lands a new row."""
+    _ingest(sample_tool_use_line, temp_db)
+    _ingest(sample_tool_use_line, temp_db)
+    events = list(temp_db.list_session_events('s-1'))
+    # Exactly one message_assistant + one tool_use, no duplicates.
+    types = [e['event_type'] for e in events]
+    assert types.count('message_assistant') == 1
+    assert types.count('tool_use') == 1
+
+
+def test_user_event_preview_truncated_at_200(temp_db):
+    rec = {
+        'type': 'user',
+        'uuid': 'u-long',
+        'sessionId': 's-1',
+        'timestamp': '2026-04-27T12:05:00Z',
+        'cwd': '/tmp/proj',
+        'message': {'content': [{'type': 'text', 'text': 'x' * 5000}]},
+    }
+    _ingest(rec, temp_db)
+    events = [
+        e for e in temp_db.list_session_events('s-1')
+        if e['event_type'] == 'message_user'
+    ]
+    assert len(events) == 1
+    payload = json.loads(events[0]['payload'])
+    assert len(payload['preview']) <= 200

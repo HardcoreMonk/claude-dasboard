@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
+import database
 from database import read_db, write_db
 from parser import CLAUDE_PROJECTS, parse_jsonl_file, process_record
 
@@ -112,8 +113,14 @@ class _JsonlEventHandler(FileSystemEventHandler if _WATCHDOG_OK else object):
 class ClaudeFileWatcher:
     def __init__(self,
                  broadcast: Callable[[dict], Awaitable[None]],
-                 metrics: Optional[WatcherMetrics] = None):
+                 metrics: Optional[WatcherMetrics] = None,
+                 timeline_broadcast: Optional[Callable[[str, dict], None]] = None):
         self._broadcast = broadcast
+        # Spec A Task 7: optional sync callable for per-event WS fan-out.
+        # ``None`` (default) keeps the watcher silent on the timeline channel,
+        # which is what every existing test expects. Production wires
+        # ``main._broadcast_timeline_event``.
+        self._timeline_broadcast = timeline_broadcast
         self._metrics = metrics or WatcherMetrics()
         self._file_mtimes: dict[str, float] = {}
         self._retry_queue: dict[str, int] = {}
@@ -122,6 +129,82 @@ class ClaudeFileWatcher:
         self._task: Optional[asyncio.Task] = None
         self._observer: Optional["Observer"] = None  # type: ignore[name-defined]
         self._event_queue: Optional[asyncio.Queue] = None
+
+    # ── Spec A Task 5: subagent child-link back-fill ──────────────────────
+
+    def link_subagent_child(self, parent_sid: str, parent_tool_use_id: str,
+                            child_sid: str) -> int:
+        """Back-fill ``child_session_id`` into the parent's ``subagent_dispatch``
+        event payload. Thin wrapper over ``database.update_subagent_child_link``.
+
+        Safe to call from OUTSIDE a held write lock — opens its own
+        ``write_db()``. Do NOT call from inside an open ``write_db()`` block
+        (would re-acquire ``_write_lock`` and deadlock).
+        """
+        return database.update_subagent_child_link(
+            parent_sid, parent_tool_use_id, child_sid)
+
+    def _maybe_link_subagent_child(self, child_sid: str) -> None:
+        """Look up a child session's (parent_session_id, parent_tool_use_id)
+        and back-fill the parent's subagent_dispatch event. No-op if either
+        column is empty (link will be re-attempted on the next re-scan)."""
+        try:
+            with read_db() as rdb:
+                row = rdb.execute(
+                    "SELECT parent_session_id, parent_tool_use_id"
+                    "  FROM sessions WHERE id = ?",
+                    (child_sid,),
+                ).fetchone()
+            if not row:
+                return
+            parent_sid = row['parent_session_id'] or ''
+            parent_tool_use_id = row['parent_tool_use_id'] or ''
+            if not parent_sid or not parent_tool_use_id:
+                # Operator grep target: this happens when the child file
+                # arrives before the parent's Task tool_use line is parsed.
+                # The reverse direction (parent's _process_file finding this
+                # child via _backfill_children_for_parent) closes the race.
+                logger.debug(
+                    "subagent_link skip sid=%s parent_sid=%s parent_tool_use_id=%s — incomplete metadata",
+                    child_sid, parent_sid or '', parent_tool_use_id or '',
+                )
+                return
+            self.link_subagent_child(
+                parent_sid=parent_sid,
+                parent_tool_use_id=parent_tool_use_id,
+                child_sid=child_sid,
+            )
+        except Exception:
+            # Linking is best-effort; never break the watcher loop over it.
+            logger.exception("subagent child-link failed for sid=%s", child_sid)
+
+    def _backfill_children_for_parent(self, parent_sid: str) -> None:
+        """Reverse-direction race recovery: when a parent file gets new records,
+        any subagent children whose JSONLs were ingested earlier (with
+        ``parent_session_id`` resolved by directory inference but
+        ``parent_tool_use_id`` blank because we hadn't yet seen the parent's
+        ``Task`` tool_use line) can now be linked.
+
+        Together with :meth:`_maybe_link_subagent_child` (which fires when a
+        child's file gets new records), this closes both directions of the
+        parent/child arrival race within a single scan cycle — the only way
+        a link is missed is if neither file has new records, which is
+        impossible for a brand-new dispatch.
+        """
+        try:
+            with read_db() as rdb:
+                rows = rdb.execute(
+                    "SELECT id FROM sessions"
+                    " WHERE parent_session_id = ?"
+                    "   AND parent_tool_use_id IS NOT NULL"
+                    "   AND parent_tool_use_id <> ''",
+                    (parent_sid,),
+                ).fetchall()
+            for row in rows:
+                self._maybe_link_subagent_child(row['id'])
+        except Exception:
+            logger.exception(
+                "subagent child-backfill failed for parent_sid=%s", parent_sid)
 
     async def start_async(self):
         self._event_queue = asyncio.Queue(maxsize=10_000)
@@ -336,7 +419,8 @@ class ClaudeFileWatcher:
                     if record['_line_number'] < actual_start:
                         continue
                     last_line = record['_line_number'] + 1
-                    result = process_record(record, file_path, db)
+                    result = process_record(record, file_path, db,
+                                              broadcast=self._timeline_broadcast)
                     if result:
                         new_records.append(result)
 
@@ -353,6 +437,33 @@ class ClaudeFileWatcher:
 
             with self._state_lock:
                 self._retry_queue.pop(file_path, None)
+
+            # Spec A Task 5: bidirectional subagent-link race recovery.
+            # We dispatch back-fill calls AFTER write_db() exits so
+            # update_subagent_child_link can safely re-acquire _write_lock
+            # without deadlock.
+            #
+            # Two directions cover both arrival orderings:
+            #   1. Child-arrives-with-new-records: this file is the subagent
+            #      transcript; look up its parent metadata and link.
+            #   2. Parent-arrives-with-new-records: this file is a parent
+            #      transcript that just emitted (or earlier emitted) a Task
+            #      tool_use; any child whose JSONL was already ingested but
+            #      blocked on missing parent_tool_use_id can now resolve.
+            #
+            # Together: the link is missed only if neither file has new
+            # records in this cycle, which is impossible for a brand-new
+            # dispatch — at minimum the child file is being created right now.
+            if new_records:
+                child_sids = {r['session_id'] for r in new_records
+                              if r.get('is_subagent') and r.get('session_id')}
+                for child_sid in child_sids:
+                    self._maybe_link_subagent_child(child_sid)
+                parent_sids = {r['session_id'] for r in new_records
+                               if not r.get('is_subagent') and r.get('session_id')}
+                for parent_sid in parent_sids:
+                    self._backfill_children_for_parent(parent_sid)
+
             return {'type': 'batch_update', 'records': new_records} if new_records else None
 
         except Exception:

@@ -1178,6 +1178,48 @@ function renderConvSortBar(){
     return `<button onclick="toggleSort('conversations','${k}')" class="px-2 py-0.5 rounded-full border spring text-[9px] font-bold ${active?'bg-accent/15 text-accent border-accent/30':'text-white/40 border-white/[0.06] hover:text-white/70'}">${l}${arr}</button>`;
   }).join('');
 }
+// ─── Spec A Task 8 — [Conversation | Timeline] toggle pill ──────────────
+// Injected after the session header is rendered. Reads ?view= from the URL,
+// builds two pills, and on click flips the param via history.pushState then
+// re-runs openConversation to swap the body. DOM-safe: createElement only.
+function renderConvViewToggle(sid, session) {
+  const header = document.getElementById('convViewerHeader');
+  if (!header) return;
+  // Remove a previous toggle if openConversation was re-run (toggle click).
+  header.querySelectorAll('.conv-view-toggle').forEach(n => n.remove());
+
+  const current = (new URLSearchParams(location.search).get('view') || 'conversation');
+  const wrap = document.createElement('div');
+  wrap.className = 'conv-view-toggle mt-3 inline-flex items-center gap-1 p-0.5 rounded-full bg-white/5 ring-1 ring-white/[0.07]';
+
+  const mkBtn = (key, label) => {
+    const b = document.createElement('button');
+    const active = current === key;
+    b.className = 'px-3 py-1 rounded-full text-[10px] font-bold spring ' +
+      (active
+        ? 'bg-accent/20 text-accent'
+        : 'text-white/45 hover:text-white/80');
+    b.textContent = label;
+    b.dataset.viewKey = key;
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+    b.onclick = () => {
+      if (current === key) return;
+      const params = new URLSearchParams(location.search);
+      if (key === 'conversation') params.delete('view');
+      else params.set('view', key);
+      const qs = params.toString();
+      const next = location.pathname + (qs ? '?' + qs : '') + location.hash;
+      history.pushState(null, '', next);
+      // Re-run the session opener so the new view branch fires.
+      openConversation(sid, session, null);
+    };
+    return b;
+  };
+  wrap.appendChild(mkBtn('conversation', '대화'));
+  wrap.appendChild(mkBtn('timeline', '타임라인'));
+  header.appendChild(wrap);
+}
+
 function switchConvSource(src) {
   if (src !== 'claude-code' && src !== 'claude-ai') return;
   state.convSource = src;
@@ -1195,6 +1237,11 @@ function switchConvSource(src) {
   document.getElementById('convNavBar')?.classList.add('hidden');
   document.getElementById('convSearchResults').classList.add('hidden');
   document.getElementById('convSearch').value = '';
+  // Tear down any active TimelineCard before swapping conversation source.
+  if (window._activeTimeline && typeof window._activeTimeline.destroy === 'function') {
+    try { window._activeTimeline.destroy(); } catch {}
+    window._activeTimeline = null;
+  }
   state.currentSession = null;
   loadConvList();
 }
@@ -1863,6 +1910,31 @@ async function openConversation(sid,session,listItem){
     btn.onclick = () => loadSessionChain(sid);
     slot.appendChild(btn);
   }, 60);
+  // Spec A Task 8 — render [Conversation | Timeline] toggle pill
+  renderConvViewToggle(sid, session);
+  // If ?view=timeline, take over the message pane with TimelineCard and skip
+  // the conventional message-rendering path.
+  const _convView = (new URLSearchParams(location.search).get('view') || 'conversation');
+  if (_convView === 'timeline' && typeof window.TimelineCard === 'function') {
+    const c = document.getElementById('convMessages');
+    c.textContent = '';
+    // Hide nav/trace bars that don't apply to the timeline view
+    document.getElementById('convNavBar')?.classList.add('hidden');
+    document.getElementById('convTraceBar')?.classList.add('hidden');
+    document.getElementById('convStatsSummary')?.classList.add('hidden');
+    if (window._activeTimeline && typeof window._activeTimeline.destroy === 'function') {
+      try { window._activeTimeline.destroy(); } catch {}
+    }
+    const tc = new window.TimelineCard(c);
+    window._activeTimeline = tc;
+    tc.load(sid);
+    return;
+  }
+  // Otherwise: tear down any active timeline and proceed with conversation render
+  if (window._activeTimeline && typeof window._activeTimeline.destroy === 'function') {
+    try { window._activeTimeline.destroy(); } catch {}
+    window._activeTimeline = null;
+  }
   const c=document.getElementById('convMessages');
   c.innerHTML=`<div class="text-center text-white/25 text-xs py-10 dots">로딩 중</div>`;
   let data,msgs;

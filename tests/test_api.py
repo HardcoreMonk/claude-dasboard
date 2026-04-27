@@ -611,3 +611,135 @@ def test_api_works_with_auth_cookie(tmp_path, monkeypatch):
     with TestClient(main.app) as fresh:
         r = fresh.get('/api/sessions')
         assert r.status_code == 401
+
+
+# ─── Session timeline (Spec A Task 6) ───────────────────────────────────
+
+def test_get_timeline_happy(api_client):
+    import database
+    database.insert_session_event(
+        session_id='s-1', event_type='tool_use',
+        ts='2026-04-27T12:00:00Z', payload='{}', source='jsonl',
+    )
+    r = api_client.get('/api/sessions/s-1/timeline')
+    assert r.status_code == 200
+    body = r.json()
+    assert body['session_id'] == 's-1'
+    assert len(body['events']) == 1
+    ev = body['events'][0]
+    assert ev['event_type'] == 'tool_use'
+    assert ev['ts'] == '2026-04-27T12:00:00Z'
+    assert ev['payload'] == {}
+    assert ev['source'] == 'jsonl'
+    assert 'id' in ev
+
+
+def test_get_timeline_since_filter(api_client):
+    import database
+    database.insert_session_event(
+        session_id='s-1', event_type='tool_use',
+        ts='2026-04-27T11:00:00Z', payload='{}', source='jsonl',
+    )
+    database.insert_session_event(
+        session_id='s-1', event_type='tool_use',
+        ts='2026-04-27T13:00:00Z', payload='{}', source='jsonl',
+    )
+    r = api_client.get('/api/sessions/s-1/timeline?since=2026-04-27T12:00:00Z')
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body['events']) == 1
+    assert body['events'][0]['ts'] == '2026-04-27T13:00:00Z'
+
+
+def test_get_timeline_limit(api_client):
+    import database
+    for i in range(10):
+        database.insert_session_event(
+            session_id='s-1', event_type='tool_use',
+            ts=f'2026-04-27T12:0{i}:00Z', payload='{}', source='jsonl',
+        )
+    r = api_client.get('/api/sessions/s-1/timeline?limit=5')
+    assert r.status_code == 200
+    assert len(r.json()['events']) == 5
+
+
+def test_get_timeline_empty_for_unknown_session(api_client):
+    r = api_client.get('/api/sessions/unknown/timeline')
+    assert r.status_code == 200
+    body = r.json()
+    assert body['session_id'] == 'unknown'
+    assert body['events'] == []
+
+
+def test_get_timeline_event_shape_contract(api_client):
+    """REST contract: each event MUST carry id (int), event_type (str),
+    ts (ISO string), payload (decoded dict), source (str).
+
+    timeline-card.js renders ``ev.payload.tool``, ``ev.payload.preview`` etc.
+    directly — if the serializer ever ships ``payload`` as a JSON STRING the
+    frontend renders ``"{...}".tool === undefined`` and the body line breaks.
+    Lock that down here so a future "let's just dump the row" refactor
+    can't silently regress the timeline UI.
+    """
+    import database
+    database.insert_session_event(
+        session_id='s-shape', event_type='tool_use',
+        ts='2026-04-27T12:00:00Z',
+        payload='{"tool": "Edit", "input_preview": "{}", "tool_use_id": "x"}',
+        source='jsonl',
+    )
+    r = api_client.get('/api/sessions/s-shape/timeline')
+    assert r.status_code == 200
+    events = r.json()['events']
+    assert len(events) == 1
+    ev = events[0]
+    # All five fields MUST be present.
+    for field in ('id', 'event_type', 'ts', 'payload', 'source'):
+        assert field in ev, f"missing {field}"
+    # Type contract — dedup needs id-as-int, renderer needs payload-as-dict.
+    assert isinstance(ev['id'], int)
+    assert isinstance(ev['event_type'], str)
+    assert isinstance(ev['ts'], str)
+    # ts is ISO 8601 string, NOT epoch number (frontend's _fmtTime depends on this)
+    assert 'T' in ev['ts'] and ev['ts'].endswith('Z')
+    assert isinstance(ev['payload'], dict)
+    assert ev['payload']['tool'] == 'Edit'
+    assert isinstance(ev['source'], str)
+
+
+def test_get_timeline_requires_auth(tmp_path, monkeypatch):
+    """When DASHBOARD_PASSWORD is set, an unauthenticated GET must be rejected."""
+    db_file = tmp_path / 'authtl.db'
+    fake_projects = tmp_path / 'projects'
+    fake_projects.mkdir()
+
+    monkeypatch.setenv('DASHBOARD_PASSWORD', _AUTH_PASSWORD)
+    monkeypatch.setenv('DASHBOARD_SECRET', 'fixed-test-secret-for-determinism')
+
+    try:
+        from prometheus_client import REGISTRY
+        for c in list(REGISTRY._collector_to_names.keys()):
+            try:
+                REGISTRY.unregister(c)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    for name in list(sys.modules):
+        if name in ('database', 'parser', 'watcher', 'main'):
+            sys.modules.pop(name, None)
+
+    import database
+    monkeypatch.setattr(database, 'DB_PATH', db_file)
+    monkeypatch.setattr(database, 'CLAUDE_PROJECTS', fake_projects)
+    import parser as app_parser
+    monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_projects)
+    import main
+    monkeypatch.setattr(main, '_AUTH_PW', _AUTH_PASSWORD)
+    database.init_db()
+
+    from fastapi.testclient import TestClient
+    with TestClient(main.app) as fresh:
+        r = fresh.get('/api/sessions/s-1/timeline')
+        assert r.status_code in (302, 401, 403)

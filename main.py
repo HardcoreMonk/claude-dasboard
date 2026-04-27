@@ -11,6 +11,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone as _tz
@@ -42,12 +43,14 @@ except ImportError:
     _anthropic_sdk = None  # type: ignore
     _ANTHROPIC_OK = False
 
+import database
 from database import (
     read_db, write_db, init_db, check_integrity, DB_PATH, _write_lock,
     close_thread_connections, wal_checkpoint,
 )
 from parser import process_record
 from watcher import ClaudeFileWatcher, WatcherMetrics
+import hooks
 
 logging.basicConfig(
     level=logging.INFO,
@@ -220,15 +223,67 @@ def _make_watcher_metrics() -> "WatcherMetrics":
     )
 
 
+# ─── Hook receiver plumbing (Spec A Task 3) ──────────────────────────────────
+
+# Resolved at lifespan start; routes read via the module-level closure in hooks.py.
+HOOK_TOKEN: str = ""
+
+
+# Per-session WS subscriber registry. Keyed by session_id; values are
+# the set of WebSocket connections subscribed to that session's timeline.
+# Mutations require ``_subs_lock``; the lock is NEVER held across an
+# ``await`` or a network send so a slow client cannot block other
+# subscribers' broadcasts.
+_timeline_subs: dict[str, set["WebSocket"]] = {}
+_subs_lock = threading.Lock()
+
+
+def _broadcast_timeline_event(session_id: str, event: dict) -> None:
+    """Fan-out a timeline event to every WS subscribed to ``session_id``.
+
+    Called from sync contexts (hook receivers, parser inside watcher's
+    ``write_db()``). FastAPI's ``WebSocket.send_json`` is async, so we
+    schedule it on the FastAPI event loop via ``run_coroutine_threadsafe``
+    — fire-and-forget; we don't block on the future.
+
+    No-op if there are no subscribers OR the event loop hasn't been
+    captured yet (e.g. a hook arrives during early lifespan startup).
+    """
+    with _subs_lock:
+        targets = list(_timeline_subs.get(session_id, ()))
+    if not targets:
+        return
+    loop = getattr(app.state, 'loop', None)
+    if loop is None:
+        return
+    msg = {'type': 'timeline_event',
+           'session_id': session_id, 'event': event}
+    for ws in targets:
+        try:
+            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+        except Exception:
+            # Scheduling failure (e.g. loop closing) — drop silently;
+            # the WS handler's finally clause will clean up the dead
+            # subscription on disconnect.
+            pass
+
+
 # ─── Lifespan ────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global watcher, _sched_task
+    global watcher, _sched_task, HOOK_TOKEN
     init_db()
     if DB_PATH.exists() and not check_integrity():
         logger.error("DATABASE INTEGRITY CHECK FAILED — consider restoring from backup")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    # Capture the FastAPI event loop so ``_broadcast_timeline_event`` (a sync
+    # callable invoked from hook routes / watcher threads) can schedule
+    # ``ws.send_json(...)`` coroutines onto it via ``run_coroutine_threadsafe``.
+    app.state.loop = asyncio.get_running_loop()
+    # Load (or create) the hook bearer token and wire the receiver router.
+    HOOK_TOKEN = hooks.load_or_create_hook_token()
+    hooks._wire(database, _broadcast_timeline_event, HOOK_TOKEN)
     async def _broadcast_with_analyze(update: dict) -> None:
         await manager.broadcast(update)
         if update.get('type') == 'batch_update':
@@ -236,7 +291,11 @@ async def lifespan(app: FastAPI):
                 if rec.get('stop_reason') == 'end_turn' and not rec.get('is_subagent'):
                     asyncio.create_task(_analyze_session(rec['session_id']))
 
-    watcher = ClaudeFileWatcher(_broadcast_with_analyze, metrics=_make_watcher_metrics())
+    watcher = ClaudeFileWatcher(
+        _broadcast_with_analyze,
+        metrics=_make_watcher_metrics(),
+        timeline_broadcast=_broadcast_timeline_event,
+    )
     await watcher.start_async()
     _sched_task = asyncio.create_task(_retention_scheduler_loop())
     yield
@@ -252,6 +311,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Claude Usage Dashboard", lifespan=lifespan)
+
+# Hook receiver router — auth via Bearer token (see hooks._check_auth), so the
+# dashboard session middleware skips this prefix (added to _AUTH_BYPASS_PREFIX).
+app.include_router(hooks.router)
 
 # CORS — restricted by default; set DASHBOARD_CORS_ORIGINS to allow specific origins.
 # Example: DASHBOARD_CORS_ORIGINS=https://dash.example.com,http://localhost:3000
@@ -274,7 +337,11 @@ app.add_middleware(
 _AUTH_BYPASS = {'/', '/api/health', '/metrics', '/api/ingest', '/api/collector.py',
                 '/api/auth/login', '/api/auth/me', '/login', '/features',
                 '/landing', '/landing/'}
-_AUTH_BYPASS_PREFIX = ('/static/', '/landing/')
+_AUTH_BYPASS_PREFIX = (
+    '/static/',
+    '/landing/',
+    '/api/hooks/',  # bearer-token gated in hooks._check_auth, NOT cookie session
+)
 
 if _AUTH_PW:
     @app.middleware("http")
@@ -579,6 +646,10 @@ async def websocket_endpoint(ws: WebSocket):
         return
     await manager.connect(ws)
     lock = manager.get_lock(ws)
+    # Track this connection's timeline subscriptions so we can clean them
+    # up in the finally clause if the client disconnects without explicit
+    # unsubscribe.
+    subscribed: set[str] = set()
     try:
         stats = _get_stats()
         async with lock:
@@ -589,6 +660,32 @@ async def websocket_endpoint(ws: WebSocket):
                 if msg == 'ping':
                     async with lock:
                         await ws.send_text('pong')
+                    continue
+                # Spec A Task 7: JSON control messages.
+                # Anything that isn't 'ping' is parsed as JSON; non-JSON
+                # frames are silently dropped (forward-compat — clients
+                # may send heartbeats we don't understand yet).
+                try:
+                    obj = json.loads(msg)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                mtype = obj.get('type')
+                sid = obj.get('session_id')
+                if mtype == 'subscribe_timeline' and isinstance(sid, str) and sid:
+                    with _subs_lock:
+                        _timeline_subs.setdefault(sid, set()).add(ws)
+                    subscribed.add(sid)
+                elif mtype == 'unsubscribe_timeline' and isinstance(sid, str) and sid:
+                    with _subs_lock:
+                        peers = _timeline_subs.get(sid)
+                        if peers is not None:
+                            peers.discard(ws)
+                            if not peers:
+                                _timeline_subs.pop(sid, None)
+                    subscribed.discard(sid)
+                # Unknown types are ignored (forward-compat).
             except asyncio.TimeoutError:
                 try:
                     async with lock:
@@ -600,6 +697,15 @@ async def websocket_endpoint(ws: WebSocket):
     except Exception as exc:
         logger.warning("WS error: %s", exc)
     finally:
+        # Clean up any timeline subscriptions this connection registered.
+        if subscribed:
+            with _subs_lock:
+                for sid in subscribed:
+                    peers = _timeline_subs.get(sid)
+                    if peers is not None:
+                        peers.discard(ws)
+                        if not peers:
+                            _timeline_subs.pop(sid, None)
         manager.disconnect(ws)
 
 
@@ -995,6 +1101,48 @@ def api_session_messages(
             (session_id,),
         ).fetchone()[0]
     return {'messages': [dict(r) for r in rows], 'total': total, 'limit': limit, 'offset': offset}
+
+
+@app.get("/api/sessions/{sid}/timeline")
+def api_session_timeline(
+    sid: str,
+    since: Optional[str] = None,
+    limit: int = Query(200, ge=1),
+):
+    """Return ordered ``session_events`` rows for a session.
+
+    Spec A Task 6 — append-only event log emitted by the JSONL parser
+    (``source='jsonl'``) and the Claude Code event hooks (``source='hook'``).
+    Auth is gated by the dashboard session middleware; ``/api/sessions/`` is
+    NOT in ``_AUTH_BYPASS_PREFIX`` so cookie-or-Basic auth applies.
+
+    Parameters
+    ----------
+    sid    : session id (no row in ``sessions`` is required — events may exist
+             ahead of the session row; unknown sids simply return [].)
+    since  : optional ISO-8601 timestamp; rows with ``ts >= since`` are kept.
+    limit  : default 200, hard-capped at 1000.
+    """
+    if limit > 1000:
+        limit = 1000
+    rows = database.list_session_events(sid, since=since, limit=limit)
+    events = []
+    for r in rows:
+        try:
+            payload = json.loads(r['payload'])
+        except (TypeError, ValueError):
+            # Defensive: every writer (parser, hooks) emits json.dumps(...) so
+            # this branch should be unreachable. Surface raw text rather than
+            # 500-ing the whole timeline if a single row is corrupt.
+            payload = None
+        events.append({
+            'id': r['id'],
+            'event_type': r['event_type'],
+            'ts': r['ts'],
+            'payload': payload,
+            'source': r['source'],
+        })
+    return {'session_id': sid, 'events': events}
 
 
 # ─── Usage time-series (timezone-aware) ───────────────────────────────────────
@@ -2677,9 +2825,13 @@ def _run_retention(older_than_days: int) -> dict:
             sess_del = db.execute(
                 f'DELETE FROM sessions WHERE id IN ({ph})', sids
             ).rowcount
-    logger.info("Retention: deleted %d sessions, %d messages (cutoff=%s)",
-                sess_del, msg_del, cutoff)
-    return {'sessions': sess_del, 'messages': msg_del, 'cutoff': cutoff}
+    # Also age-out session_events on the same cadence (Spec A Task 10).
+    events_del = database.cleanup_old_session_events(retention_days=older_than_days)
+    logger.info(
+        "Retention: deleted %d sessions, %d messages, %d events (cutoff=%s)",
+        sess_del, msg_del, events_del, cutoff)
+    return {'sessions': sess_del, 'messages': msg_del,
+            'events': events_del, 'cutoff': cutoff}
 
 
 @app.post("/api/admin/backup")
