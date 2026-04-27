@@ -10,6 +10,7 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -905,6 +906,25 @@ def list_session_events(session_id: str, *, since: str | None = None,
                 (session_id, limit),
             )
         return list(cur)
+
+
+def cleanup_old_session_events(retention_days: int = 90) -> int:
+    """Delete ``session_events`` rows whose ``ts`` is older than the cutoff.
+
+    Cutoff = ``now (UTC) - retention_days``, formatted as ISO 8601 ``Z`` so
+    string comparison against the ``ts`` column matches the storage format.
+    Returns the number of rows deleted.
+    """
+    cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=retention_days)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+    with write_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM session_events WHERE ts < ?", (cutoff_ts,))
+        deleted = cur.rowcount
+    if deleted:
+        logger.info("Retention: deleted %d session_events older than %s",
+                    deleted, cutoff_ts)
+    return deleted
 
 
 def update_subagent_child_link(parent_sid: str, parent_tool_use_id: str,

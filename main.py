@@ -2825,9 +2825,13 @@ def _run_retention(older_than_days: int) -> dict:
             sess_del = db.execute(
                 f'DELETE FROM sessions WHERE id IN ({ph})', sids
             ).rowcount
-    logger.info("Retention: deleted %d sessions, %d messages (cutoff=%s)",
-                sess_del, msg_del, cutoff)
-    return {'sessions': sess_del, 'messages': msg_del, 'cutoff': cutoff}
+    # Also age-out session_events on the same cadence (Spec A Task 10).
+    events_del = database.cleanup_old_session_events(retention_days=older_than_days)
+    logger.info(
+        "Retention: deleted %d sessions, %d messages, %d events (cutoff=%s)",
+        sess_del, msg_del, events_del, cutoff)
+    return {'sessions': sess_del, 'messages': msg_del,
+            'events': events_del, 'cutoff': cutoff}
 
 
 @app.post("/api/admin/backup")
