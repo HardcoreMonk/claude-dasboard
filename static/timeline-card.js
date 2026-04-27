@@ -55,6 +55,10 @@ function _tcDefaultRender(body, payload) {
   }
 }
 
+// Sticky-bottom scroll threshold — if user scrolled up more than this many px
+// from bottom, new events don't yank the scroll back. Standard chat-UI heuristic.
+const _TC_BOTTOM_THRESHOLD = 50;
+
 class TimelineCard {
   constructor(container) {
     this.container = container;
@@ -62,10 +66,14 @@ class TimelineCard {
     this.ws = null;
     this.sid = null;
     this._listEl = null;
+    // Set true on destroy() — async load() callbacks check this before
+    // touching DOM/WS to avoid leaking state on rapid double-load.
+    this._destroyed = false;
   }
 
   async load(sid) {
     this.sid = sid;
+    this._destroyed = false;
     // Reset DOM target
     this.container.textContent = '';
     const list = document.createElement('div');
@@ -82,9 +90,11 @@ class TimelineCard {
     try {
       const url = `/api/sessions/${encodeURIComponent(sid)}/timeline?limit=200`;
       const resp = await fetch(url, { credentials: 'same-origin' });
+      if (this._destroyed) return;  // double-load guard
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       data = await resp.json();
     } catch (err) {
+      if (this._destroyed) return;
       list.textContent = '';
       const fail = document.createElement('div');
       fail.className = 'text-center text-white/25 text-xs py-10';
@@ -92,6 +102,7 @@ class TimelineCard {
       list.appendChild(fail);
       return;
     }
+    if (this._destroyed) return;
 
     list.textContent = '';
     const events = (data.events || []).slice();
@@ -112,6 +123,8 @@ class TimelineCard {
       }
     }
     this.events = events;
+    // Initial render: scroll to bottom (most-recent visible).
+    this.container.scrollTop = this.container.scrollHeight;
     this._subscribeWs(sid);
   }
 
@@ -169,6 +182,7 @@ class TimelineCard {
   }
 
   _subscribeWs(sid) {
+    if (this._destroyed) return;  // double-load guard
     try {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       this.ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -177,11 +191,13 @@ class TimelineCard {
       return;
     }
     this.ws.onopen = () => {
+      if (this._destroyed) { try { this.ws.close(); } catch {} return; }
       try {
         this.ws.send(JSON.stringify({ type: 'subscribe_timeline', session_id: sid }));
       } catch {}
     };
     this.ws.onmessage = (e) => {
+      if (this._destroyed) return;
       let m;
       try { m = JSON.parse(e.data); } catch { return; }
       if (!m || m.type !== 'timeline_event') return;
@@ -190,17 +206,26 @@ class TimelineCard {
       if (!ev) return;
       // Avoid duplicate appends when REST + WS overlap
       if (ev.id && this.events.some(x => x.id === ev.id)) return;
+      // Sticky-bottom: snapshot scroll position BEFORE the append (which grows
+      // scrollHeight). Only auto-scroll if user was already at/near bottom.
+      const wasAtBottom = (
+        this.container.scrollHeight -
+        this.container.scrollTop -
+        this.container.clientHeight
+      ) < _TC_BOTTOM_THRESHOLD;
       this.events.push(ev);
       if (this._listEl) {
         this._listEl.appendChild(this._cardFor(ev));
-        // Auto-scroll bottom
-        this.container.scrollTop = this.container.scrollHeight;
+        if (wasAtBottom) {
+          this.container.scrollTop = this.container.scrollHeight;
+        }
       }
     };
     this.ws.onerror = () => { /* swallow; user gets stale view, no crash */ };
   }
 
   destroy() {
+    this._destroyed = true;
     if (this.ws) {
       try {
         if (this.ws.readyState === WebSocket.OPEN && this.sid) {

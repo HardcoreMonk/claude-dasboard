@@ -733,3 +733,22 @@ body.theme-light .glass-section {
 .text-xl   { font-size: 25px !important; }
 .text-2xl  { font-size: 30px !important; }
 .text-3xl  { font-size: 38px !important; }
+
+/* ─── Timeline card (per-session event list) ───────────────────────
+   Tailwind utilities already cover layout. These rules add the
+   semantic theme: hover lift, event-type accents, light-mode invert.
+*/
+.tl-card-list { scroll-behavior: smooth; }
+.tl-card { transition: background-color .12s ease, border-color .12s ease, transform .12s ease; }
+.tl-card:hover { background-color: rgba(255,255,255,.05); border-color: rgba(255,255,255,.12); }
+.tl-card.tl-permission_prompt { border-color: rgba(245, 158, 11, .35); background-color: rgba(245, 158, 11, .04); }
+.tl-card.tl-end_turn { border-color: rgba(16, 185, 129, .25); }
+.tl-card.tl-session_start, .tl-card.tl-session_stop { border-color: rgba(56, 189, 248, .25); }
+.tl-card.tl-subagent_dispatch { border-color: rgba(167, 139, 250, .25); }
+.tl-card .tl-type { letter-spacing: .08em; }
+
+body.theme-light .tl-card { background-color: rgba(0,0,0,.02); border-color: rgba(0,0,0,.07); }
+body.theme-light .tl-card:hover { background-color: rgba(0,0,0,.05); border-color: rgba(0,0,0,.12); }
+body.theme-light .tl-card .tl-time { color: rgba(0,0,0,.55); }
+body.theme-light .tl-card .tl-source { color: rgba(0,0,0,.30); }
+body.theme-light .tl-card .tl-body { color: rgba(0,0,0,.78); }

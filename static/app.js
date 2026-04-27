@@ -273,6 +273,21 @@ async function deepLinkConversation(sid) {
 
 window.addEventListener('hashchange', applyHash);
 
+// Browser back/forward after toggle pill click — re-honor ?view= on the
+// already-open conversation. Toggle pill uses history.pushState (not hash),
+// so hashchange doesn't fire. Without this, back/forward shows stale view.
+window.addEventListener('popstate', () => {
+  if (!location.hash.startsWith('#/conversations')) return;
+  const sid = state.currentSession;
+  if (!sid) return;
+  // deepLinkConversation no-ops if same sid is already open without a view
+  // change, but openConversation re-runs cleanly to honor ?view= flips.
+  // Fetch metadata to re-call openConversation.
+  safeFetch('/api/sessions/' + encodeURIComponent(sid))
+    .then(session => session && session.id && openConversation(sid, session, null))
+    .catch(() => { /* swallow; user can refresh */ });
+});
+
 // ─── Safe Fetch (retry + timeout + deduplication) ───────────────────────
 const FETCH_MAX_RETRIES = 3;
 const FETCH_TIMEOUT_MS = 15000;
