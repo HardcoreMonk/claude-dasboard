@@ -297,6 +297,115 @@ def parse_jsonl_file(file_path: str, start_line: int = 0) -> Generator[dict, Non
         logger.error("Error reading %s: %s", file_path, e)
 
 
+# ─── Derived session events (Spec A timeline) ────────────────────────────────
+
+def _insert_event(db: sqlite3.Connection, *, session_id: str, event_type: str,
+                  ts: str, payload: str) -> None:
+    """Append an event to ``session_events`` on the caller's connection.
+
+    Mirrors ``database.insert_session_event`` but writes via the parser's
+    already-open write connection — calling the module-level helper would
+    re-acquire ``_write_lock`` and deadlock since we run inside the watcher's
+    ``write_db()`` context. The UNIQUE(session_id, event_type, ts, source)
+    constraint plus INSERT OR IGNORE keeps re-ingestion idempotent.
+    """
+    db.execute(
+        "INSERT OR IGNORE INTO session_events"
+        " (session_id, event_type, ts, payload, source, schema_ver)"
+        " VALUES (?, ?, ?, ?, 'jsonl', 1)",
+        (session_id, event_type, ts, payload),
+    )
+
+
+def _emit_assistant_events(record: dict, sid: str, ts: str,
+                           db: sqlite3.Connection) -> None:
+    """Emit message_assistant + (optional) end_turn + tool_use + subagent_dispatch.
+
+    Called only after the underlying message INSERT actually landed a fresh
+    row (the caller checks ``cur.rowcount > 0``). That gating is what makes
+    re-ingest idempotent end-to-end — no row, no events.
+    """
+    msg = record.get('message') or {}
+    if not isinstance(msg, dict):
+        return
+    stop_reason = msg.get('stop_reason') or record.get('stop_reason') or ''
+    content_raw = msg.get('content', [])
+    preview = extract_content_text(content_raw)[:200]
+    msg_uuid = record.get('uuid', '')
+
+    _insert_event(
+        db, session_id=sid, event_type='message_assistant', ts=ts,
+        payload=json.dumps({
+            'preview': preview,
+            'stop_reason': stop_reason,
+            'message_uuid': msg_uuid,
+        }),
+    )
+
+    if stop_reason == 'end_turn':
+        _insert_event(
+            db, session_id=sid, event_type='end_turn', ts=ts,
+            payload=json.dumps({
+                'preview': preview,
+                'message_uuid': msg_uuid,
+            }),
+        )
+
+    if not isinstance(content_raw, list):
+        return
+    for block in content_raw:
+        if not isinstance(block, dict) or block.get('type') != 'tool_use':
+            continue
+        tool = block.get('name', '') or ''
+        tool_use_id = block.get('id', '') or ''
+        block_input = block.get('input', {}) or {}
+        # input_preview is a JSON string capped at 200 chars to keep the
+        # payload column small. Full input lives in the messages.content row.
+        try:
+            input_preview = json.dumps(block_input)[:200]
+        except (TypeError, ValueError):
+            input_preview = ''
+        _insert_event(
+            db, session_id=sid, event_type='tool_use', ts=ts,
+            payload=json.dumps({
+                'tool': tool,
+                'input_preview': input_preview,
+                'tool_use_id': tool_use_id,
+            }),
+        )
+        # Both ``Agent`` (legacy) and ``Task`` (current) trigger subagent
+        # dispatch. Task 5 will wire the watcher to back-fill child_session_id
+        # via ``database.update_subagent_child_link`` once the subagent file
+        # appears on disk.
+        if tool in ('Agent', 'Task'):
+            _insert_event(
+                db, session_id=sid, event_type='subagent_dispatch', ts=ts,
+                payload=json.dumps({
+                    'agent_type': block_input.get('subagent_type'),
+                    'description': block_input.get('description'),
+                    'child_session_id': None,
+                    'tool_use_id': tool_use_id,
+                }),
+            )
+
+
+def _emit_user_event(record: dict, sid: str, ts: str,
+                     db: sqlite3.Connection) -> None:
+    msg = record.get('message') or {}
+    if isinstance(msg, dict):
+        raw = msg.get('content', '')
+    else:
+        raw = ''
+    preview = extract_content_text(raw)[:200] if raw else ''
+    _insert_event(
+        db, session_id=sid, event_type='message_user', ts=ts,
+        payload=json.dumps({
+            'preview': preview,
+            'message_uuid': record.get('uuid', ''),
+        }),
+    )
+
+
 # ─── Record processing (caller owns the transaction) ─────────────────────────
 
 def effective_session_id(record_session_id: str, file_path: str) -> str:
@@ -458,6 +567,11 @@ def _process_assistant(record: dict, file_path: str, db: sqlite3.Connection,
     if cur.rowcount <= 0:
         return None
 
+    # Spec A: derive timeline events from this assistant turn.
+    # Gated by rowcount > 0 above so re-ingesting an existing message_uuid
+    # is a no-op for events as well as messages.
+    _emit_assistant_events(record, sid, record.get('timestamp', ''), db)
+
     # Only overwrite session.model with a REAL model (not synthetic/meta).
     # This is the fix for C1 — prevents `<synthetic>` from hijacking a session's
     # displayed primary model and throwing off /api/stats aggregations.
@@ -555,6 +669,8 @@ def _process_user(record: dict, file_path: str, db: sqlite3.Connection,
             UPDATE sessions SET updated_at = ?, user_message_count = user_message_count + 1
             WHERE id = ?
         ''', (record.get('timestamp', ''), sid))
+        # Spec A: derived timeline event for the user turn.
+        _emit_user_event(record, sid, record.get('timestamp', ''), db)
         return {
             'type': 'new_message',
             'session_id': sid,
