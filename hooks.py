@@ -78,8 +78,25 @@ def _check_auth(authorization: str | None, expected: str) -> None:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "missing bearer token")
     provided = authorization.removeprefix("Bearer ").strip()
+    # Defensive: empty expected (pre-_wire window) or empty provided must
+    # never auth. compare_digest("", "") would otherwise return True.
+    if not expected or not provided:
+        raise HTTPException(401, "invalid token")
     if not verify_hook_token(provided, expected):
         raise HTTPException(401, "invalid token")
+
+
+def _log_validation_error(route: str, e: ValidationError) -> None:
+    """Log a Pydantic ValidationError WITHOUT the offending input.
+
+    ``ValidationError.__str__`` includes ``input_value=...`` which would leak
+    raw payload bytes (tokens, paths, message excerpts) into journalctl.
+    Spec section 13 + project CLAUDE.md forbid that. We log just the error
+    count and locator path.
+    """
+    locs = [err["loc"] for err in e.errors(include_input=False)]
+    log.warning("%s payload invalid (%d errors at %s)",
+                route, e.error_count(), locs)
 
 
 def _now_iso() -> str:
@@ -95,7 +112,12 @@ def _noop_broadcast(session_id: str, event: dict) -> None:
 
 _db: Any = None
 _broadcast: Callable[[str, dict], None] = _noop_broadcast
-_token: str = ""
+# Sentinel: a fresh random token at import time. ``_wire`` replaces this with
+# the real expected token during lifespan startup. Until then, no caller can
+# possibly know this value, so any bearer header is rejected by default —
+# closes the empty-Bearer auth window if Uvicorn (or a TestClient) ever lets
+# requests through before lifespan completes.
+_token: str = secrets.token_hex(32)
 
 
 def _wire(db: Any, broadcast_fn: Callable[[str, dict], None],
@@ -125,7 +147,7 @@ def session_start(payload: dict, authorization: str | None = Header(default=None
     try:
         data = SessionStartPayload(**payload)
     except ValidationError as e:
-        log.warning("session-start payload invalid: %s", e)
+        _log_validation_error("session-start", e)
         return {"ok": False, "warn": "invalid payload"}
     ts = _now_iso()
     _db.insert_session_event(
@@ -143,7 +165,7 @@ def session_stop(payload: dict, authorization: str | None = Header(default=None)
     try:
         data = SessionStopPayload(**payload)
     except ValidationError as e:
-        log.warning("session-stop payload invalid: %s", e)
+        _log_validation_error("session-stop", e)
         return {"ok": False, "warn": "invalid payload"}
     ts = _now_iso()
     _db.insert_session_event(
@@ -160,7 +182,7 @@ def notification(payload: dict, authorization: str | None = Header(default=None)
     try:
         data = NotificationPayload(**payload)
     except ValidationError as e:
-        log.warning("notification payload invalid: %s", e)
+        _log_validation_error("notification", e)
         return {"ok": False, "warn": "invalid payload"}
     ts = _now_iso()
     _db.insert_session_event(

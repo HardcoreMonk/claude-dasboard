@@ -32,6 +32,41 @@ def test_compare_constant_time():
     assert verify_hook_token("abc", "xyz") is False
 
 
+def test_check_auth_rejects_empty_expected():
+    """Pre-_wire window: empty expected token must reject any bearer.
+
+    If module-level ``_token`` ever defaulted to ``""``, an attacker sending
+    ``Authorization: Bearer `` (empty bearer) would pass ``compare_digest``.
+    Defensive guard in ``_check_auth`` must reject before reaching compare.
+    """
+    from fastapi import HTTPException
+
+    from hooks import _check_auth
+
+    # Empty expected — any provided bearer (even empty) must 401.
+    with pytest.raises(HTTPException) as exc_info:
+        _check_auth("Bearer ", expected="")
+    assert exc_info.value.status_code == 401
+
+    with pytest.raises(HTTPException) as exc_info:
+        _check_auth("Bearer something", expected="")
+    assert exc_info.value.status_code == 401
+
+
+def test_module_level_token_is_random_sentinel():
+    """At import time, ``_token`` must be a fresh random sentinel — not ``""``.
+
+    This protects the window between FastAPI app construction and lifespan
+    completion (where ``_wire`` is called). A test client that bypasses
+    lifespan would otherwise see an empty token.
+    """
+    # Force a fresh import to observe import-time state.
+    sys.modules.pop("hooks", None)
+    import hooks as fresh_hooks
+    assert fresh_hooks._token != ""
+    assert len(fresh_hooks._token) >= 32  # token_hex(32) → 64 chars
+
+
 # ─── Receiver route fixtures (Task 3) ───────────────────────────────────────
 
 @pytest.fixture()

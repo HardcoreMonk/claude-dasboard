@@ -299,7 +299,11 @@ app.add_middleware(
 _AUTH_BYPASS = {'/', '/api/health', '/metrics', '/api/ingest', '/api/collector.py',
                 '/api/auth/login', '/api/auth/me', '/login', '/features',
                 '/landing', '/landing/'}
-_AUTH_BYPASS_PREFIX = ('/static/', '/landing/', '/api/hooks/')
+_AUTH_BYPASS_PREFIX = (
+    '/static/',
+    '/landing/',
+    '/api/hooks/',  # bearer-token gated in hooks._check_auth, NOT cookie session
+)
 
 if _AUTH_PW:
     @app.middleware("http")
