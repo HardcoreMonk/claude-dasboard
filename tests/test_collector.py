@@ -6,10 +6,7 @@ scan_files, read_new_lines) without needing the server.
 """
 import json
 
-import pytest
-
 import collector
-
 
 # ─── State persistence ────────────────────────────────────────────────
 

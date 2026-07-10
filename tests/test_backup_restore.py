@@ -6,9 +6,8 @@ tests exercise the same primitive (sqlite3 backup) to ensure the produced
 file is valid and restorable, and also verify that restoring a v1-schema
 backup still allows the migration ladder to advance it to the latest.
 """
-import sqlite3
 import shutil
-from pathlib import Path
+import sqlite3
 
 
 def _populate(conn: sqlite3.Connection) -> None:

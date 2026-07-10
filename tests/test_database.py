@@ -1,9 +1,6 @@
 """Unit tests for database.py — migrations, FTS5, thread-local pool."""
 import sqlite3
-import sys
 import threading
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -74,7 +71,7 @@ def test_migration_heal_project_identity(temp_db):
     conn = sqlite3.connect(str(temp_db))
     # Simulate a pre-v4 DB: v3 schema with a bad row
     conn.executescript(database._SCHEMA_V1)
-    conn.execute(f"PRAGMA user_version = 3")
+    conn.execute("PRAGMA user_version = 3")
     # Insert a legacy session whose project_path was dash-decoded wrongly
     conn.execute('''INSERT INTO sessions (id, project_path, project_name, cwd)
                     VALUES (?, ?, ?, ?)''',
@@ -190,8 +187,10 @@ def test_read_db_isolates_connections_across_threads(temp_db):
 
     t1 = threading.Thread(target=worker)
     t2 = threading.Thread(target=worker)
-    t1.start(); t2.start()
-    t1.join(); t2.join()
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
 
     assert len(seen) == 2
     assert seen[0] != seen[1], 'thread-local isolation broken'
@@ -209,8 +208,10 @@ def test_write_db_serializes_writes(temp_db):
                            (f't{n}-{i}', 0))
 
     threads = [threading.Thread(target=writer, args=(i,)) for i in range(4)]
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
     conn = sqlite3.connect(str(temp_db))
     n = conn.execute("SELECT COUNT(*) FROM file_watch_state").fetchone()[0]
@@ -274,8 +275,9 @@ def test_session_events_list_filters_and_orders(temp_db):
 
 def test_update_subagent_child_link_fills_payload(temp_db):
     """Back-fills child_session_id into a subagent_dispatch event's payload."""
-    import database
     import json as _json
+
+    import database
     database.init_db()
     payload = _json.dumps({'tool_use_id': 'tu_42', 'description': 'demo'})
     database.insert_session_event(
@@ -329,8 +331,9 @@ def test_retention_empty_db_is_noop(temp_db):
 
 def test_retention_keeps_boundary_row(temp_db):
     """A row with ts equal to or just past the cutoff is preserved (cutoff is strict <)."""
-    import database
     from datetime import datetime, timedelta, timezone
+
+    import database
     database.init_db()
     # ts = now (well within retention window) — must survive a 90d cleanup.
     fresh = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

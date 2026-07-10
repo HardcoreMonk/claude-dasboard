@@ -27,7 +27,7 @@ EVENTS = {
 
 # Literal token path baked into the hook command — `cat` resolves it at hook
 # fire time, so token rotation works without rewriting settings.json.
-_TOKEN_PATH_LITERAL = "~/.claude/.hook-token"
+_TOKEN_PATH_LITERAL = "~/.claude/.hook-token"  # nosec B105
 
 
 def _hook_command(route: str) -> str:

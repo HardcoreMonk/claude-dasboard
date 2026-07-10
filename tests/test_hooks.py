@@ -1,12 +1,9 @@
 """Hook receiver tests — token storage + 3 receiver routes (Spec A Task 3)."""
-import importlib
 import sys
 
 import pytest
 
-
 # ─── Token storage / verify (Task 2) ────────────────────────────────────────
-
 from hooks import load_or_create_hook_token  # noqa: E402
 
 

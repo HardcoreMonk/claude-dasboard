@@ -15,7 +15,6 @@ import logging
 import os
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 import database
@@ -23,8 +22,8 @@ from database import read_db, write_db
 from parser import CLAUDE_PROJECTS, parse_jsonl_file, process_record
 
 try:
-    from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
     _WATCHDOG_OK = True
 except ImportError:
     _WATCHDOG_OK = False

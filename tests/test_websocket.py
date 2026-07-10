@@ -9,7 +9,6 @@ import sys
 
 import pytest
 
-
 TEST_PASSWORD = 'ws-test-pw'
 
 
@@ -262,9 +261,9 @@ def test_ws_broadcast_full_row_contract(noauth_client):
     so a future regression to ``{event_type, ts}``-only fan-out is caught
     immediately.
     """
+    import database
     import main
     import parser as app_parser
-    import database
 
     with noauth_client.websocket_connect('/ws') as ws:
         # Drain init

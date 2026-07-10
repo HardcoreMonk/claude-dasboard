@@ -4,13 +4,9 @@ Authentication test suite.
 Covers: login, logout, /api/auth/me, session middleware (redirect vs 401),
 WebSocket cookie auth, rate limiting, session expiry.
 """
-import sqlite3
 import sys
-import time
 
 import pytest
-from httpx import Client
-
 
 TEST_PASSWORD = 'test-secret-42'
 

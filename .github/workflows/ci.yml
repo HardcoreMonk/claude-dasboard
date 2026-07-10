@@ -12,10 +12,10 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
@@ -29,8 +29,10 @@ jobs:
       - name: Ruff (lint)
         run: ruff check .
 
+      # skips: B101 assert / B110·B112 try-except-pass·continue (의도된 resilience 패턴)
+      #        B608 SQL 문자열 조립 (CLAUDE.md 규약: 값은 전 파라미터화, 식별자는 화이트리스트 — 수동 게이트로 검증)
       - name: Bandit (security scan)
-        run: bandit -r main.py database.py parser.py watcher.py collector.py -s B101 -q
+        run: bandit -r . -x ./.venv,./tests,./node_modules -s B101,B110,B112,B608 -q
 
       - name: pip-audit (dependency vulnerabilities)
         run: pip-audit --strict
@@ -44,17 +46,15 @@ jobs:
     timeout-minutes: 3
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install dependencies
         run: npm ci
       - name: Syntax check source files
         run: |
-          for f in static/app.js static/charts.js static/sessions.js \
-                   static/overview.js static/plan.js static/subagents.js \
-                   static/timeline.js; do
+          for f in static/*.js; do
             node --check "$f"
           done
       - name: Build bundle

@@ -3,8 +3,6 @@ temporary SQLite DB with controlled fixture data.
 
 Unlike the unit tests, these exercise the full middleware + routing stack.
 """
-import importlib
-import os
 import sys
 
 import pytest
@@ -47,10 +45,10 @@ def api_client(tmp_path, monkeypatch):
     import parser as app_parser
     monkeypatch.setattr(app_parser, 'CLAUDE_PROJECTS', fake_claude_projects)
 
-    import main  # noqa: F401 — imported for its side effect of app construction
-
     # Pre-seed some deterministic data so endpoints have something to return
     import sqlite3
+
+    import main  # noqa: F401 — imported for its side effect of app construction
     database.init_db()
     conn = sqlite3.connect(str(db_file))
     conn.execute('''INSERT INTO sessions

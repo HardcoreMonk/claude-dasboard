@@ -19,8 +19,8 @@ Then replace this file with a Playwright sync_playwright() test that
 navigates to the page and interacts with the DOM.
 """
 import re
-import sys
 import sqlite3
+import sys
 
 import pytest
 
@@ -35,8 +35,10 @@ def e2e_client(tmp_path, monkeypatch):
     try:
         from prometheus_client import REGISTRY
         for c in list(REGISTRY._collector_to_names.keys()):
-            try: REGISTRY.unregister(c)
-            except Exception: pass
+            try:
+                REGISTRY.unregister(c)
+            except Exception:
+                pass
     except Exception:
         pass
     for name in list(sys.modules):

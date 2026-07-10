@@ -6,7 +6,6 @@ import pytest
 
 import parser as p
 
-
 # ─── Pricing ────────────────────────────────────────────────────────────────
 
 def test_get_pricing_exact_match():

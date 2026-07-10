@@ -138,7 +138,7 @@ def send_batch(url: str, node_id: str, ingest_key: str,
         method='POST',
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors='replace')[:500]

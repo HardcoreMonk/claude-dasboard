@@ -6,7 +6,6 @@ import pytest
 
 import watcher
 
-
 # ─── WatcherMetrics dependency injection ─────────────────────────────────
 
 def test_metrics_none_is_noop():
@@ -103,8 +102,10 @@ def test_retry_queue_concurrent_mutation_safe():
                     w._retry_queue.pop(f'f{i}', None)
 
     threads = [threading.Thread(target=bump) for _ in range(8)]
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
     # If we got here without an exception, the lock did its job.
 
 
@@ -161,6 +162,7 @@ def temp_db(tmp_path, monkeypatch):
     database.init_db()
     # Reimport watcher so it binds to the freshly-configured database module.
     import importlib
+
     import watcher as _w
     importlib.reload(_w)
     # Update the module-level alias used by tests in this file.
@@ -241,6 +243,7 @@ def test_process_file_backfills_existing_child_when_parent_arrives(
          must trigger _backfill_children_for_parent and link the orphan child.
     """
     import database
+
     # Patch parser.CLAUDE_PROJECTS so _fallback_project_from_filepath /
     # is_subagent_file see the temp dir, not the developer's real ~/.claude.
     import parser as _parser

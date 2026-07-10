@@ -12,10 +12,8 @@ These are intentionally crude — a deliberate refactor will rewrite them
 and prompt re-running this contract. Regex over a small file is fast and
 keeps the safety net in pure Python.
 """
-from pathlib import Path
-
 import re
-
+from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent / 'static' / 'timeline-card.js'
 

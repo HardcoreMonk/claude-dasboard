@@ -8,9 +8,8 @@ contract holds.
 This test file is intentionally tolerant of 404s for not-yet-seeded fixture
 IDs but strict about 5xx and malformed payloads.
 """
-import importlib
-import sys
 import sqlite3
+import sys
 
 import pytest
 

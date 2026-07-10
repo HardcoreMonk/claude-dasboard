@@ -9,16 +9,16 @@ import logging
 import os
 import re
 import secrets
-import shutil
 import sqlite3
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone as _tz
+from datetime import datetime, timedelta
+from datetime import timezone as _tz
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
@@ -30,7 +30,11 @@ except ImportError:
 
 try:
     from prometheus_client import (
-        Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST,
+        CONTENT_TYPE_LATEST,
+        Counter,
+        Gauge,
+        Histogram,
+        generate_latest,
     )
     _PROMETHEUS_OK = True
 except ImportError:
@@ -44,13 +48,19 @@ except ImportError:
     _ANTHROPIC_OK = False
 
 import database
+import hooks
 from database import (
-    read_db, write_db, init_db, check_integrity, DB_PATH, _write_lock,
-    close_thread_connections, wal_checkpoint,
+    DB_PATH,
+    _write_lock,
+    check_integrity,
+    close_thread_connections,
+    init_db,
+    read_db,
+    wal_checkpoint,
+    write_db,
 )
 from parser import process_record
 from watcher import ClaudeFileWatcher, WatcherMetrics
-import hooks
 
 logging.basicConfig(
     level=logging.INFO,
@@ -584,7 +594,7 @@ class LoginPayload(BaseModel):
 async def api_login(payload: LoginPayload, request: Request):
     if not _AUTH_PW:
         return {'ok': True, 'message': 'no password configured'}
-    client_ip = request.client.host if request.client else '0.0.0.0'
+    client_ip = request.client.host if request.client else '0.0.0.0'  # nosec B104
     if not _check_rate_limit(client_ip):
         return JSONResponse(
             {'ok': False, 'error': 'too many attempts, try again later'},
@@ -1462,7 +1472,7 @@ def api_projects_top(
     """
     active_cutoff = (datetime.now(_tz.utc) - timedelta(minutes=active_window_minutes)).strftime(
         '%Y-%m-%dT%H:%M:%SZ')
-    _project_cols = f'''
+    _project_cols = '''
         project_name, project_path,
         SUM(CASE WHEN is_subagent=0 THEN 1 ELSE 0 END) AS session_count,
         SUM(CASE WHEN is_subagent=1 THEN 1 ELSE 0 END) AS subagent_count,
@@ -1667,7 +1677,7 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
     with read_db() as db:
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
-        rows = db.execute(f'''
+        rows = db.execute('''
             SELECT strftime('%Y-%m-%d', timestamp, ?) AS date,
                    SUM(cost_micro)*1.0/1000000 AS cost,
                    COUNT(*) AS msgs
@@ -2392,9 +2402,11 @@ def api_subagents_heatmap():
         p = r['project_name']
         t = r['agent_type']
         if p not in seen_p:
-            seen_p.add(p); projects.append(p)
+            seen_p.add(p)
+            projects.append(p)
         if t not in seen_t:
-            seen_t.add(t); types.append(t)
+            seen_t.add(t)
+            types.append(t)
         cells[f'{t}|{p}'] = {
             'count': r['count'],
             'cost': r['cost'],
@@ -3315,4 +3327,4 @@ def api_metrics():
 if __name__ == '__main__':
     import uvicorn
     port = int(os.environ.get('PORT', 8765))
-    uvicorn.run('main:app', host='0.0.0.0', port=port, reload=False, log_level='info')
+    uvicorn.run('main:app', host='0.0.0.0', port=port, reload=False, log_level='info')  # nosec B104

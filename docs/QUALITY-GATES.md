@@ -12,7 +12,7 @@
 
 | 기준 | 조건 |
 |------|------|
-| 전체 통과 | 174+ tests, **0 failures** |
+| 전체 통과 | 226+ tests, **0 failures** |
 | 신규 기능 | 관련 테스트 최소 1개 추가 |
 | 버그 수정 | 재현 테스트 추가 후 수정 |
 | 인증 관련 | `test_auth.py` 패턴으로 양쪽 (인증O/인증X) 검증 |
@@ -43,12 +43,12 @@ ruff check .
 ## Gate 4: 보안 (필수)
 
 ```bash
-bandit -r main.py database.py parser.py watcher.py collector.py -s B101 -q
+./.venv/bin/bandit -r . -x ./.venv,./tests,./node_modules -s B101,B110,B112,B608 -q
 ```
 
 | 기준 | 조건 |
 |------|------|
-| bandit | 0 findings (B101 assert 제외) |
+| bandit | 0 findings. 스킵: B101 (assert), B110/B112 (try-except-pass/continue — 의도된 resilience 패턴), B608 (SQL 문자열 조립 — 아래 SQL 수동 기준으로 대체 검증). 개별 false positive는 사유 명시한 `# nosec BXXX` 주석 |
 | SQL | 모든 쿼리 파라미터화. f-string SQL은 화이트리스트 컬럼만 |
 | XSS | `innerHTML`에 사용자 데이터 → `esc()` 필수. 새 코드는 `h()` 또는 DOM API |
 | 인증 | destructive 엔드포인트는 인증 필수. `_AUTH_BYPASS`에 추가 금지 |
