@@ -5,41 +5,46 @@
 에이전트가 이 코드베이스를 수정할 때 지켜야 할 규칙.
 
 - 사용자 문서: `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/SCHEMA.md`
-- 아키텍처 결정: `docs/adr/` (6건)
+- 아키텍처 결정: `docs/adr/` (7건)
 - **품질 게이트**: `docs/QUALITY-GATES.md` — 머지 전 필수 통과 기준
 
-## 통합 컨텍스트 (zone-level)
+## ⚠️ Repo 상태 — archive (zone ADR-017, 2026-05-21)
 
-- project-dashboard(:8766) 가 이 서비스를 `/claude/*` 경로로 **reverse-proxy** 중이다 (ADR-011 Phase B, script-injection 아키텍처). 브라우저가 `/ws`, `/api/foo` 처럼 root-absolute 경로로 호출해도 인터셉터가 런타임에 `/claude/` prefix 를 붙인다.
-- 새 root-level 라우트를 추가할 때 주의: 프록시는 경로를 투명하게 통과하지만, HTML body 내 절대경로(`href="/x"`, `src="/x"`, CSS `url(/x)`)는 프록시가 서버-사이드에서 `/claude/x` 로 재작성한다. `<script type="module">` 의 import path 등은 런타임 인터셉터가 커버하므로 별도 조치 불필요.
+- **이 repo 는 라이브 서빙 코드가 아니다.** zone ADR-017 Phase D (M2 완료, 2026-05-21) 로 project-dashboard(:8766) 단일 FastAPI 프로세스가 이 서비스를 흡수했다. 라이브 코드는 `project-dashboard/claude_dashboard/` subtree 이며 그쪽에서 독자 진화 중 (v91+). `:8765` standalone 및 `claude-dashboard.service` 는 폐지.
+- 접근 경로: `:8766/claude/*` (path alias, M3 까지 유지). `/claude/api/health` 는 public. ADR-011 Phase B 의 reverse-proxy/script-injection 구조는 **제거됨** (ADR-017 이 Phase C dual-port 결정을 supersede).
+- 이 repo 는 rollback/복원 가능성 유지를 위해 보존 (subtree merge 로 git history 이관 완료). **여기서의 수정은 라이브 서비스에 반영되지 않는다** — 라이브 반영이 목적이면 `project-dashboard/claude_dashboard/` 를 수정할 것. 이 repo 를 건드릴 때도 CI 그린 유지.
 - claude-dashboard 의 `project_name` 은 project-dashboard 의 `projects.name` 과 매칭되는 1급 키다 (ADR-011). basename 기준 — 경로 변경 시 두 쪽 모두 주의.
 
 ## 파일 구조
 
 | 파일 | 역할 |
 |------|------|
-| `main.py` | FastAPI 67 routes + WS. `/` 공개 랜딩, `/app` SPA (인증), `/api/ingest`, 쿠키 세션 인증, 보존 스케줄러 |
-| `database.py` | SQLite WAL, write/read 분리, v0→v15 마이그레이션 |
-| `parser.py` | JSONL 파싱 (assistant/user/system), 비용 계산, source_node |
-| `watcher.py` | watchdog + safety poll, WatcherMetrics DI |
+| `main.py` | FastAPI 69 routes + WS. `/` 공개 랜딩, `/app` SPA (인증), `/api/ingest`, 쿠키 세션 인증, 보존 스케줄러 |
+| `database.py` | SQLite WAL, write/read 분리, v0→v16 마이그레이션 |
+| `parser.py` | JSONL 파싱 (assistant/user/system), 비용 계산, source_node, session_events 도출 |
+| `watcher.py` | watchdog + safety poll, WatcherMetrics DI, subagent 양방향 링크 복구 |
 | `collector.py` | 원격 수집 에이전트 (stdlib only) |
+| `hooks.py` | Claude Code hook 수신 APIRouter — POST `/api/hooks/*` 3종, `~/.claude/.hook-token` Bearer 검증 (ADR-0007) |
+| `install_hooks.py` | hook 설치 CLI — install/uninstall/rotate-token |
+| `import_claude_ai.py` | claude.ai "Export data" zip 1회성 임포터 (idempotent, `claude_ai_*` 테이블) |
 | `build.js` | esbuild concat+minify + tailwindcss CLI |
 | `static/app.js` | core: state, bus, accessors, WS, routing, 대화뷰어 |
 | `static/sessions.js` | 세션 목록, 필터, 벌크, 노드 필터 |
 | `static/timeline.js` | Gantt, 히트맵, 시간별 분석, 트렌드 |
+| `static/timeline-card.js` | 세션별 timeline 이벤트 카드 뷰 (`?view=timeline`) + WS live-append |
 | `static/charts.js` | Chart.js 6개 차트 + 테마 |
 | `static/overview.js` | 히어로 카드, 활성+TOP 5 (2그룹), 예측 |
 | `static/search.js` | 전문 검색 — 3섹션 컨텍스트 뷰어, 역할 필터, 세션 점프 |
 | `static/app.css` | 스타일 + 라이트모드 (WCAG AA 4.5:1) + color-scheme |
 | `landing-pages/` | 공개 소개 페이지. `index.html` = `combined.html` (md5 동일, 주 랜딩) + variant-a/b/c 보조 시안 3종. `/landing/` 로 서빙, 인증 우회 |
-| `tests/` | 177 pytest (11개 파일) |
+| `tests/` | 226 pytest (14개 파일) |
 
 ## 실행·빌드·테스트
 
 ```bash
 ./start.sh                                    # .env 로드 + npm build + uvicorn
 npm run build                                 # bundle.js + tailwind.css
-./.venv/bin/python -m pytest tests/ -v        # 177 tests
+./.venv/bin/python -m pytest tests/ -v        # 226 tests
 
 # 원격 수집
 curl -o collector.py http://dashboard:8765/api/collector.py
@@ -112,7 +117,7 @@ DB는 **UTC**. 시계열 쿼리는 `plan_config.timezone_name` (IANA)으로 변�
 
 ## 마이그레이션
 
-`SCHEMA_VERSION=15`. `init_db()`가 차분 적용. 각 단계는 `_commit_migration()`으로 원자적 커밋.
+`SCHEMA_VERSION=16`. `init_db()`가 차분 적용. 각 단계는 `_commit_migration()`으로 원자적 커밋.
 
 | 버전 | 내용 |
 |------|------|
@@ -130,6 +135,7 @@ DB는 **UTC**. 시계열 쿼리는 `plan_config.timezone_name` (IANA)으로 변�
 | v13 | sessions.source_node + remote_nodes 테이블 |
 | v14 | admin_audit + app_config — 관리자 감사 로그 + in-app 설정 스토어 |
 | v15 | sessions.ai_tags + ai_tags_status — AI 세션 자동 태깅 |
+| v16 | session_events — hook/JSONL 이벤트 append-only 로그 + 인덱스 2종 (ADR-0007) |
 
 새 마이그레이션: `SCHEMA_VERSION` bump → `_commit_migration()` 사용 → idempotent. 전체 표: `docs/SCHEMA.md`.
 
@@ -147,8 +153,8 @@ DB는 **UTC**. 시계열 쿼리는 `plan_config.timezone_name` (IANA)으로 변�
 npm run build    # concat → esbuild minify → bundle.js + tailwindcss → tailwind.css
 npm run dev      # watch 모드
 ```
-- `index.html`은 `bundle.vN.js` + `tailwind.vN.css` 2개만 로드 (현재 v=89)
-- 서버가 `.vN` strip하여 실제 파일 서빙
+- `index.html`은 `bundle.vN.js` + `tailwind.vN.css` 2개만 로드 (현재 v=90)
+- 서버가 `.vN` strip하여 실제 파일 서빙 — 디스크에는 `bundle.js`/`tailwind.css` 만 있으면 되고, `bundle.vN.js` 실물 사본은 불필요 (과거 v83~v89 사본은 제거됨)
 - 빌드 산출물은 git tracked — 배포 시 Node 불필요
 
 ### 공개 랜딩 페이지 (`landing-pages/` → `/` + `/landing/`)
