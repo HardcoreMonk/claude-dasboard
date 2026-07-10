@@ -38,6 +38,16 @@ jobs:
         run: pip-audit --strict
         continue-on-error: true
 
+      # e2e 스모크 테스트가 /static/bundle.vN.js 를 fetch — 산출물(bundle.js)은
+      # gitignored 라 fresh checkout 에 없으므로 pytest 전에 빌드 필요
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Build JS bundle (needed by e2e smoke tests)
+        run: |
+          npm ci
+          npm run build
+
       - name: Pytest
         run: python -m pytest tests/ -v --tb=short
 

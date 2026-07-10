@@ -155,7 +155,7 @@ npm run dev      # watch 모드
 ```
 - `index.html`은 `bundle.vN.js` + `tailwind.vN.css` 2개만 로드 (현재 v=90)
 - 서버가 `.vN` strip하여 실제 파일 서빙 — 디스크에는 `bundle.js`/`tailwind.css` 만 있으면 되고, `bundle.vN.js` 실물 사본은 불필요 (과거 v83~v89 사본은 제거됨)
-- 빌드 산출물은 git tracked — 배포 시 Node 불필요
+- 빌드 산출물(`bundle.js`/`tailwind.css`)은 **gitignored** — fresh checkout에는 없음. `start.sh`가 npm build 수행, CI `test` job도 pytest 전에 빌드 (e2e 스모크가 번들 fetch)
 
 ### 공개 랜딩 페이지 (`landing-pages/` → `/` + `/landing/`)
 
