@@ -6,7 +6,7 @@ uvicorn==0.44.0               # ASGI server (use --loop asyncio --http h11)
 websockets==16.0              # /ws transport
 h11==0.16.0                   # uvicorn http backend
 aiofiles==25.1.0              # async file I/O
-python-multipart==0.0.26      # form parsing (FastAPI dep)
+python-multipart==0.0.31      # form parsing (FastAPI dep) — 0.0.26은 CVE 4건
 
 prometheus_client>=0.20.0     # /metrics endpoint
 watchdog>=4.0.0               # inotify-based file watching (polling fallback if missing)

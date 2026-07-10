@@ -36,7 +36,6 @@ jobs:
 
       - name: pip-audit (dependency vulnerabilities)
         run: pip-audit --strict
-        continue-on-error: true
 
       # e2e 스모크 테스트가 /static/bundle.vN.js 를 fetch — 산출물(bundle.js)은
       # gitignored 라 fresh checkout 에 없으므로 pytest 전에 빌드 필요
