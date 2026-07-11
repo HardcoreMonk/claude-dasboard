@@ -1,6 +1,6 @@
 # REST API
 
-67 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/` (공개 랜딩), `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features`, `/landing/*` 는 인증 우회. SPA 대시보드는 `/app` 에서 서빙 (인증 필요).
+68 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/` (공개 랜딩), `/api/health`, `/metrics`, `/api/ingest`, `/api/collector.py`, `/login`, `/features`, `/landing/*` 는 인증 우회. SPA 대시보드는 `/app` 에서 서빙 (인증 필요).
 
 ## 자동 생성 스펙 (FastAPI)
 

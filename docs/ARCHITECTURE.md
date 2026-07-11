@@ -16,7 +16,7 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
            |
      [SQLite WAL 쓰기]          database.py
            |
-     [FastAPI 67 routes]        main.py
+     [FastAPI 69 routes]        main.py
        /   |     |    \
       /   REST   WS    \
      /    |     |      \
@@ -43,7 +43,7 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --loop asyncio --http h11
 
 ### main.py — FastAPI 애플리케이션
 
-**67 HTTP routes + 1 WebSocket** 을 호스팅.
+**68 HTTP routes + 1 WebSocket** 을 호스팅.
 
 | 그룹 | 라우트 | 역할 |
 |---|---|---|

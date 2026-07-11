@@ -1,10 +1,12 @@
 # Claude Usage Dashboard
 
+> **⚠️ archive repo (zone ADR-017, 2026-05-21)** — 이 repo 는 라이브 서빙 코드가 아니다. project-dashboard(`:8766`) 단일 FastAPI 프로세스가 이 서비스를 흡수했고, 라이브 코드는 `project-dashboard/claude_dashboard/` subtree 에서 독자 진화 중이다. 접근 경로는 `:8766/claude/*`. 이 repo 는 rollback/복원 가능성 유지를 위해서만 보존되며, 여기서의 수정은 라이브 서비스에 반영되지 않는다. 상세는 프로젝트 `CLAUDE.md` 참조.
+
 Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간 추적**하는 자체 호스팅 웹 대시보드.
 다중 서버의 Claude Code 데이터를 중앙 수집하고, claude.ai 웹 대화 export 도 통합 뷰어에서 검색할 수 있다.
 
 ```
-~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 67 routes
+~/.claude/projects/**/*.jsonl  →  watchdog 감지  →  SQLite WAL  →  FastAPI 69 routes
                                                                     ├─ `/` 공개 랜딩 (마케팅 페이지)
                                                                     └─ `/app` SPA 대시보드 (인증 필요)
                                                                   ↑
@@ -16,7 +18,7 @@ Claude Code 세션의 토큰 사용량, 비용, 대화, subagent 를 **실시간
 | 백엔드 | Python 3.12, FastAPI, uvicorn, watchdog |
 | 저장소 | SQLite WAL + FTS5, micro-dollar 정수 비용, v16 스키마 |
 | 프런트 | esbuild 번들 (222KB) + Tailwind v3 빌드 (60KB) + Pretendard + Chart.js. SPA 하단 nav + 우측 유틸 pill 2-cluster 구조 |
-| 테스트 | 221 pytest, CI: ruff + bandit + pip-audit + esbuild |
+| 테스트 | 226 pytest, CI: ruff + bandit + pip-audit(하드 게이트) + esbuild |
 
 ## 빠른 시작
 
@@ -49,7 +51,7 @@ sudo systemctl enable --now claude-dashboard
 ### 테스트 & 빌드
 
 ```bash
-./.venv/bin/python -m pytest tests/ -v        # 221 tests
+./.venv/bin/python -m pytest tests/ -v        # 226 tests
 npm run build                                 # bundle.js + tailwind.css
 npm run dev                                   # watch 모드 (개발)
 ```
@@ -158,7 +160,7 @@ dashboard.example.com {
 ## 프로젝트 구조
 
 ```
-main.py              FastAPI 67 routes + WS + 쿠키 세션 인증 + /landing/ 공개 라우트 + in-app 스케줄러
+main.py              FastAPI 69 routes + WS + 쿠키 세션 인증 + /landing/ 공개 라우트 + in-app 스케줄러
 database.py          SQLite WAL, v0→v16 마이그레이션, write/read 분리
 parser.py            JSONL 파싱, 비용 계산, cross-platform cwd
 watcher.py           watchdog + safety poll
@@ -184,9 +186,9 @@ landing-pages/       공개 소개 페이지 (인증 우회, /landing/ 로 서�
   variant-a-editorial.html   보조 시안 — 미니멀 에디토리얼
   variant-b-dataviz.html     보조 시안 — 데이터 중심 (bento 그리드)
   variant-c-multinode.html   보조 시안 — 팀/멀티노드 (아키텍처 다이어그램)
-tests/               221 pytest
+tests/               226 pytest
 docs/
-  API.md             REST API 67 routes
+  API.md             REST API 69 routes
   ARCHITECTURE.md    아키텍처 가이드
   SCHEMA.md          DB 스키마 + 마이그레이션
   QUALITY-GATES.md   8단계 품질 게이트
@@ -225,7 +227,7 @@ sudo systemctl enable --now claude-dashboard-retention.timer
 
 | 문서 | 내용 |
 |------|------|
-| [`docs/API.md`](docs/API.md) | REST API 67 routes + WebSocket |
+| [`docs/API.md`](docs/API.md) | REST API 69 routes + WebSocket |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 아키텍처 가이드 |
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | DB 스키마, 마이그레이션, SQL 예제 |
 | [`docs/QUALITY-GATES.md`](docs/QUALITY-GATES.md) | 8단계 품질 게이트 |

@@ -53,7 +53,7 @@ ruff check .
 | XSS | `innerHTML`에 사용자 데이터 → `esc()` 필수. 새 코드는 `h()` 또는 DOM API |
 | 인증 | destructive 엔드포인트는 인증 필수. `_AUTH_BYPASS`에 추가 금지 |
 
-## Gate 5: 의존성 (경고)
+## Gate 5: 의존성 (필수)
 
 ```bash
 pip-audit --strict
@@ -61,7 +61,7 @@ pip-audit --strict
 
 | 기준 | 조건 |
 |------|------|
-| pip-audit | 알려진 취약점 0 (CI에서 경고, 블록은 아님) |
+| pip-audit | 알려진 취약점 0. **하드 게이트 — 발견 시 CI 실패** (2026-07-11 `continue-on-error` 제거로 승격, python-multipart CVE 4건 해소 후 전환) |
 | CDN 스크립트 | SRI integrity 해시 필수 |
 
 ## Gate 6: DB 마이그레이션 (해당 시)
@@ -102,7 +102,7 @@ pip-audit --strict
 
 ```yaml
 jobs:
-  test:     # Gate 1 + Gate 3 + Gate 4 + Gate 5
+  test:     # Gate 1 + Gate 3 + Gate 4 + Gate 5 (+ pytest 직전 npm build — e2e 스모크가 bundle.js fetch, gitignored라 필요)
   js-build: # Gate 2
 ```
 
